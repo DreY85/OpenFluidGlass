@@ -125,10 +125,15 @@ HRESULT AccentOverrider::MyCAccent__UpdateSolidFill(
 	// indicates window should transition on maximized, so we can receive colorization updates
 	// this make permanent change to the attribute during its lifetime, until a update to the attribute is made
 	// is there any better way to implement it?
-	data->GetClientBlurAttributeReference() |= 8;
+	// Liquid Glass stays clear while another window is maximized: the Vista transition would
+	// turn the glass opaque black, so it neither asks for the transition nor follows it.
+	if (!Shared::g_liquidGlass.enabled)
+	{
+		data->GetClientBlurAttributeReference() |= 8;
+	}
 
 	winrt::com_ptr<uDWM::CSolidColorLegacyMilBrushProxy> effectBrush{ nullptr };
-	const auto maximized = window->TreatAsMaximized(data);
+	const auto maximized = !Shared::g_liquidGlass.enabled && window->TreatAsMaximized(data);
 
 	if (!visual->GetInstructions().views().empty())
 	{
