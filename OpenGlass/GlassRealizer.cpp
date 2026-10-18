@@ -47,6 +47,7 @@ HRESULT CGlassRealizer::Render(
 	Shared::GlassType type
 )
 {
+	LG_TRACE("[LG] d2d render: type=%u\n", static_cast<UINT>(type));
 	if (!EnsureGlassEffect(type))
 	{
 		return S_OK;

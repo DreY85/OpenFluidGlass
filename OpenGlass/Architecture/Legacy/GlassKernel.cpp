@@ -619,6 +619,13 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		lg.lightDegrees = lgValue(L"LiquidGlassLight", 360.f - 135.f) - 360.f;
 		lg.radius = std::clamp(lgValue(L"LiquidGlassRadius", 8.f), 0.f, 200.f);
 		lg.profile = std::min(GlassEngine::GetDwordFromRegistry(L"LiquidGlassProfile", 0), 2ul);
+		lg.clarity = std::clamp(lgValue(L"LiquidGlassClarity", 0.75f), 0.f, 1.f);
+		lg.softness = std::clamp(lgValue(L"LiquidGlassSoftness", 1.5f), 0.f, 6.f);
+		{
+			char lgBuffer[256];
+			sprintf_s(lgBuffer, "[LG] settings: d3d=%d enabled=%d sat=%.2f userKey=%p\n", Shared::g_useD3DRendering ? 1 : 0, lg.enabled ? 1 : 0, lg.saturation, static_cast<void*>(GlassEngine::GetDwmKey()));
+			OutputDebugStringA(lgBuffer);
+		}
 	}
 }
 

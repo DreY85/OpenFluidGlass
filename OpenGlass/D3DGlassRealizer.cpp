@@ -530,9 +530,12 @@ HRESULT CD3DGlassRealizer::Render(
 		)
 	);
 
+	LG_TRACE("[LG] d3d render: %ux%u protected=%d initialized=%d type=%u\n", backBufferDesc.Width, backBufferDesc.Height, hwProtectionEnabled, m_initialized ? 1 : 0, static_cast<UINT>(type));
 	if (!m_initialized)
 	{
-		RETURN_IF_FAILED(Initialize(device));
+		const HRESULT lgHr = Initialize(device);
+		LG_TRACE("[LG] d3d initialize hr=0x%08X\n", static_cast<unsigned>(lgHr));
+		RETURN_IF_FAILED(lgHr);
 	}
 
 	RETURN_IF_FAILED(
@@ -651,7 +654,9 @@ HRESULT CD3DGlassRealizer::Render(
 		cbPS.lgOptics = { lg.ior, lg.bezel, lg.thickness, lg.scale };
 		cbPS.lgLook = { lg.chroma, lg.saturation, lg.readability, lg.gap };
 		cbPS.lgRim = { lg.rim, lg.shine, lg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(lg.profile) };
+		cbPS.lgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), lg.enabled ? lg.clarity : 0.f, lg.softness };
 	}
+	LG_TRACE("[LG] d3d compose: enabled=%.0f sat=%.2f bounds=%.0f,%.0f,%.0f,%.0f quarter=%u\n", cbPS.lgTex.w, cbPS.lgLook.y, cbPS.lgRect.x, cbPS.lgRect.y, cbPS.lgRect.z, cbPS.lgRect.w, quarterWidth);
 	if (memcmp(&m_cbPS, &cbPS, sizeof(cbPS)) != 0)
 	{
 		m_cbPS = cbPS;
@@ -700,7 +705,8 @@ HRESULT CD3DGlassRealizer::Render(
 	//
 	// https://github.com/ALTaleX531/OpenGlass/issues/257#issuecomment-3856945555
 	ID3D11ShaderResourceView* pass1InputSRV = backBufferSRV;
-	if (!pass1InputSRV)
+	const bool liquidGlassSharp = Shared::g_liquidGlass.enabled && Shared::g_liquidGlass.clarity > 0.f;
+	if (!pass1InputSRV || liquidGlassSharp)
 	{
 		RETURN_IF_FAILED(
 			m_intermediateBuffer.Ensure(
@@ -853,8 +859,8 @@ HRESULT CD3DGlassRealizer::Render(
 	{
 		context->PSSetShader(m_pixelShaderBlurV_Vista.get(), nullptr, 0);
 	}
-	ID3D11ShaderResourceView* srvsQuarter[] = { m_quarterResBuffer.m_srv.get() };
-	context->PSSetShaderResources(0, 1, srvsQuarter);
+	ID3D11ShaderResourceView* srvsQuarter[] = { m_quarterResBuffer.m_srv.get(), liquidGlassSharp ? m_intermediateBuffer.m_srv.get() : nullptr };
+	context->PSSetShaderResources(0, 2, srvsQuarter);
 
 	clipRect = ToScissorRect(
 		D2D1::RectF(
@@ -868,7 +874,7 @@ HRESULT CD3DGlassRealizer::Render(
 	);
 	context->RSSetScissorRects(1, &clipRect);
 	context->DrawIndexed(static_cast<UINT>(indicesCompose.size()), 0, 0);
-	{ ID3D11ShaderResourceView* nullSRV[1] = { nullptr }; context->PSSetShaderResources(0, 1, nullSRV); }
+	{ ID3D11ShaderResourceView* nullSRV[2] = { nullptr, nullptr }; context->PSSetShaderResources(0, 2, nullSRV); }
 	context->Flush();
 
 	return S_OK;

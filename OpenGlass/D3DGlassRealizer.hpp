@@ -27,6 +27,7 @@ namespace OpenGlass
 		D2D1_VECTOR_4F lgOptics;	// index of refraction, bezel width, glass thickness, refraction scale
 		D2D1_VECTOR_4F lgLook;		// dispersion, saturation, readability, glass-to-background gap
 		D2D1_VECTOR_4F lgRim;		// rim light strength, shine exponent, light angle in radians, bezel profile
+		D2D1_VECTOR_4F lgFull;		// uv per pixel of the full-resolution copy (x, y), clarity, softness in pixels
 	};
 
 	// 80 bytes/vertex：pos(2) + baseUV(2) + 8 samples packed into 4 float4

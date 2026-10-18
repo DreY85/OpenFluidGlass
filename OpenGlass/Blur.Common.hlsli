@@ -21,9 +21,11 @@ cbuffer BlurPSConstants : register(b0)
 	float4 lgOptics;	// index of refraction, bezel width, glass thickness, refraction scale
 	float4 lgLook;		// dispersion, saturation, readability, glass-to-background gap
 	float4 lgRim;		// rim light strength, shine exponent, light angle in radians, bezel profile
+	float4 lgFull;		// uv per pixel of the full-resolution copy (x, y), clarity, softness in pixels
 };
 
 Texture2D<float4> texture0 : register(t0);
+Texture2D<float4> texture1 : register(t1);	// Liquid Glass: full-resolution copy of the backdrop
 SamplerState sampler0 : register(s0);
 
 struct VS_INPUT
@@ -104,6 +106,18 @@ float4 LgBlurAt(PS_INPUT input, float2 duv)
 	return s;
 }
 
+// The sharp backdrop at a full-resolution uv, softened by a small cross of samples.
+float4 LgSharpAt(float2 uv)
+{
+	float2 o = lgFull.xy * lgFull.w;
+	float4 s = texture1.Sample(sampler0, uv) * 0.4f;
+	s += texture1.Sample(sampler0, uv + float2(o.x, 0.0f)) * 0.15f;
+	s += texture1.Sample(sampler0, uv - float2(o.x, 0.0f)) * 0.15f;
+	s += texture1.Sample(sampler0, uv + float2(0.0f, o.y)) * 0.15f;
+	s += texture1.Sample(sampler0, uv - float2(0.0f, o.y)) * 0.15f;
+	return s;
+}
+
 // The blurred background seen through the glass, plus the light caught by the rim.
 void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 {
@@ -128,13 +142,20 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	float2 N = normalize(float2(-slope, 1.0f));
 	float depth = lgOptics.z * LgHeight(u) + lgLook.w;
 	float ior = lgOptics.x;
-	float2 toUv = lgTex.xy * lgOptics.w;
-	float2 dg = -n * LgLateral(N, 1.0f / ior, depth) * toUv;
-	float2 dr = -n * LgLateral(N, 1.0f / max(ior - lgLook.x, 1.0001f), depth) * toUv;
-	float2 db = -n * LgLateral(N, 1.0f / (ior + lgLook.x), depth) * toUv;
+	// Sideways shift in pixels for each channel; dispersion bends red less and blue more.
+	float2 pg = -n * LgLateral(N, 1.0f / ior, depth) * lgOptics.w;
+	float2 pr = -n * LgLateral(N, 1.0f / max(ior - lgLook.x, 1.0001f), depth) * lgOptics.w;
+	float2 pb = -n * LgLateral(N, 1.0f / (ior + lgLook.x), depth) * lgOptics.w;
 
-	float4 g = LgBlurAt(input, dg);
-	background = float4(LgBlurAt(input, dr).r, g.g, LgBlurAt(input, db).b, g.a);
+	float4 g = LgBlurAt(input, pg * lgTex.xy);
+	background = float4(LgBlurAt(input, pr * lgTex.xy).r, g.g, LgBlurAt(input, pb * lgTex.xy).b, g.a);
+	if (lgFull.z > 0.0f)
+	{
+		float2 uv = p * lgFull.xy;
+		float4 sg = LgSharpAt(uv + pg * lgFull.xy);
+		float3 sharp = float3(LgSharpAt(uv + pr * lgFull.xy).r, sg.g, LgSharpAt(uv + pb * lgFull.xy).b);
+		background.rgb = lerp(background.rgb, sharp, lgFull.z);
+	}
 
 	float luminance = dot(background.rgb, float3(0.2126f, 0.7152f, 0.0722f));
 	background.rgb = max(lerp(luminance.xxx, background.rgb, lgLook.y), 0.0f);
