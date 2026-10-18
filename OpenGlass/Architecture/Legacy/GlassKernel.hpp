@@ -2,6 +2,7 @@
 #include "framework.hpp"
 #include "cpprt.hpp"
 #include "GlassEngine.hpp"
+#include "Shared.hpp"
 
 namespace OpenGlass::GlassKernel
 {
@@ -57,7 +58,7 @@ namespace OpenGlass::GlassKernel
 		)
 		{
 			SetIsActive(active);
-			SetIsMaximized(maximized);
+			SetIsMaximized(maximized && !Shared::g_liquidGlass.enabled);
 		}
 	};
 

@@ -324,6 +324,11 @@ float GlassKernel::GetBlurExpansion()
 
 float GlassKernel::GetColorizationOpacity(bool active, bool maximized)
 {
+	// Liquid Glass stays clear while a window is maximized; the Vista transition turns glass opaque black.
+	if (Shared::g_liquidGlass.enabled)
+	{
+		maximized = false;
+	}
 	if (active && !maximized)
 	{
 		return Shared::g_colorizationOpacity;
@@ -345,6 +350,10 @@ float GlassKernel::GetColorizationOpacity(bool active, bool maximized)
 }
 D2D1_COLOR_F GlassKernel::GetBaseColor(bool opaque, bool maximized)
 {
+	if (Shared::g_liquidGlass.enabled)
+	{
+		maximized = false;
+	}
 	D2D1_COLOR_F color{};
 
 	if (Shared::g_opaqueBlendPriority == Shared::OpaqueBlendPriority::Vista)
@@ -520,6 +529,10 @@ GlassKernel::CRealizedGlassColorizationParameters GlassKernel::RealizeWindowColo
 
 float GlassKernel::GetAdjustedReflectionIntensity(bool active, bool maximized)
 {
+	if (Shared::g_liquidGlass.enabled)
+	{
+		maximized = false;
+	}
 	float baseOpacity = 0.f;
 
 	if (active && !maximized)
