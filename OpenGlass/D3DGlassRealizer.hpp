@@ -21,6 +21,12 @@ namespace OpenGlass
 		D2D1_VECTOR_4F blurBalance;
 		D2D1_VECTOR_4F color;
 		D2D1_VECTOR_4F fallback;
+		// Liquid Glass: refraction at the bezel of the glass, see Blur.Common.hlsli.
+		D2D1_VECTOR_4F lgRect;		// left, top, right, bottom of the glass, back-buffer pixels
+		D2D1_VECTOR_4F lgTex;		// uv per pixel (x, y), corner radius in pixels, enabled
+		D2D1_VECTOR_4F lgOptics;	// index of refraction, bezel width, glass thickness, refraction scale
+		D2D1_VECTOR_4F lgLook;		// dispersion, saturation, readability, glass-to-background gap
+		D2D1_VECTOR_4F lgRim;		// rim light strength, shine exponent, light angle in radians, bezel profile
 	};
 
 	// 80 bytes/vertex：pos(2) + baseUV(2) + 8 samples packed into 4 float4

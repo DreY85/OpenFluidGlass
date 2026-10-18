@@ -31,6 +31,15 @@ namespace OpenGlass::Shared
 	inline float g_glassOpacity{};
 	inline float g_glassOpacityInactive{};
 	inline bool g_useD3DRendering{};
+	// Liquid Glass parameters for the Direct3D renderer. Lengths are in back-buffer pixels.
+	inline struct LiquidGlassSettings
+	{
+		bool enabled{ false };
+		float ior{ 1.5f }, bezel{ 26.f }, thickness{ 26.f }, gap{ 0.f }, scale{ 1.f };
+		float chroma{ 0.03f }, saturation{ 1.4f }, readability{ 0.5f };
+		float rim{ 1.f }, shine{ 2.f }, lightDegrees{ -135.f }, radius{ 8.f };
+		UINT profile{ 0 };
+	} g_liquidGlass{};
 
 	inline D2D1_COLOR_F g_color{};
 	inline D2D1_COLOR_F g_colorInactive{};

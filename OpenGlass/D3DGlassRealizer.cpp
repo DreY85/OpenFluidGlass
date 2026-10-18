@@ -643,6 +643,15 @@ HRESULT CD3DGlassRealizer::Render(
 		cbPS.color.z = params.color.b;
 		cbPS.color.w = params.color.a;
 	}
+	{
+		const auto& lg = Shared::g_liquidGlass;
+		cbPS.lgRect = { geometryBounds.left, geometryBounds.top, geometryBounds.right, geometryBounds.bottom };
+		// Pass 2 samples the quarter-width buffer: u advances by 0.25 / quarterWidth per back-buffer pixel.
+		cbPS.lgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), lg.radius, lg.enabled ? 1.f : 0.f };
+		cbPS.lgOptics = { lg.ior, lg.bezel, lg.thickness, lg.scale };
+		cbPS.lgLook = { lg.chroma, lg.saturation, lg.readability, lg.gap };
+		cbPS.lgRim = { lg.rim, lg.shine, lg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(lg.profile) };
+	}
 	if (memcmp(&m_cbPS, &cbPS, sizeof(cbPS)) != 0)
 	{
 		m_cbPS = cbPS;

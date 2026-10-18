@@ -93,8 +93,8 @@
   <ItemGroup>
     <FxCompile Include="$(MSBuildThisFileDirectory)AeroColorizationEffect.hlsl"><Link>Shader Files\AeroColorizationEffect.hlsl</Link><ShaderType>Pixel</ShaderType><CompileD2DCustomEffect>true</CompileD2DCustomEffect><EntryPointName>AeroColorizationEffect</EntryPointName></FxCompile>
     <FxCompile Include="$(MSBuildThisFileDirectory)Blur.PS_BlurH.hlsl"><Link>Shader Files\Blur.PS_BlurH.hlsl</Link><ShaderType>Pixel</ShaderType></FxCompile>
-    <FxCompile Include="$(MSBuildThisFileDirectory)Blur.PS_BlurV.hlsl"><Link>Shader Files\Blur.PS_BlurV.hlsl</Link><ShaderType>Pixel</ShaderType></FxCompile>
-    <FxCompile Include="$(MSBuildThisFileDirectory)Blur.PS_BlurV_Vista.hlsl"><Link>Shader Files\Blur.PS_BlurV_Vista.hlsl</Link><ShaderType>Pixel</ShaderType></FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)Blur.PS_BlurV.hlsl"><Link>Shader Files\Blur.PS_BlurV.hlsl</Link><ShaderType>Pixel</ShaderType><ShaderModel>5.0</ShaderModel></FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)Blur.PS_BlurV_Vista.hlsl"><Link>Shader Files\Blur.PS_BlurV_Vista.hlsl</Link><ShaderType>Pixel</ShaderType><ShaderModel>5.0</ShaderModel></FxCompile>
     <FxCompile Include="$(MSBuildThisFileDirectory)Blur.VS.hlsl"><Link>Shader Files\Blur.VS.hlsl</Link><ShaderType>Vertex</ShaderType></FxCompile>
   </ItemGroup>
 </Project>
