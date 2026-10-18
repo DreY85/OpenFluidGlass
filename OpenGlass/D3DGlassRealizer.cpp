@@ -732,7 +732,33 @@ HRESULT CD3DGlassRealizer::Render(
 		const float copyLeftMargin = expansion + static_cast<float>(m_dwmHwSamples.radius + 1);
 		const float copyRightMargin = expansion + static_cast<float>(m_dwmHwSamples.radius);
 
-		if (rectangles.size() <= 12)
+		if (liquidGlassSharp)
+		{
+			// Refraction samples the sharp copy anywhere under the glass, not only inside the
+			// rectangles being redrawn, so copy the whole glass plus the blur reach.
+			const float margin = expansion + static_cast<float>(m_dwmHwSamples.radius + 1);
+			const auto copyRegionRect = RectF::ToRectU(
+				D2D1::RectF(
+					std::max(std::min(geometryBounds.left, samplingWorldBounds.left) - margin, 0.f),
+					std::max(std::min(geometryBounds.top, samplingWorldBounds.top) - margin, 0.f),
+					std::min(std::max(geometryBounds.right, samplingWorldBounds.right) + margin, static_cast<float>(backBufferDesc.Width)),
+					std::min(std::max(geometryBounds.bottom, samplingWorldBounds.bottom) + margin, static_cast<float>(backBufferDesc.Height))
+				)
+			);
+			LG_TRACE("[LG] sharp copy: srv=%d rects=%u region=%u,%u,%u,%u target=%ux%u\n", backBufferSRV ? 1 : 0, static_cast<UINT>(rectangles.size()), copyRegionRect.left, copyRegionRect.top, copyRegionRect.right, copyRegionRect.bottom, backBufferDesc.Width, backBufferDesc.Height);
+			if (copyRegionRect.right > copyRegionRect.left && copyRegionRect.bottom > copyRegionRect.top)
+			{
+				Util::CopyTextureRegion(
+					context,
+					backBuffer,
+					m_intermediateBuffer.m_texture.get(),
+					copyRegionRect,
+					copyRegionRect.left,
+					copyRegionRect.top
+				);
+			}
+		}
+		else if (rectangles.size() <= 12)
 		{
 			for (auto subRectangle : rectangles)
 			{
@@ -780,7 +806,8 @@ HRESULT CD3DGlassRealizer::Render(
 			);
 		}
 
-		pass1InputSRV = m_intermediateBuffer.m_srv.get();
+		// With a back buffer view, pass 1 keeps reading the back buffer as before.
+		pass1InputSRV = backBufferSRV ? backBufferSRV : m_intermediateBuffer.m_srv.get();
 	}
 	else
 	{
