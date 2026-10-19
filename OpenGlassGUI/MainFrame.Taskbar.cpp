@@ -116,6 +116,7 @@ namespace OpenGlass
 		const TaskbarSlider c_taskbarSliders[]
 		{
 			{ &PillHeight, L"Pill height:", L"Height of every pill. The taskbar itself is 48 px tall." },
+			{ &PillIconSize, L"Icon size:", L"Size of the app icons. The taskbar draws them at 24 px; their buttons widen to fit." },
 			{ &PillPadding, L"Side padding:", L"Room between the icons and the rounded ends of a pill." },
 			{ &PillGap, L"Tray to clock gap:", L"Space between the tray icons pill and the clock pill." },
 		};

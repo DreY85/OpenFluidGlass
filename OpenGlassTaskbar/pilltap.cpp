@@ -164,9 +164,49 @@ namespace
 			m_frame.LayoutUpdated([this](auto&&, auto&&) { Update(); });
 			m_timer = wux::DispatcherTimer();
 			m_timer.Interval(std::chrono::milliseconds(500));
-			m_timer.Tick([this](auto&&, auto&&) { Update(); });
+			m_iconSize = static_cast<int>(ReadPillSetting(PillIconSize));
+			m_timer.Tick([this](auto&&, auto&&) { m_iconSize = static_cast<int>(ReadPillSetting(PillIconSize)); Update(); });
 			m_timer.Start();
 			Update();
+		}
+
+		static constexpr int DefaultIconSize = 24;
+
+		static wux::FrameworkElement FindNamed(const wux::DependencyObject& node, std::wstring_view name, int depth)
+		{
+			const int count = wux::Media::VisualTreeHelper::GetChildrenCount(node);
+			for (int index = 0; index < count; ++index)
+			{
+				const auto child = wux::Media::VisualTreeHelper::GetChild(node, index);
+				const auto element = child.try_as<wux::FrameworkElement>();
+				if (element && element.Name() == name) return element;
+				if (depth > 0)
+					if (auto found = FindNamed(child, name, depth - 1)) return found;
+			}
+			return nullptr;
+		}
+
+		// App icons at the size the Taskbar tab asks for; the taskbar's own is 24. Each button is a fixed-width
+		// panel (44 for a task, 45 for Start) holding the icon, so the panel grows by as much as the icon does.
+		// Recycled buttons keep the size; buttons that appear later get it on the next layout pass.
+		void SizeIcons(int size)
+		{
+			if (size == DefaultIconSize && !m_iconsSized) return;
+			m_iconsSized = size != DefaultIconSize;
+			const int count = wux::Media::VisualTreeHelper::GetChildrenCount(m_repeater);
+			for (int index = 0; index < count; ++index)
+			{
+				const auto button = wux::Media::VisualTreeHelper::GetChild(m_repeater, index);
+				if (wux::Media::VisualTreeHelper::GetChildrenCount(button) == 0) continue;
+				const auto panel = wux::Media::VisualTreeHelper::GetChild(button, 0).try_as<wux::FrameworkElement>();
+				const auto icon = panel ? FindNamed(panel, L"Icon", 2) : nullptr;
+				if (!icon) continue;
+				// The panel has grown exactly as much as its icon, so its own width follows from the two.
+				const double iconWidth = std::isnan(icon.Width()) ? DefaultIconSize : icon.Width();
+				const double width = panel.Width() - iconWidth + size;
+				if (iconWidth != size) { icon.Width(size); icon.Height(size); }
+				if (!std::isnan(width) && panel.Width() != width) panel.Width(width);
+			}
 		}
 
 		static void Hide(const wux::FrameworkElement& element, bool hide)
@@ -198,6 +238,7 @@ namespace
 				const HWND host = FindWindowW(PillHostClass, nullptr);
 				Hide(m_fill, host != nullptr);
 				Hide(m_stroke, host != nullptr);
+				SizeIcons(host ? m_iconSize : DefaultIconSize);
 				if (!host || !m_share)
 				{
 					m_published = false;
@@ -264,6 +305,8 @@ namespace
 		bool m_started{};
 		bool m_published{};
 		bool m_updateFailed{};
+		bool m_iconsSized{};
+		int m_iconSize{ DefaultIconSize };
 		wux::FrameworkElement m_frame{ nullptr }, m_fill{ nullptr }, m_stroke{ nullptr }, m_repeater{ nullptr }, m_trayGrid{ nullptr };
 		wux::DispatcherTimer m_timer{ nullptr };
 		HANDLE m_mapping{};
