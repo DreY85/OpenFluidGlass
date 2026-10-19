@@ -152,7 +152,9 @@ namespace
 	// (ITaskbarList::AddTab on a hidden window changes nothing on the Windows 11 taskbar.)
 	HWND g_nudge{};
 	ULONGLONG g_nudgeTime{};
+	int g_nudges{};	// since the TAP attached; a TAP that never answers would otherwise get nudged forever
 	constexpr ULONGLONG NudgeLimit = 2000, NudgeRetryDelay = 5000;
+	constexpr int NudgeTries = 3;
 
 	void EndNudge()
 	{
@@ -168,8 +170,9 @@ namespace
 			EndNudge();
 			if (!g_share) g_tapTime = now + NudgeRetryDelay;
 		}
-		else if (!g_share && now >= g_tapTime)
+		else if (!g_share && now >= g_tapTime && g_nudges < NudgeTries)
 		{
+			if (++g_nudges == NudgeTries) Log(L"last nudge; the TAP has not answered");
 			g_tapTime = now + NudgeRetryDelay;
 			g_nudgeTime = now;
 			ShowWindow(g_nudge, SW_SHOWNOACTIVATE);
@@ -197,7 +200,7 @@ namespace
 			// Once attached, the next wait is for the nudge: just long enough for the TAP to subscribe.
 			g_tapTime = now + (attached ? NudgeDelay : TapRetryDelay);
 			// Refused copies are unloaded by now; the attached one is locked and stays.
-			if (attached) CleanTapCopies();
+			if (attached) { CleanTapCopies(); g_nudges = 0; }
 		}
 		else if (g_tap == TapState::Attached)
 		{

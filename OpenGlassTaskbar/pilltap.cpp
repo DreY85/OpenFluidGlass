@@ -64,6 +64,10 @@ namespace
 		{
 			if (m_site) { m_site->Release(); m_site = nullptr; }
 			if (!site) return S_OK;
+			Log(L"site set in module 0x" + std::to_wstring(reinterpret_cast<ULONG_PTR>(g_module)));
+			wchar_t name[96];
+			PillEventName(name, GetCurrentProcessId(), L"Site");
+			if (const HANDLE event = CreateEventW(nullptr, TRUE, FALSE, name)) { SetEvent(event); CloseHandle(event); }
 			site->AddRef();
 			m_site = site;
 			// Lives as long as explorer: the handlers below keep using it.
@@ -308,17 +312,35 @@ namespace
 	{
 		wchar_t location[MAX_PATH];
 		GetModuleFileNameW(g_module, location, MAX_PATH);
+		Log(L"attaching from module 0x" + std::to_wstring(reinterpret_cast<ULONG_PTR>(g_module)) + L" " + location);
 		const HMODULE xaml = LoadLibraryExW(L"Windows.UI.Xaml.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		const auto initialize = xaml ? reinterpret_cast<InitializeXamlDiagnosticsEx_t>(GetProcAddress(xaml, "InitializeXamlDiagnosticsEx")) : nullptr;
 		if (!initialize) { Log(L"no InitializeXamlDiagnosticsEx"); Report(false); return 1; }
 		// One try per copy: once XAML refuses this file it keeps refusing it, so the host retries
 		// with a fresh copy instead. Diagnostics initialize once per thread, hence the new thread.
 		// Windows only accepts endpoint names like Visual Studio's (a name of our own fails with 0x80070490).
+		// Each XAML thread in explorer listens on VisualDiagConnection<n>, numbered from 1 in the order the threads
+		// start, and 0x80070490 means nothing listens yet. The first one opens when the taskbar's XAML thread starts,
+		// so retrying it quickly catches the taskbar while it is still being built.
+		// Right after the endpoint opens, XAML can accept the connection and still never load the TAP,
+		// so success only counts once the TAP has its site; until then, connect again.
+		wchar_t name[96];
+		PillEventName(name, GetCurrentProcessId(), L"Site");
+		const HANDLE site = CreateEventW(nullptr, TRUE, FALSE, name);
+		if (site) ResetEvent(site);
 		HRESULT hr{};
-		std::thread([&] { hr = initialize(L"VisualDiagConnection1", GetCurrentProcessId(), nullptr, location, CLSID_PillTap, nullptr); }).join();
-		Log(SUCCEEDED(hr) ? L"attached" : L"could not attach, error 0x" + std::to_wstring(static_cast<unsigned long>(hr)));
-		Report(SUCCEEDED(hr));
-		return SUCCEEDED(hr) ? 0 : 1;
+		bool attached{};
+		for (int attempt = 1; attempt <= 4 && !attached; ++attempt)
+		{
+			std::thread([&] { hr = initialize(L"VisualDiagConnection1", GetCurrentProcessId(), nullptr, location, CLSID_PillTap, nullptr); }).join();
+			if (FAILED(hr)) break;
+			attached = site && WaitForSingleObject(site, 1000) == WAIT_OBJECT_0;
+			Log(attached ? L"attached" : L"connected, but no site after attempt " + std::to_wstring(attempt));
+		}
+		if (FAILED(hr)) Log(L"could not attach, error 0x" + std::to_wstring(static_cast<unsigned long>(hr)));
+		if (site) CloseHandle(site);
+		Report(attached);
+		return attached ? 0 : 1;
 	}
 
 	// The thread holds its own reference to the DLL (taken in DllMain), so the DLL cannot unload
