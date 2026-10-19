@@ -74,7 +74,7 @@ namespace
 	ULONGLONG g_tapTime{};	// while idle: when to try next; while waiting: when the hook was set
 	HANDLE g_tapDone{}, g_tapAttached{};
 	HMODULE g_tapModule{};
-	constexpr ULONGLONG TapRetryDelay = 2000, TapWaitLimit = 15000;
+	constexpr ULONGLONG TapRetryDelay = 500, TapWaitLimit = 15000, NudgeDelay = 300;
 
 	void ReleaseTap()
 	{
@@ -194,7 +194,10 @@ namespace
 			ReleaseTap();
 			g_tap = attached ? TapState::Attached : TapState::Idle;
 			Log(attached ? L"TAP attached" : done ? L"TAP refused, retrying" : L"TAP did not answer, retrying");
-			g_tapTime = now + TapRetryDelay;
+			// Once attached, the next wait is for the nudge: just long enough for the TAP to subscribe.
+			g_tapTime = now + (attached ? NudgeDelay : TapRetryDelay);
+			// Refused copies are unloaded by now; the attached one is locked and stays.
+			if (attached) CleanTapCopies();
 		}
 		else if (g_tap == TapState::Attached)
 		{
