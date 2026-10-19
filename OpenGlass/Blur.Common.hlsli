@@ -165,7 +165,11 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	}
 
 	float2 p = input.pos.xy;
-	float bezel = max(lgOptics.y, 1.0f);
+	// The bezel ends on the flat top at the latest where the glass is deepest. A wider bezel than
+	// half of a short glass (a 48 px pill) left a slope at the middle, whose normal flips there,
+	// so the refraction tore along a line at half height.
+	float2 halfSize = (lgRect.zw - lgRect.xy) * 0.5f;
+	float bezel = clamp(lgOptics.y, 1.0f, max(min(halfSize.x, halfSize.y), 1.0f));
 	float d = -max(LgDepth(p), 0.0f);
 	// Edge normal, pointing out of the glass.
 	float2 e = float2(1.0f, 0.0f);
