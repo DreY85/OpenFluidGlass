@@ -31,7 +31,6 @@ namespace
 	HANDLE g_mapping{};
 	const PillShare* g_share{};
 	DWORD g_explorer{};
-	HHOOK g_hook{};
 	Settings g_settings{};
 	wchar_t g_ini[MAX_PATH]{};
 	FILETIME g_iniTime{};
@@ -65,25 +64,21 @@ namespace
 		fclose(file);
 	}
 
-	// Attaching to explorer. A freshly started explorer refuses the TAP for a while, so the host
-	// hooks it, waits for the TAP to say how its attempt ended and, if it failed, tries again.
-	// Once XAML has refused a TAP file it keeps refusing that path in that explorer, so every
-	// attempt loads its own copy of pilltap.dll, from the tap folder next to the exe.
+	// Attaching to explorer. A freshly started explorer refuses the TAP until its taskbar's XAML starts,
+	// so the host loads the TAP into it once, as early as it can, and the TAP keeps trying from inside. The host waits
+	// for the TAP to say how that ended and, if it failed, tries again. Every attempt loads its own copy
+	// of pilltap.dll, from the tap folder next to the exe, as XAML may keep refusing a file it refused once.
 	enum class TapState { Idle, Waiting, Attached };
 	TapState g_tap{ TapState::Idle };
-	ULONGLONG g_tapTime{};	// while idle: when to try next; while waiting: when the hook was set
+	ULONGLONG g_tapTime{};	// while idle: when to try next; while waiting: when the TAP was loaded
 	HANDLE g_tapDone{}, g_tapAttached{};
-	HMODULE g_tapModule{};
-	constexpr ULONGLONG TapRetryDelay = 500, TapWaitLimit = 15000, NudgeDelay = 300;
+	// The TAP waits for explorer's XAML itself, then makes up to four attempts of about a second each.
+	constexpr ULONGLONG TapRetryDelay = 500, TapWaitLimit = TapListenLimit + 10000, NudgeDelay = 300;
 
 	void ReleaseTap()
 	{
-		if (g_hook) UnhookWindowsHookEx(g_hook);
-		if (g_tapModule) FreeLibrary(g_tapModule);
 		if (g_tapDone) CloseHandle(g_tapDone);
 		if (g_tapAttached) CloseHandle(g_tapAttached);
-		g_hook = nullptr;
-		g_tapModule = nullptr;
 		g_tapDone = g_tapAttached = nullptr;
 	}
 
@@ -113,14 +108,14 @@ namespace
 		FindClose(search);
 	}
 
-	// Hands a copy of pilltap.dll to explorer through a hook on the taskbar's thread. The TAP's own
-	// thread keeps the DLL loaded while it tries, and a successful attach pins it, so the hook only
-	// has to live until the TAP reports back. A failed attempt unloads with the hook.
+	// Has explorer load a copy of pilltap.dll on a thread of its own, started at LoadLibraryW, which
+	// kernel32 maps at the same address in every process. A hook on the taskbar's thread would wait for
+	// that thread to be free, and while explorer starts, it is busy building the taskbar for seconds.
+	// The TAP drops this load's reference when its attempt ends; a successful attach pins the DLL.
 	void Inject(HWND tray)
 	{
 		DWORD pid{};
-		const DWORD thread = GetWindowThreadProcessId(tray, &pid);
-		if (!thread) return;
+		if (!GetWindowThreadProcessId(tray, &pid)) return;
 		wchar_t folder[MAX_PATH], source[MAX_PATH], dll[MAX_PATH];
 		HostFolder(folder);
 		swprintf_s(source, L"%spilltap.dll", folder);
@@ -128,9 +123,8 @@ namespace
 		CreateDirectoryW(dll, nullptr);
 		swprintf_s(dll, L"%stap\\pilltap-%lu-%llu.dll", folder, pid, GetTickCount64());
 		if (!CopyFileW(source, dll, FALSE)) return;
-		g_tapModule = LoadLibraryW(dll);
-		const auto hook = g_tapModule ? reinterpret_cast<HOOKPROC>(GetProcAddress(g_tapModule, "TapHook")) : nullptr;
-		if (!hook) { ReleaseTap(); return; }
+		const HANDLE explorer = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE, FALSE, pid);
+		if (!explorer) { Log(L"cannot open explorer"); return; }
 		wchar_t name[96];
 		PillEventName(name, pid, L"Done");
 		g_tapDone = CreateEventW(nullptr, TRUE, FALSE, name);
@@ -138,11 +132,29 @@ namespace
 		g_tapAttached = CreateEventW(nullptr, TRUE, FALSE, name);
 		if (g_tapDone) ResetEvent(g_tapDone);
 		if (g_tapAttached) ResetEvent(g_tapAttached);
-		g_hook = SetWindowsHookExW(WH_CALLWNDPROC, hook, g_tapModule, thread);
-		if (!g_hook) { ReleaseTap(); return; }
-		SendMessageTimeoutW(tray, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 2000, nullptr);
-		g_tap = TapState::Waiting;
-		g_tapTime = GetTickCount64();
+		const SIZE_T size = (wcslen(dll) + 1) * sizeof(wchar_t);
+		void* remote = VirtualAllocEx(explorer, nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+		const auto load = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryW"));
+		HANDLE thread{};
+		if (remote && WriteProcessMemory(explorer, remote, dll, size, nullptr))
+		{
+			thread = CreateRemoteThread(explorer, nullptr, 0, load, remote, 0, nullptr);
+		}
+		if (thread)
+		{
+			// LoadLibraryW only runs DllMain, which hands the attempt to a thread of the TAP's own.
+			if (WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0) VirtualFreeEx(explorer, remote, 0, MEM_RELEASE);
+			CloseHandle(thread);
+			g_tap = TapState::Waiting;
+			g_tapTime = GetTickCount64();
+		}
+		else
+		{
+			Log(L"cannot start a thread in explorer");
+			if (remote) VirtualFreeEx(explorer, remote, 0, MEM_RELEASE);
+			ReleaseTap();
+		}
+		CloseHandle(explorer);
 	}
 
 	// XAML does not list the taskbar's existing elements to the TAP, so the TAP only finds the
@@ -185,9 +197,9 @@ namespace
 		const ULONGLONG now = GetTickCount64();
 		if (g_tap == TapState::Idle && tray && now >= g_tapTime)
 		{
-			g_tapTime = now + TapRetryDelay;	// in case the hook cannot even be set
+			g_tapTime = now + TapRetryDelay;	// in case explorer cannot even be reached
 			Inject(tray);
-			Log(L"hooking explorer");
+			Log(L"loading the TAP into explorer");
 		}
 		else if (g_tap == TapState::Waiting)
 		{

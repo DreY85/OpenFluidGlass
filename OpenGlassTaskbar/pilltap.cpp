@@ -316,12 +316,12 @@ namespace
 		const HMODULE xaml = LoadLibraryExW(L"Windows.UI.Xaml.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		const auto initialize = xaml ? reinterpret_cast<InitializeXamlDiagnosticsEx_t>(GetProcAddress(xaml, "InitializeXamlDiagnosticsEx")) : nullptr;
 		if (!initialize) { Log(L"no InitializeXamlDiagnosticsEx"); Report(false); return 1; }
-		// One try per copy: once XAML refuses this file it keeps refusing it, so the host retries
-		// with a fresh copy instead. Diagnostics initialize once per thread, hence the new thread.
-		// Windows only accepts endpoint names like Visual Studio's (a name of our own fails with 0x80070490).
+		// Diagnostics initialize once per thread, hence a new thread per call.
 		// Each XAML thread in explorer listens on VisualDiagConnection<n>, numbered from 1 in the order the threads
-		// start, and 0x80070490 means nothing listens yet. The first one opens when the taskbar's XAML thread starts,
-		// so retrying it quickly catches the taskbar while it is still being built.
+		// start, and 0x80070490 means nothing listens yet; the connection fails before XAML ever sees this file.
+		// The first endpoint opens when the taskbar's XAML thread starts, so retrying it quickly from here, rather
+		// than through the host's hook, catches the taskbar while it is still being built: the hook only loads
+		// a copy when the taskbar's thread is free, and that thread is busy for seconds while it builds the taskbar.
 		// Right after the endpoint opens, XAML can accept the connection and still never load the TAP,
 		// so success only counts once the TAP has its site; until then, connect again.
 		wchar_t name[96];
@@ -330,12 +330,22 @@ namespace
 		if (site) ResetEvent(site);
 		HRESULT hr{};
 		bool attached{};
-		for (int attempt = 1; attempt <= 4 && !attached; ++attempt)
+		int waits{};
+		const ULONGLONG start = GetTickCount64();
+		for (int attempt = 1; attempt <= 4 && !attached;)
 		{
 			std::thread([&] { hr = initialize(L"VisualDiagConnection1", GetCurrentProcessId(), nullptr, location, CLSID_PillTap, nullptr); }).join();
+			if (hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) && GetTickCount64() - start < TapListenLimit)
+			{
+				++waits;
+				Sleep(100);
+				continue;
+			}
+			if (waits) { Log(L"endpoint opened after " + std::to_wstring(waits) + L" tries"); waits = 0; }
 			if (FAILED(hr)) break;
+			++attempt;
 			attached = site && WaitForSingleObject(site, 1000) == WAIT_OBJECT_0;
-			Log(attached ? L"attached" : L"connected, but no site after attempt " + std::to_wstring(attempt));
+			Log(attached ? L"attached" : L"connected, but no site after attempt " + std::to_wstring(attempt - 1));
 		}
 		if (FAILED(hr)) Log(L"could not attach, error 0x" + std::to_wstring(static_cast<unsigned long>(hr)));
 		if (site) CloseHandle(site);
@@ -343,17 +353,12 @@ namespace
 		return attached ? 0 : 1;
 	}
 
-	// The thread holds its own reference to the DLL (taken in DllMain), so the DLL cannot unload
-	// under it when the hook goes away early, for example because the host exited.
+	// The host's LoadLibraryW holds the reference this thread runs on; ending the attempt drops it,
+	// so a failed copy unloads and a successful one stays pinned by XAML.
 	DWORD WINAPI Install(void*)
 	{
 		FreeLibraryAndExitThread(g_module, Attach());
 	}
-}
-
-extern "C" LRESULT CALLBACK TapHook(int code, WPARAM wParam, LPARAM lParam)
-{
-	return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID riid, void** out)
@@ -372,14 +377,11 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, void*)
 		wchar_t exe[MAX_PATH];
 		GetModuleFileNameW(nullptr, exe, MAX_PATH);
 		const wchar_t* name = wcsrchr(exe, L'\\');
-		// Only explorer installs; the host loads the DLL just to hand its hook to Windows.
-		// No pinning here: a successful attach pins the DLL, a failed one must leave it free to
-		// unload with the hook, or explorer keeps this dead copy and never loads a new one.
-		HMODULE self{};
-		if (name && _wcsicmp(name + 1, L"explorer.exe") == 0 &&
-			GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&Install), &self))
+		// Only explorer installs. No pinning here: a successful attach pins the DLL, and a failed
+		// copy must unload, as explorer would otherwise keep it and never take a new one.
+		if (name && _wcsicmp(name + 1, L"explorer.exe") == 0)
 		{
-			// If the thread cannot start, the extra reference only keeps an idle copy loaded.
+			// If the thread cannot start, the host's reference only keeps an idle copy loaded.
 			if (const HANDLE thread = CreateThread(nullptr, 0, Install, nullptr, 0, nullptr)) CloseHandle(thread);
 		}
 	}

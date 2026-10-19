@@ -7,6 +7,7 @@ constexpr wchar_t PillShareName[] = L"Local\\LiquidGlassTaskbarGroups";
 constexpr wchar_t PillHostClass[] = L"LiquidGlassTaskbarHost";
 constexpr UINT PillCount = 3;	// apps, tray, clock
 constexpr UINT PillChanged = WM_APP + 1;	// posted by the TAP to the host after it publishes
+constexpr ULONGLONG TapListenLimit = 30000;	// how long the TAP waits, in ms, for explorer's XAML to start listening
 
 // What the taskbar shows, without any styling: the host decides how big each pill is.
 struct PillShare
