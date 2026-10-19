@@ -42,6 +42,10 @@ namespace OpenGlass::AccentOverrider
 		winrt::com_ptr<uDWM::CRenderDataVisual> visual;
 	};
 	std::unordered_map<uDWM::CAccent*, CAccentInfo> g_accentClipRegions{};
+
+	// Our own flag, unused by Windows: the window asks for its glass to be a pill, cut to an
+	// outline rounded by half its height. It is removed before the policy reaches uDWM's own accent code.
+	constexpr DWORD AccentFlagPill{ 0x80000000 };
 }
 
 HRESULT AccentOverrider::MyCAccent_UpdateAccentPolicy(
@@ -67,6 +71,7 @@ HRESULT AccentOverrider::MyCAccent_UpdateAccentPolicy(
 	auto accentPolicy = *policy;
 	accentPolicy.AccentState = 1;
 	accentPolicy.dwGradientColor = 0;
+	accentPolicy.AccentFlags &= ~AccentFlagPill;
 	if (const auto it = g_accentClipRegions.find(This); it != g_accentClipRegions.end() && it->second.clipRegion)
 	{
 		// remove accent border atlas
@@ -163,7 +168,9 @@ HRESULT AccentOverrider::MyCAccent__UpdateSolidFill(
 				).GetEffectivescRGBBlendColor(0.f),
 				0.f
 			);
-			glassColor.a = GlassKernel::AlphaChannelReinterpreter(true, maximized).ToFloat();
+			GlassKernel::AlphaChannelReinterpreter marker{ true, maximized };
+			marker.SetIsPill((data->GetAccentPolicy()->AccentFlags & AccentFlagPill) != 0);
+			glassColor.a = marker.ToFloat();
 			RETURN_IF_FAILED(effectBrush->Update(1.0, glassColor));
 
 			RETURN_IF_FAILED(

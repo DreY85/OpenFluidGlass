@@ -38,6 +38,15 @@ namespace OpenGlass::GlassKernel
 		{
 			m_flag.set(2, value);
 		}
+		// A pill: the glass is cut to its outline, rounded by half its height.
+		bool GetIsPill() const
+		{
+			return m_flag.test(3);
+		}
+		void SetIsPill(bool value)
+		{
+			m_flag.set(3, value);
+		}
 
 		float ToFloat() const
 		{

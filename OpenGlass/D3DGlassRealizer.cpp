@@ -197,6 +197,13 @@ HRESULT CD3DGlassRealizer::CreateDeviceResources(ID3D11Device* device)
 	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 	RETURN_IF_FAILED(device->CreateBlendState(&blendDesc, m_blendStateOpaque.put()));
 
+	// Pills: the shader returns premultiplied color faded by how much of the pixel lies inside
+	// the rounded outline, so the corners keep what is already in the back buffer.
+	blendDesc.RenderTarget[0].BlendEnable = TRUE;
+	blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+	blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+	RETURN_IF_FAILED(device->CreateBlendState(&blendDesc, m_blendStatePill.put()));
+
 	return S_OK;
 }
 
@@ -647,11 +654,12 @@ HRESULT CD3DGlassRealizer::Render(
 		const auto& lg = Shared::g_liquidGlass;
 		cbPS.lgRect = { geometryBounds.left, geometryBounds.top, geometryBounds.right, geometryBounds.bottom };
 		// Pass 2 samples the quarter-width buffer: u advances by 0.25 / quarterWidth per back-buffer pixel.
-		cbPS.lgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), lg.radius, lg.enabled ? 1.f : 0.f };
+		// A pill asks for more radius than any glass can hold; the shader clamps it to half the height.
+		cbPS.lgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), params.pill ? 10000.f : lg.radius, lg.enabled ? 1.f : 0.f };
 		cbPS.lgOptics = { lg.ior, lg.bezel, lg.thickness, lg.scale };
 		cbPS.lgLook = { lg.chroma, lg.saturation, lg.readability, lg.gap };
 		cbPS.lgRim = { lg.rim, lg.shine, lg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(lg.profile) };
-		cbPS.lgLimit = { GetLiquidGlassReach(), 0.f, 0.f, 0.f };
+		cbPS.lgLimit = { GetLiquidGlassReach(), params.pill ? 1.f : 0.f, 0.f, 0.f };
 		cbPS.lgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), lg.enabled ? lg.clarity : 0.f, lg.softness };
 	}
 	if (memcmp(&m_cbPS, &cbPS, sizeof(cbPS)) != 0)
@@ -881,6 +889,10 @@ HRESULT CD3DGlassRealizer::Render(
 	else
 	{
 		context->PSSetShader(m_pixelShaderBlurV_Vista.get(), nullptr, 0);
+	}
+	if (params.pill)
+	{
+		context->OMSetBlendState(m_blendStatePill.get(), nullptr, 0xffffffff);
 	}
 	ID3D11ShaderResourceView* srvsQuarter[] = { m_quarterResBuffer.m_srv.get(), liquidGlassSharp ? m_intermediateBuffer.m_srv.get() : nullptr };
 	context->PSSetShaderResources(0, 2, srvsQuarter);

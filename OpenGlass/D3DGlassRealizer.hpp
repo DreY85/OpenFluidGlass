@@ -88,6 +88,7 @@ namespace OpenGlass
 
 		winrt::com_ptr<ID3D11RasterizerState>       m_rasterizerStateScissor{ nullptr };
 		winrt::com_ptr<ID3D11BlendState>            m_blendStateOpaque{ nullptr };
+		winrt::com_ptr<ID3D11BlendState>            m_blendStatePill{ nullptr };
 
 		HRESULT CreateDeviceResources(ID3D11Device* device);
 		HRESULT Initialize(ID3D11Device* device);

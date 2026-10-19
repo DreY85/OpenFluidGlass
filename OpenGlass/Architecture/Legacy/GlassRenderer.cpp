@@ -443,6 +443,7 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 				g_type = Shared::g_type;
 				g_params.blurAmount = Shared::g_blurAmount;
 				g_params.optimization = Shared::g_blurOptimization;
+				g_params.pill = reinterpreter.GetIsPill();
 				if (colorSpaceIsScRGB)
 				{
 					g_params.color = Color::sRGBToscRGB(realizedGlassColorizationParameters.color, sdrBoost);

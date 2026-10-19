@@ -12,5 +12,5 @@ minfloat4 main(PS_INPUT input) : SV_Target0
 	return minfloat4(
 		minfloat3(color.xyz) + minfloat(1.0f - color.a) * background.xyz + minfloat3(lgRimLight),
 		minfloat(color.a) + minfloat(1.0f - color.a) * background.a
-	);
+	) * minfloat(LgMask(input.pos.xy));
 }

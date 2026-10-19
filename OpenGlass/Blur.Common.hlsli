@@ -22,7 +22,7 @@ cbuffer BlurPSConstants : register(b0)
 	float4 lgLook;		// dispersion, saturation, readability, glass-to-background gap
 	float4 lgRim;		// rim light strength, shine exponent, light angle in radians, bezel profile
 	float4 lgFull;		// uv per pixel of the full-resolution copy (x, y), clarity, softness in pixels
-	float4 lgLimit;		// longest refraction shift in pixels, unused
+	float4 lgLimit;		// longest refraction shift in pixels, 1 for a pill cut to its rounded outline
 };
 
 Texture2D<float4> texture0 : register(t0);
@@ -81,6 +81,21 @@ float LgDepth(float2 p)
 		t = (-qb + sqrt(max(qb * qb - 4.0f * qa * qc, 0.0f))) / (2.0f * qa);
 	}
 	return t;
+}
+// How much of the pixel lies inside a pill's rounded outline; 1 for any other glass.
+// Windows draws the glass over the whole window rectangle, so a pill fades it out over
+// one pixel outside its outline and the blend keeps the back buffer in the corners.
+float LgMask(float2 p)
+{
+	if (lgLimit.y < 0.5f)
+	{
+		return 1.0f;
+	}
+	float2 halfSize = (lgRect.zw - lgRect.xy) * 0.5f;
+	float r = min(lgTex.z, min(halfSize.x, halfSize.y));
+	float2 q = abs(p - (lgRect.xy + lgRect.zw) * 0.5f) - halfSize + r;
+	float outside = length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r;
+	return saturate(0.5f - outside);
 }
 // Bezel height from the outer edge (u = 0) to the flat top (u = 1).
 float LgConvex(float u)
