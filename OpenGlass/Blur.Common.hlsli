@@ -190,7 +190,10 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	// Rim light: how steep the bezel is and how much it faces the light.
 	// The opposite edge catches a weaker reflection, like light leaving through the far side.
 	float2 L = float2(cos(lgRim.z), sin(lgRim.z));
-	float facing = pow(max(dot(n, L), 0.0f), lgRim.y) + 0.4f * pow(max(dot(n, -L), 0.0f), lgRim.y);
+	// A rounded corner is the only place whose normal can face a diagonal light head-on, which made it a
+	// hot spot. Cap the facing at what the best lit straight side gets, so the corner matches the sides.
+	float sideFacing = max(abs(L.x), abs(L.y));
+	float facing = pow(clamp(dot(n, L), 0.0f, sideFacing), lgRim.y) + 0.4f * pow(clamp(dot(n, -L), 0.0f, sideFacing), lgRim.y);
 	rimLight = ((1.0f - N.y) * facing * lgRim.x).xxx;
 }
 
