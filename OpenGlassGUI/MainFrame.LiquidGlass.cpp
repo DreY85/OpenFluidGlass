@@ -117,6 +117,46 @@ namespace OpenGlass
 			return text;
 		}
 
+		// Apple publishes no numbers for Liquid Glass. These are estimates from how its two variants look:
+		// Clear is nearly unblurred with a bright rim, Regular is frosted with richer color.
+		struct LiquidGlassPreset
+		{
+			PCWSTR label;
+			PCWSTR hint;
+			std::vector<std::pair<PCWSTR, float>> values;	// parameters left out take their default
+		};
+		const LiquidGlassPreset c_liquidGlassPresets[]
+		{
+			{
+				L"Apple Clear", L"Almost no blur, strong bending at the edge, bright rim.",
+				{
+					{ L"LiquidGlassBezel", 30.f }, { L"LiquidGlassThickness", 40.f }, { L"LiquidGlassSoftness", 0.5f },
+					{ L"LiquidGlassClarity", 1.f }, { L"LiquidGlassChroma", 0.02f }, { L"LiquidGlassSaturation", 1.2f },
+					{ L"LiquidGlassReadability", 0.35f }, { L"LiquidGlassRim", 1.4f }, { L"LiquidGlassShine", 3.f }
+				}
+			},
+			{
+				L"Apple Regular", L"Frosted glass with richer color, softer bending.",
+				{
+					{ L"LiquidGlassThickness", 30.f }, { L"LiquidGlassSoftness", 4.f }, { L"LiquidGlassClarity", 0.55f },
+					{ L"LiquidGlassChroma", 0.01f }, { L"LiquidGlassSaturation", 1.8f }, { L"LiquidGlassReadability", 0.6f },
+					{ L"LiquidGlassShine", 2.5f }
+				}
+			}
+		};
+
+		float GetPresetValue(const LiquidGlassPreset& preset, const LiquidGlassParameter& parameter)
+		{
+			for (const auto& [name, value] : preset.values)
+			{
+				if (wcscmp(name, parameter.name) == 0)
+				{
+					return value;
+				}
+			}
+			return parameter.defaultValue;
+		}
+
 		struct LiquidGlassRow
 		{
 			const LiquidGlassParameter* parameter;
@@ -159,6 +199,26 @@ namespace OpenGlass
 			profile->SetToolTip(L"Squircle bends only close to the edge. Circle spreads the bend across the whole bezel.");
 			row->Add(profile, 1, wxALIGN_CENTER_VERTICAL);
 			generalGroup->Add(row, 0, wxEXPAND | wxALL, 4);
+		}
+
+		std::vector<std::pair<wxButton*, const LiquidGlassPreset*>> presetButtons;
+		{
+			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
+			row->Add(new wxStaticText(panel, wxID_ANY, L"Presets:", wxDefaultPosition, FromDIP(wxSize(160, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			for (const auto& preset : c_liquidGlassPresets)
+			{
+				auto* button = new wxButton(panel, wxID_ANY, preset.label);
+				button->SetToolTip(preset.hint);
+				row->Add(button, 0, wxRIGHT, 5);
+				presetButtons.emplace_back(button, &preset);
+			}
+			generalGroup->Add(row, 0, wxEXPAND | wxALL, 4);
+
+			auto* presetNote = new wxStaticText(panel, wxID_ANY,
+				L"Apple publishes no values, so these are estimates to start from. Fine-tune them with the sliders below.");
+			presetNote->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+			presetNote->Wrap(FromDIP(560));
+			generalGroup->Add(presetNote, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 		}
 		sizer->Add(generalGroup, 0, wxEXPAND | wxALL, 2);
 
@@ -276,6 +336,21 @@ namespace OpenGlass
 			load();
 			SetStatusText(L"Liquid Glass: defaults applied");
 		});
+
+		for (const auto& [button, preset] : presetButtons)
+		{
+			button->Bind(wxEVT_BUTTON, [this, rows, load, preset](wxCommandEvent&)
+			{
+				for (const auto& row : *rows)
+				{
+					WriteLiquidGlassDword(row.parameter->name, EncodeLiquidGlassValue(*row.parameter, GetPresetValue(*preset, *row.parameter)));
+				}
+				WriteLiquidGlassDword(L"LiquidGlassProfile", 0);
+				NotifyLiquidGlassChange();
+				load();
+				SetStatusText(wxString(L"Liquid Glass: ") + preset->label + L" applied");
+			});
+		}
 
 		copyButton->Bind(wxEVT_BUTTON, [this, rows, profile](wxCommandEvent&)
 		{
