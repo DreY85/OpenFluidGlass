@@ -51,6 +51,20 @@ namespace
 		g_settings.join = GetPrivateProfileIntW(L"Pills", L"Join", defaults.join, g_ini) != 0;
 	}
 
+	// Rare events (attach attempts, nudges) to %TEMP%\pillhost.txt, timestamped like the TAP's log.
+	void Log(const wchar_t* line)
+	{
+		wchar_t path[MAX_PATH];
+		GetTempPathW(MAX_PATH, path);
+		wcscat_s(path, L"pillhost.txt");
+		FILE* file{};
+		if (_wfopen_s(&file, path, L"a, ccs=UTF-8") || !file) return;
+		SYSTEMTIME now{};
+		GetLocalTime(&now);
+		fwprintf(file, L"%02u:%02u:%02u.%03u %s\n", now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, line);
+		fclose(file);
+	}
+
 	// Attaching to explorer. A freshly started explorer refuses the TAP for a while, so the host
 	// hooks it, waits for the TAP to say how its attempt ended and, if it failed, tries again.
 	// Once XAML has refused a TAP file it keeps refusing that path in that explorer, so every
@@ -60,7 +74,7 @@ namespace
 	ULONGLONG g_tapTime{};	// while idle: when to try next; while waiting: when the hook was set
 	HANDLE g_tapDone{}, g_tapAttached{};
 	HMODULE g_tapModule{};
-	constexpr ULONGLONG TapRetryDelay = 3000, TapWaitLimit = 40000;
+	constexpr ULONGLONG TapRetryDelay = 2000, TapWaitLimit = 15000;
 
 	void ReleaseTap()
 	{
@@ -138,7 +152,7 @@ namespace
 	// (ITaskbarList::AddTab on a hidden window changes nothing on the Windows 11 taskbar.)
 	HWND g_nudge{};
 	ULONGLONG g_nudgeTime{};
-	constexpr ULONGLONG NudgeLimit = 3000, NudgeRetryDelay = 10000;
+	constexpr ULONGLONG NudgeLimit = 2000, NudgeRetryDelay = 5000;
 
 	void EndNudge()
 	{
@@ -159,6 +173,7 @@ namespace
 			g_tapTime = now + NudgeRetryDelay;
 			g_nudgeTime = now;
 			ShowWindow(g_nudge, SW_SHOWNOACTIVATE);
+			Log(L"nudging the taskbar");
 		}
 	}
 
@@ -169,6 +184,7 @@ namespace
 		{
 			g_tapTime = now + TapRetryDelay;	// in case the hook cannot even be set
 			Inject(tray);
+			Log(L"hooking explorer");
 		}
 		else if (g_tap == TapState::Waiting)
 		{
@@ -177,6 +193,7 @@ namespace
 			const bool attached = g_tapAttached && WaitForSingleObject(g_tapAttached, 0) == WAIT_OBJECT_0;
 			ReleaseTap();
 			g_tap = attached ? TapState::Attached : TapState::Idle;
+			Log(attached ? L"TAP attached" : done ? L"TAP refused, retrying" : L"TAP did not answer, retrying");
 			g_tapTime = now + TapRetryDelay;
 		}
 		else if (g_tap == TapState::Attached)
@@ -254,6 +271,7 @@ namespace
 		if (pid != g_explorer)
 		{
 			// Explorer (re)started: the old TAP is gone with it.
+			Log(L"new explorer");
 			Disconnect();
 			EndNudge();
 			ReleaseTap();

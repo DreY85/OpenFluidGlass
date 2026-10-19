@@ -40,7 +40,9 @@ namespace
 		wcscat_s(path, L"pilltap.txt");
 		FILE* file{};
 		if (_wfopen_s(&file, path, L"a, ccs=UTF-8") || !file) return;
-		fputws((line + L"\n").c_str(), file);
+		SYSTEMTIME now{};
+		GetLocalTime(&now);
+		fwprintf(file, L"%02u:%02u:%02u.%03u explorer %lu: %s\n", now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, GetCurrentProcessId(), line.c_str());
 		fclose(file);
 	}
 
@@ -309,19 +311,14 @@ namespace
 		const HMODULE xaml = LoadLibraryExW(L"Windows.UI.Xaml.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		const auto initialize = xaml ? reinterpret_cast<InitializeXamlDiagnosticsEx_t>(GetProcAddress(xaml, "InitializeXamlDiagnosticsEx")) : nullptr;
 		if (!initialize) { Log(L"no InitializeXamlDiagnosticsEx"); Report(false); return 1; }
+		// One try per copy: once XAML refuses this file it keeps refusing it, so the host retries
+		// with a fresh copy instead. Diagnostics initialize once per thread, hence the new thread.
+		// Windows only accepts endpoint names like Visual Studio's (a name of our own fails with 0x80070490).
 		HRESULT hr{};
-		for (int attempt = 1; attempt <= 60; ++attempt)
-		{
-			// Diagnostics initialize once per thread, so every attempt gets a new one.
-			// Windows only accepts endpoint names like Visual Studio's (a name of our own fails with 0x80070490).
-			const std::wstring connection = L"VisualDiagConnection" + std::to_wstring(attempt);
-			std::thread([&] { hr = initialize(connection.c_str(), GetCurrentProcessId(), nullptr, location, CLSID_PillTap, nullptr); }).join();
-			if (SUCCEEDED(hr)) { Log(L"attached on attempt " + std::to_wstring(attempt)); Report(true); return 0; }
-			Sleep(500);
-		}
-		Log(L"could not attach, last error 0x" + std::to_wstring(static_cast<unsigned long>(hr)));
-		Report(false);
-		return 1;
+		std::thread([&] { hr = initialize(L"VisualDiagConnection1", GetCurrentProcessId(), nullptr, location, CLSID_PillTap, nullptr); }).join();
+		Log(SUCCEEDED(hr) ? L"attached" : L"could not attach, error 0x" + std::to_wstring(static_cast<unsigned long>(hr)));
+		Report(SUCCEEDED(hr));
+		return SUCCEEDED(hr) ? 0 : 1;
 	}
 
 	// The thread holds its own reference to the DLL (taken in DllMain), so the DLL cannot unload
