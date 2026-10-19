@@ -61,10 +61,11 @@ static const minfloat3 grayFactor = minfloat3(0.2126, 0.7152, 0.0722);
 // edge shows the background from further inside, compressed, as on Apple's Liquid Glass.
 //----------------------------------------------------------------------------------
 
-float LgDistance(float2 p)
+// Signed distance to the glass outline rounded with radius r. Negative inside.
+float LgDistance(float2 p, float r)
 {
 	float2 halfSize = (lgRect.zw - lgRect.xy) * 0.5f;
-	float r = min(lgTex.z, min(halfSize.x, halfSize.y));
+	r = min(r, min(halfSize.x, halfSize.y));
 	float2 q = abs(p - (lgRect.xy + lgRect.zw) * 0.5f) - halfSize + r;
 	return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r;
 }
@@ -137,12 +138,15 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	}
 
 	float2 p = input.pos.xy;
-	float d = LgDistance(p);
+	float bezel = max(lgOptics.y, 1.0f);
+	// With a corner radius smaller than the bezel, the inner contours meet at a sharp diagonal and the
+	// refraction tears along it. Rounding the bezel's own outline by at least its width keeps them smooth.
+	float r = max(lgTex.z, bezel);
+	float d = min(LgDistance(p, r), 0.0f);
 	// Edge normal, pointing out of the glass.
 	float2 e = float2(1.0f, 0.0f);
-	float2 n = normalize(float2(LgDistance(p + e.xy) - LgDistance(p - e.xy), LgDistance(p + e.yx) - LgDistance(p - e.yx)) + 1e-6f);
+	float2 n = normalize(float2(LgDistance(p + e.xy, r) - LgDistance(p - e.xy, r), LgDistance(p + e.yx, r) - LgDistance(p - e.yx, r)) + 1e-6f);
 
-	float bezel = max(lgOptics.y, 1.0f);
 	float u = saturate(-d / bezel);
 	float slope = u >= 1.0f ? 0.0f : lgOptics.z / bezel * (LgHeight(min(u + 0.002f, 1.0f)) - LgHeight(max(u - 0.002f, 0.0f))) / 0.004f;
 	// Cross-section through the edge: x points inward, y points up. The surface normal leans outward.
