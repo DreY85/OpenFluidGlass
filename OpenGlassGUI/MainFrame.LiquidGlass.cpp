@@ -157,6 +157,36 @@ namespace OpenGlass
 			return parameter.defaultValue;
 		}
 
+		// User presets live under HKCU, one subkey per name holding the same DWORDs as the DWM key.
+		constexpr PCWSTR c_userPresetsKey = L"Software\\OpenGlass\\LiquidGlassPresets";
+
+		std::wstring UserPresetPath(const wxString& name)
+		{
+			return std::wstring(c_userPresetsKey) + L"\\" + name.ToStdWstring();
+		}
+
+		wxArrayString ListUserPresets()
+		{
+			wxArrayString names;
+			wil::unique_hkey key;
+			if (RegOpenKeyExW(HKEY_CURRENT_USER, c_userPresetsKey, 0, KEY_READ, key.put()) != ERROR_SUCCESS)
+			{
+				return names;
+			}
+			wchar_t name[256];
+			for (DWORD index = 0;; ++index)
+			{
+				DWORD length = ARRAYSIZE(name);
+				if (RegEnumKeyExW(key.get(), index, name, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
+				{
+					break;
+				}
+				names.Add(name);
+			}
+			names.Sort();
+			return names;
+		}
+
 		struct LiquidGlassRow
 		{
 			const LiquidGlassParameter* parameter;
@@ -219,6 +249,26 @@ namespace OpenGlass
 			presetNote->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
 			presetNote->Wrap(FromDIP(560));
 			generalGroup->Add(presetNote, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
+		}
+
+		wxChoice* userPresets{};
+		wxButton* applyUserPreset{};
+		wxButton* saveUserPreset{};
+		wxButton* deleteUserPreset{};
+		{
+			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
+			row->Add(new wxStaticText(panel, wxID_ANY, L"My presets:", wxDefaultPosition, FromDIP(wxSize(160, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			userPresets = new wxChoice(panel, wxID_ANY);
+			userPresets->SetToolTip(L"Presets you saved with Save as. They are stored for your account.");
+			row->Add(userPresets, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			applyUserPreset = new wxButton(panel, wxID_ANY, L"Apply");
+			saveUserPreset = new wxButton(panel, wxID_ANY, L"Save as...");
+			saveUserPreset->SetToolTip(L"Save the current values and bezel shape under a name you choose.");
+			deleteUserPreset = new wxButton(panel, wxID_ANY, L"Delete");
+			row->Add(applyUserPreset, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			row->Add(saveUserPreset, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			row->Add(deleteUserPreset, 0, wxALIGN_CENTER_VERTICAL);
+			generalGroup->Add(row, 0, wxEXPAND | wxALL, 4);
 		}
 		sizer->Add(generalGroup, 0, wxEXPAND | wxALL, 2);
 
@@ -351,6 +401,94 @@ namespace OpenGlass
 				SetStatusText(wxString(L"Liquid Glass: ") + preset->label + L" applied");
 			});
 		}
+
+		auto refreshUserPresets = [userPresets, applyUserPreset, deleteUserPreset](const wxString& select)
+		{
+			userPresets->Set(ListUserPresets());
+			const int index = select.empty() ? (userPresets->IsEmpty() ? wxNOT_FOUND : 0) : userPresets->FindString(select, true);
+			userPresets->SetSelection(index);
+			applyUserPreset->Enable(index != wxNOT_FOUND);
+			deleteUserPreset->Enable(index != wxNOT_FOUND);
+		};
+		refreshUserPresets(wxEmptyString);
+
+		saveUserPreset->Bind(wxEVT_BUTTON, [this, rows, profile, refreshUserPresets](wxCommandEvent&)
+		{
+			wxTextEntryDialog dialog(this, L"Name for this preset:", L"Save Liquid Glass preset");
+			if (dialog.ShowModal() != wxID_OK)
+			{
+				return;
+			}
+			const wxString name = dialog.GetValue().Strip(wxString::both);
+			if (name.empty() || name.length() > 64 || name.find_first_of(L"\\/") != wxString::npos)
+			{
+				wxMessageBox(L"Use a name of 1 to 64 characters without \\ or /.", L"Save Liquid Glass preset", wxOK | wxICON_WARNING, this);
+				return;
+			}
+			if (ListUserPresets().Index(name, false) != wxNOT_FOUND
+				&& wxMessageBox(L"A preset named \"" + name + L"\" already exists. Replace it?", L"Save Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
+			{
+				return;
+			}
+			wil::unique_hkey key;
+			if (RegCreateKeyExW(HKEY_CURRENT_USER, UserPresetPath(name).c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, key.put(), nullptr) != ERROR_SUCCESS)
+			{
+				SetStatusText(L"Liquid Glass: the preset could not be saved");
+				return;
+			}
+			for (const auto& row : *rows)
+			{
+				const DWORD value = EncodeLiquidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step);
+				RegSetValueExW(key.get(), row.parameter->name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+			}
+			const DWORD shape = static_cast<DWORD>(std::max(profile->GetSelection(), 0));
+			RegSetValueExW(key.get(), L"LiquidGlassProfile", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&shape), sizeof(shape));
+			refreshUserPresets(name);
+			SetStatusText(L"Liquid Glass: saved preset " + name);
+		});
+
+		applyUserPreset->Bind(wxEVT_BUTTON, [this, rows, load, userPresets](wxCommandEvent&)
+		{
+			const wxString name = userPresets->GetStringSelection();
+			wil::unique_hkey key;
+			if (name.empty() || RegOpenKeyExW(HKEY_CURRENT_USER, UserPresetPath(name).c_str(), 0, KEY_READ, key.put()) != ERROR_SUCCESS)
+			{
+				SetStatusText(L"Liquid Glass: the preset could not be read");
+				return;
+			}
+			const auto read = [&key](PCWSTR value, DWORD fallback)
+			{
+				DWORD data{}, size = sizeof(data), type{};
+				return RegQueryValueExW(key.get(), value, nullptr, &type, reinterpret_cast<BYTE*>(&data), &size) == ERROR_SUCCESS && type == REG_DWORD ? data : fallback;
+			};
+			for (const auto& row : *rows)
+			{
+				WriteLiquidGlassDword(row.parameter->name, read(row.parameter->name, EncodeLiquidGlassValue(*row.parameter, row.parameter->defaultValue)));
+			}
+			WriteLiquidGlassDword(L"LiquidGlassProfile", std::min(read(L"LiquidGlassProfile", 0), 2ul));
+			NotifyLiquidGlassChange();
+			load();
+			SetStatusText(L"Liquid Glass: " + name + L" applied");
+		});
+
+		deleteUserPreset->Bind(wxEVT_BUTTON, [this, userPresets, refreshUserPresets](wxCommandEvent&)
+		{
+			const wxString name = userPresets->GetStringSelection();
+			if (name.empty()
+				|| wxMessageBox(L"Delete the preset \"" + name + L"\"?", L"Delete Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
+			{
+				return;
+			}
+			RegDeleteTreeW(HKEY_CURRENT_USER, UserPresetPath(name).c_str());
+			refreshUserPresets(wxEmptyString);
+			SetStatusText(L"Liquid Glass: deleted preset " + name);
+		});
+
+		userPresets->Bind(wxEVT_CHOICE, [userPresets, applyUserPreset, deleteUserPreset](wxCommandEvent&)
+		{
+			applyUserPreset->Enable(userPresets->GetSelection() != wxNOT_FOUND);
+			deleteUserPreset->Enable(userPresets->GetSelection() != wxNOT_FOUND);
+		});
 
 		copyButton->Bind(wxEVT_BUTTON, [this, rows, profile](wxCommandEvent&)
 		{

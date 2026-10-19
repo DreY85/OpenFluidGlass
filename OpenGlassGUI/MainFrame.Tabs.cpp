@@ -733,9 +733,11 @@ namespace OpenGlass
 		wxArrayString glassTypes;
 		glassTypes.Add(L"Windows Vista Aero");
 		glassTypes.Add(L"Windows 7 Aero");
-		m_rbGlassType = new wxRadioBox(panel, wxID_ANY, L"Glass type", wxDefaultPosition, wxDefaultSize, glassTypes, 2, wxRA_SPECIFY_COLS);
+		// A drop-down instead of a radio box, which always draws a classic group frame.
+		m_rbGlassType = new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, glassTypes);
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
+			row->Add(new wxStaticText(panel, wxID_ANY, L"Glass type:", wxDefaultPosition, FromDIP(wxSize(150, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 			row->Add(m_rbGlassType, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 			AddOptionStatus(panel, row, Settings::Id::GlassType);
 			glassGroup->Add(row, 0, wxALL, 2);

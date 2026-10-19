@@ -1648,7 +1648,7 @@ namespace OpenGlass
 			}
 		});
 
-		m_rbGlassType->Bind(wxEVT_RADIOBOX, [this, updateDword, deleteValue]([[maybe_unused]] wxCommandEvent& e) {
+		m_rbGlassType->Bind(wxEVT_CHOICE, [this, updateDword, deleteValue]([[maybe_unused]] wxCommandEvent& e) {
 			int sel = e.GetSelection();
 			if (sel == 0)
 			{

@@ -2,6 +2,7 @@
 #include "ModernTheme.hpp"
 #include <wx/fontenum.h>
 #include <wx/dcbuffer.h>
+#include <wx/checklst.h>
 
 namespace OpenGlass::ModernTheme
 {
@@ -110,6 +111,14 @@ namespace OpenGlass::ModernTheme
 				if (wxDynamicCast(child, wxListCtrl) || wxDynamicCast(child, wxListBox))
 				{
 					child->SetBackgroundColour(color);
+				}
+				// Check list items are owner drawn with their own background.
+				if (auto* checkList = wxDynamicCast(child, wxCheckListBox))
+				{
+					for (unsigned int index = 0; index < checkList->GetCount(); ++index)
+					{
+						checkList->GetItem(index)->SetBackgroundColour(color);
+					}
 				}
 				ColorLists(child, color);
 			}

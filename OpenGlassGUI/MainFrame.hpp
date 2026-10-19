@@ -219,7 +219,7 @@ namespace OpenGlass
 
 		// Glass Colors Tab
 		wxScrolledWindow* m_glassColorsPanel{ nullptr };
-		wxRadioBox* m_rbGlassType{ nullptr };
+		wxChoice* m_rbGlassType{ nullptr };
 		wxBoxSizer* m_colorPresetsGroupSizer{ nullptr };
 		ColorPresetList* m_colorPresetList{ nullptr };
 		bool m_customColorsInitialized{ false };
