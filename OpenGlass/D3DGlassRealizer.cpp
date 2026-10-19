@@ -530,12 +530,9 @@ HRESULT CD3DGlassRealizer::Render(
 		)
 	);
 
-	LG_TRACE("[LG] d3d render: %ux%u protected=%d initialized=%d type=%u\n", backBufferDesc.Width, backBufferDesc.Height, hwProtectionEnabled, m_initialized ? 1 : 0, static_cast<UINT>(type));
 	if (!m_initialized)
 	{
-		const HRESULT lgHr = Initialize(device);
-		LG_TRACE("[LG] d3d initialize hr=0x%08X\n", static_cast<unsigned>(lgHr));
-		RETURN_IF_FAILED(lgHr);
+		RETURN_IF_FAILED(Initialize(device));
 	}
 
 	RETURN_IF_FAILED(
@@ -657,7 +654,6 @@ HRESULT CD3DGlassRealizer::Render(
 		cbPS.lgLimit = { GetLiquidGlassReach(), 0.f, 0.f, 0.f };
 		cbPS.lgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), lg.enabled ? lg.clarity : 0.f, lg.softness };
 	}
-	LG_TRACE("[LG] d3d compose: enabled=%.0f sat=%.2f bounds=%.0f,%.0f,%.0f,%.0f quarter=%u\n", cbPS.lgTex.w, cbPS.lgLook.y, cbPS.lgRect.x, cbPS.lgRect.y, cbPS.lgRect.z, cbPS.lgRect.w, quarterWidth);
 	if (memcmp(&m_cbPS, &cbPS, sizeof(cbPS)) != 0)
 	{
 		m_cbPS = cbPS;
@@ -746,7 +742,6 @@ HRESULT CD3DGlassRealizer::Render(
 					std::min(drawingWorldBounds.bottom + margin, static_cast<float>(backBufferDesc.Height))
 				)
 			);
-			LG_TRACE("[LG] sharp copy: srv=%d rects=%u region=%u,%u,%u,%u target=%ux%u\n", backBufferSRV ? 1 : 0, static_cast<UINT>(rectangles.size()), copyRegionRect.left, copyRegionRect.top, copyRegionRect.right, copyRegionRect.bottom, backBufferDesc.Width, backBufferDesc.Height);
 			if (copyRegionRect.right > copyRegionRect.left && copyRegionRect.bottom > copyRegionRect.top)
 			{
 				Util::CopyTextureRegion(

@@ -3,8 +3,6 @@
 #include "cpprt.hpp"
 #include "DwmSettings.hpp"
 
-// Liquid Glass diagnostics: at most one OutputDebugString per call site per second.
-#define LG_TRACE(...) 	do { 		static ULONGLONG lgLastTrace{}; 		if (const ULONGLONG lgNow = GetTickCount64(); lgNow - lgLastTrace >= 1000) 		{ 			lgLastTrace = lgNow; 			char lgBuffer[512]; 			sprintf_s(lgBuffer, __VA_ARGS__); 			OutputDebugStringA(lgBuffer); 		} 	} while (false)
 
 namespace OpenGlass::Shared
 {

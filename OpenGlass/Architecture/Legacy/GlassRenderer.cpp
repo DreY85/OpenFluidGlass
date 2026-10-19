@@ -164,7 +164,6 @@ HRESULT GlassRenderer::MyCRenderData_TryDrawCommandAsDrawList(
 )
 {
 	const auto command = reinterpret_cast<const dwmcore::CDrawGeometryCommand*>(resources->data);
-	LG_TRACE("[LG] draw list: commandType=%u length=%u isDrawGeometry=%d hooked=%d\n", commandType, static_cast<UINT>(resources->length), GlassKernel::IsDrawGeometryCommand(commandType, resources) ? 1 : 0, g_CDrawingContext_DrawGeometry_Org ? 1 : 0);
 	if (
 		GlassKernel::IsDrawGeometryCommand(commandType, resources) &&
 		(
@@ -179,7 +178,6 @@ HRESULT GlassRenderer::MyCRenderData_TryDrawCommandAsDrawList(
 		)
 	)
 	{
-		LG_TRACE("[LG] draw list: glass command matched\n");
 		if (!g_CDrawingContext_DrawGeometry_Org)
 		{
 			g_CDrawingContext_DrawGeometry_Org_Address = dwmcore::IDrawingContext_DrawGeometry_VtableSlot.address(
@@ -266,7 +264,6 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 )
 {
 	const auto drawingContext = This->GetDrawingContext();
-	LG_TRACE("[LG] draw geometry: entered\n");
 	if (dwmcore::g_versionInfo.build < os::build_w10_2004 && drawingContext->IsBounding())
 	{
 		return g_CDrawingContext_DrawGeometry_Org(
@@ -283,7 +280,6 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 		geometryShape->IsEmpty()
 	)
 	{
-		LG_TRACE("[LG] draw geometry: empty shape\n");
 		return S_OK;
 	}
 
@@ -303,7 +299,6 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 	{
 		if (!drawingContext->GetDeviceTarget())
 		{
-			LG_TRACE("[LG] draw geometry: no device target\n");
 			return S_OK;
 		}
 	}
@@ -332,7 +327,6 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 
 	if (!renderingShape || renderingShape->IsEmpty())
 	{
-		LG_TRACE("[LG] draw geometry: empty rendering shape\n");
 		return S_OK;
 	}
 
@@ -350,7 +344,6 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 		return S_OK;
 	}
 
-	LG_TRACE("[LG] draw geometry: drawing bounds=%.0f,%.0f,%.0f,%.0f\n", g_drawingWorldBounds.left, g_drawingWorldBounds.top, g_drawingWorldBounds.right, g_drawingWorldBounds.bottom);
 	g_drawingContextNoRef = drawingContext;
 	g_currentDeviceResources = &g_deviceResources.try_emplace(d2dContext).first->second;
 	g_renderTargetIgnoresAlpha = false;
@@ -553,7 +546,6 @@ void GlassRenderer::MyID2D1DeviceContext_FillGeometry(
 )
 {
 	const auto fillGeometryScope = wil::scope_exit([] { g_renderFlag.reset(); });
-	LG_TRACE("[LG] fill geometry: resources=%d opacityBrush=%d backdrop=%d d3d=%d\n", g_currentDeviceResources ? 1 : 0, opacityBrush ? 1 : 0, g_renderFlag.test(RenderFlag_Backdrop) ? 1 : 0, g_currentDeviceResources && std::holds_alternative<CD3DGlassRealizer>(g_currentDeviceResources->m_glassRealizer) ? 1 : 0);
 	if (
 		!g_currentDeviceResources ||
 		opacityBrush
