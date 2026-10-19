@@ -116,11 +116,17 @@ namespace
 					top = current;
 					current = wux::Media::VisualTreeHelper::GetParent(current);
 				}
-				if (!taskbar || !top) return;
+				if (!top) return;
+				// The roots XAML lists when the TAP attaches are already in place, not being added, so each
+				// new root is searched downwards once in case it holds the taskbar. On build 26200 the
+				// taskbar's island is not among them, and the host's nudge brings an addition inside it,
+				// which names the taskbar on the way up.
+				if (!taskbar && !m_roots.insert(winrt::get_abi(top)).second) return;
+				m_frame = m_fill = m_stroke = m_repeater = m_trayGrid = nullptr;
 				m_nodes = 0;
 				Collect(top, 0);
 				if (m_frame && m_fill && m_repeater && m_trayGrid) Start();
-				else Log(L"taskbar found but parts missing");
+				else if (taskbar) Log(L"taskbar found but parts missing");
 			}
 			catch (...) { Log(L"find threw"); }
 		}
@@ -247,6 +253,7 @@ namespace
 		std::atomic<ULONG> m_refs{ 1 };
 		IUnknown* m_site{};
 		std::set<InstanceHandle> m_checked;
+		std::set<void*> m_roots;	// roots already searched downwards
 		int m_nodes{};
 		bool m_started{};
 		bool m_published{};
@@ -281,13 +288,27 @@ namespace
 	};
 	Factory g_factory;
 
-	DWORD WINAPI Install(void*)
+	// Tells the host how the attempt ended. On success Windows has pinned this DLL, so the host can
+	// drop its hook. On failure dropping the hook unloads the DLL, and the host tries again later.
+	void Report(bool attached)
+	{
+		wchar_t name[96];
+		const auto set = [&name]
+		{
+			if (const HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, name)) { SetEvent(event); CloseHandle(event); }
+		};
+		if (attached) { PillEventName(name, GetCurrentProcessId(), L"Attached"); set(); }
+		PillEventName(name, GetCurrentProcessId(), L"Done");
+		set();
+	}
+
+	DWORD Attach()
 	{
 		wchar_t location[MAX_PATH];
 		GetModuleFileNameW(g_module, location, MAX_PATH);
 		const HMODULE xaml = LoadLibraryExW(L"Windows.UI.Xaml.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		const auto initialize = xaml ? reinterpret_cast<InitializeXamlDiagnosticsEx_t>(GetProcAddress(xaml, "InitializeXamlDiagnosticsEx")) : nullptr;
-		if (!initialize) { Log(L"no InitializeXamlDiagnosticsEx"); return 1; }
+		if (!initialize) { Log(L"no InitializeXamlDiagnosticsEx"); Report(false); return 1; }
 		HRESULT hr{};
 		for (int attempt = 1; attempt <= 60; ++attempt)
 		{
@@ -295,11 +316,19 @@ namespace
 			// Windows only accepts endpoint names like Visual Studio's (a name of our own fails with 0x80070490).
 			const std::wstring connection = L"VisualDiagConnection" + std::to_wstring(attempt);
 			std::thread([&] { hr = initialize(connection.c_str(), GetCurrentProcessId(), nullptr, location, CLSID_PillTap, nullptr); }).join();
-			if (SUCCEEDED(hr)) { Log(L"attached on attempt " + std::to_wstring(attempt)); return 0; }
+			if (SUCCEEDED(hr)) { Log(L"attached on attempt " + std::to_wstring(attempt)); Report(true); return 0; }
 			Sleep(500);
 		}
 		Log(L"could not attach, last error 0x" + std::to_wstring(static_cast<unsigned long>(hr)));
+		Report(false);
 		return 1;
+	}
+
+	// The thread holds its own reference to the DLL (taken in DllMain), so the DLL cannot unload
+	// under it when the hook goes away early, for example because the host exited.
+	DWORD WINAPI Install(void*)
+	{
+		FreeLibraryAndExitThread(g_module, Attach());
 	}
 }
 
@@ -325,11 +354,14 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, void*)
 		GetModuleFileNameW(nullptr, exe, MAX_PATH);
 		const wchar_t* name = wcsrchr(exe, L'\\');
 		// Only explorer installs; the host loads the DLL just to hand its hook to Windows.
-		if (name && _wcsicmp(name + 1, L"explorer.exe") == 0)
+		// No pinning here: a successful attach pins the DLL, a failed one must leave it free to
+		// unload with the hook, or explorer keeps this dead copy and never loads a new one.
+		HMODULE self{};
+		if (name && _wcsicmp(name + 1, L"explorer.exe") == 0 &&
+			GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&Install), &self))
 		{
-			HMODULE pinned{};
-			GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&Install), &pinned);
-			CloseHandle(CreateThread(nullptr, 0, Install, nullptr, 0, nullptr));
+			// If the thread cannot start, the extra reference only keeps an idle copy loaded.
+			if (const HANDLE thread = CreateThread(nullptr, 0, Install, nullptr, 0, nullptr)) CloseHandle(thread);
 		}
 	}
 	return TRUE;

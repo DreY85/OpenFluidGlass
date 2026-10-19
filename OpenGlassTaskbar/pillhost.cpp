@@ -15,7 +15,7 @@ using SetWindowCompositionAttribute_t = BOOL(WINAPI*)(HWND, WINDOWCOMPOSITIONATT
 namespace
 {
 	constexpr DWORD AccentFlagPill = 0x80000000;	// OpenGlass: cut the glass to a fully rounded outline
-	constexpr UINT_PTR FollowTimer = 1, UnhookTimer = 2;
+	constexpr UINT_PTR FollowTimer = 1;
 
 	// In taskbar units (pixels at 100% scale).
 	struct Settings
@@ -51,21 +51,138 @@ namespace
 		g_settings.join = GetPrivateProfileIntW(L"Pills", L"Join", defaults.join, g_ini) != 0;
 	}
 
-	// Hands pilltap.dll to explorer through a hook on the taskbar's thread. The DLL pins itself,
-	// so the hook only has to live until explorer has loaded it. A second load is a no-op.
+	// Attaching to explorer. A freshly started explorer refuses the TAP for a while, so the host
+	// hooks it, waits for the TAP to say how its attempt ended and, if it failed, tries again.
+	// Once XAML has refused a TAP file it keeps refusing that path in that explorer, so every
+	// attempt loads its own copy of pilltap.dll, from the tap folder next to the exe.
+	enum class TapState { Idle, Waiting, Attached };
+	TapState g_tap{ TapState::Idle };
+	ULONGLONG g_tapTime{};	// while idle: when to try next; while waiting: when the hook was set
+	HANDLE g_tapDone{}, g_tapAttached{};
+	HMODULE g_tapModule{};
+	constexpr ULONGLONG TapRetryDelay = 3000, TapWaitLimit = 40000;
+
+	void ReleaseTap()
+	{
+		if (g_hook) UnhookWindowsHookEx(g_hook);
+		if (g_tapModule) FreeLibrary(g_tapModule);
+		if (g_tapDone) CloseHandle(g_tapDone);
+		if (g_tapAttached) CloseHandle(g_tapAttached);
+		g_hook = nullptr;
+		g_tapModule = nullptr;
+		g_tapDone = g_tapAttached = nullptr;
+	}
+
+	// The folder next to the exe, with a trailing backslash.
+	void HostFolder(wchar_t (&path)[MAX_PATH])
+	{
+		GetModuleFileNameW(nullptr, path, MAX_PATH);
+		*(wcsrchr(path, L'\\') + 1) = L'\0';
+	}
+
+	// Copies left by earlier runs; the ones explorer still holds stay locked and are skipped.
+	void CleanTapCopies()
+	{
+		wchar_t folder[MAX_PATH], pattern[MAX_PATH];
+		HostFolder(folder);
+		wcscat_s(folder, L"tap\\");
+		swprintf_s(pattern, L"%s*.dll", folder);
+		WIN32_FIND_DATAW found{};
+		const HANDLE search = FindFirstFileW(pattern, &found);
+		if (search == INVALID_HANDLE_VALUE) return;
+		do
+		{
+			wchar_t file[MAX_PATH];
+			swprintf_s(file, L"%s%s", folder, found.cFileName);
+			DeleteFileW(file);
+		} while (FindNextFileW(search, &found));
+		FindClose(search);
+	}
+
+	// Hands a copy of pilltap.dll to explorer through a hook on the taskbar's thread. The TAP's own
+	// thread keeps the DLL loaded while it tries, and a successful attach pins it, so the hook only
+	// has to live until the TAP reports back. A failed attempt unloads with the hook.
 	void Inject(HWND tray)
 	{
 		DWORD pid{};
 		const DWORD thread = GetWindowThreadProcessId(tray, &pid);
-		wchar_t dll[MAX_PATH];
-		GetModuleFileNameW(nullptr, dll, MAX_PATH);
-		wcscpy_s(wcsrchr(dll, L'\\') + 1, MAX_PATH - (wcsrchr(dll, L'\\') + 1 - dll), L"pilltap.dll");
-		const HMODULE module = LoadLibraryW(dll);
-		const auto hook = module ? reinterpret_cast<HOOKPROC>(GetProcAddress(module, "TapHook")) : nullptr;
-		if (!hook || !thread) return;
-		g_hook = SetWindowsHookExW(WH_CALLWNDPROC, hook, module, thread);
+		if (!thread) return;
+		wchar_t folder[MAX_PATH], source[MAX_PATH], dll[MAX_PATH];
+		HostFolder(folder);
+		swprintf_s(source, L"%spilltap.dll", folder);
+		swprintf_s(dll, L"%stap", folder);
+		CreateDirectoryW(dll, nullptr);
+		swprintf_s(dll, L"%stap\\pilltap-%lu-%llu.dll", folder, pid, GetTickCount64());
+		if (!CopyFileW(source, dll, FALSE)) return;
+		g_tapModule = LoadLibraryW(dll);
+		const auto hook = g_tapModule ? reinterpret_cast<HOOKPROC>(GetProcAddress(g_tapModule, "TapHook")) : nullptr;
+		if (!hook) { ReleaseTap(); return; }
+		wchar_t name[96];
+		PillEventName(name, pid, L"Done");
+		g_tapDone = CreateEventW(nullptr, TRUE, FALSE, name);
+		PillEventName(name, pid, L"Attached");
+		g_tapAttached = CreateEventW(nullptr, TRUE, FALSE, name);
+		if (g_tapDone) ResetEvent(g_tapDone);
+		if (g_tapAttached) ResetEvent(g_tapAttached);
+		g_hook = SetWindowsHookExW(WH_CALLWNDPROC, hook, g_tapModule, thread);
+		if (!g_hook) { ReleaseTap(); return; }
 		SendMessageTimeoutW(tray, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 2000, nullptr);
-		SetTimer(g_host, UnhookTimer, 3000, nullptr);
+		g_tap = TapState::Waiting;
+		g_tapTime = GetTickCount64();
+	}
+
+	// XAML does not list the taskbar's existing elements to the TAP, so the TAP only finds the
+	// taskbar when something on it changes. If nothing does soon after attaching, the host shows a
+	// window of its own for a moment: fully transparent and off screen, but with a taskbar button,
+	// whose arrival the TAP sees. The window goes away as soon as the TAP has published.
+	// (ITaskbarList::AddTab on a hidden window changes nothing on the Windows 11 taskbar.)
+	HWND g_nudge{};
+	ULONGLONG g_nudgeTime{};
+	constexpr ULONGLONG NudgeLimit = 3000, NudgeRetryDelay = 10000;
+
+	void EndNudge()
+	{
+		if (g_nudge && IsWindowVisible(g_nudge)) ShowWindow(g_nudge, SW_HIDE);
+	}
+
+	void Nudge(ULONGLONG now)
+	{
+		if (!g_nudge) return;
+		if (IsWindowVisible(g_nudge))
+		{
+			if (!g_share && now - g_nudgeTime < NudgeLimit) return;
+			EndNudge();
+			if (!g_share) g_tapTime = now + NudgeRetryDelay;
+		}
+		else if (!g_share && now >= g_tapTime)
+		{
+			g_tapTime = now + NudgeRetryDelay;
+			g_nudgeTime = now;
+			ShowWindow(g_nudge, SW_SHOWNOACTIVATE);
+		}
+	}
+
+	void Attach(HWND tray)
+	{
+		const ULONGLONG now = GetTickCount64();
+		if (g_tap == TapState::Idle && tray && now >= g_tapTime)
+		{
+			g_tapTime = now + TapRetryDelay;	// in case the hook cannot even be set
+			Inject(tray);
+		}
+		else if (g_tap == TapState::Waiting)
+		{
+			const bool done = g_tapDone && WaitForSingleObject(g_tapDone, 0) == WAIT_OBJECT_0;
+			if (!done && now - g_tapTime < TapWaitLimit) return;
+			const bool attached = g_tapAttached && WaitForSingleObject(g_tapAttached, 0) == WAIT_OBJECT_0;
+			ReleaseTap();
+			g_tap = attached ? TapState::Attached : TapState::Idle;
+			g_tapTime = now + TapRetryDelay;
+		}
+		else if (g_tap == TapState::Attached)
+		{
+			Nudge(now);
+		}
 	}
 
 	void Disconnect()
@@ -138,9 +255,13 @@ namespace
 		{
 			// Explorer (re)started: the old TAP is gone with it.
 			Disconnect();
+			EndNudge();
+			ReleaseTap();
 			g_explorer = pid;
-			if (tray) Inject(tray);
+			g_tap = TapState::Idle;
+			g_tapTime = GetTickCount64();
 		}
+		Attach(tray);
 
 		RECT groups[PillCount]{}, pills[PillCount]{};
 		RECT bar{};
@@ -176,13 +297,7 @@ namespace
 			Follow();
 			return 0;
 		case WM_TIMER:
-			if (wParam == UnhookTimer)
-			{
-				KillTimer(window, UnhookTimer);
-				if (g_hook) UnhookWindowsHookEx(g_hook);
-				g_hook = nullptr;
-			}
-			else Follow();
+			Follow();
 			return 0;
 		case WM_CLOSE:
 			DestroyWindow(window);
@@ -218,6 +333,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	GetModuleFileNameW(nullptr, g_ini, MAX_PATH);
 	wcscpy_s(wcsrchr(g_ini, L'\\') + 1, MAX_PATH - (wcsrchr(g_ini, L'\\') + 1 - g_ini), L"pills.ini");
+	CleanTapCopies();
 
 	WNDCLASSW type{};
 	type.lpfnWndProc = HostProc;
@@ -235,6 +351,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 	pillType.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
 	RegisterClassW(&pillType);
 	for (auto& pill : g_pills) pill = MakePill(instance);
+	g_nudge = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED, L"LiquidGlassTaskbarPill", L"Liquid Glass taskbar", WS_POPUP,
+		-32000, -32000, 1, 1, nullptr, nullptr, instance, nullptr);
+	SetLayeredWindowAttributes(g_nudge, 0, 0, LWA_ALPHA);
 
 	// The taskbar can move (auto-hide), so it is followed often; the TAP's message covers layout changes.
 	SetTimer(g_host, FollowTimer, 33, nullptr);
@@ -242,7 +361,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 
 	MSG message;
 	while (GetMessageW(&message, nullptr, 0, 0) > 0) DispatchMessageW(&message);
-	if (g_hook) UnhookWindowsHookEx(g_hook);
+	EndNudge();
+	ReleaseTap();
 	Disconnect();
 	return 0;
 }
