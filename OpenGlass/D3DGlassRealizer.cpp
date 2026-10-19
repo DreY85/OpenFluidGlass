@@ -654,6 +654,7 @@ HRESULT CD3DGlassRealizer::Render(
 		cbPS.lgOptics = { lg.ior, lg.bezel, lg.thickness, lg.scale };
 		cbPS.lgLook = { lg.chroma, lg.saturation, lg.readability, lg.gap };
 		cbPS.lgRim = { lg.rim, lg.shine, lg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(lg.profile) };
+		cbPS.lgLimit = { GetLiquidGlassReach(), 0.f, 0.f, 0.f };
 		cbPS.lgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), lg.enabled ? lg.clarity : 0.f, lg.softness };
 	}
 	LG_TRACE("[LG] d3d compose: enabled=%.0f sat=%.2f bounds=%.0f,%.0f,%.0f,%.0f quarter=%u\n", cbPS.lgTex.w, cbPS.lgLook.y, cbPS.lgRect.x, cbPS.lgRect.y, cbPS.lgRect.z, cbPS.lgRect.w, quarterWidth);
@@ -736,13 +737,13 @@ HRESULT CD3DGlassRealizer::Render(
 		{
 			// Refraction samples the sharp copy anywhere under the glass, not only inside the
 			// rectangles being redrawn, so copy the whole glass plus the blur reach.
-			const float margin = std::max(expansion + static_cast<float>(m_dwmHwSamples.radius + 1), Shared::g_liquidGlass.softness + 2.f);
+			const float margin = GetBlurExpansion();
 			const auto copyRegionRect = RectF::ToRectU(
 				D2D1::RectF(
-					std::max(std::min(geometryBounds.left, samplingWorldBounds.left) - margin, 0.f),
-					std::max(std::min(geometryBounds.top, samplingWorldBounds.top) - margin, 0.f),
-					std::min(std::max(geometryBounds.right, samplingWorldBounds.right) + margin, static_cast<float>(backBufferDesc.Width)),
-					std::min(std::max(geometryBounds.bottom, samplingWorldBounds.bottom) + margin, static_cast<float>(backBufferDesc.Height))
+					std::max(drawingWorldBounds.left - margin, 0.f),
+					std::max(drawingWorldBounds.top - margin, 0.f),
+					std::min(drawingWorldBounds.right + margin, static_cast<float>(backBufferDesc.Width)),
+					std::min(drawingWorldBounds.bottom + margin, static_cast<float>(backBufferDesc.Height))
 				)
 			);
 			LG_TRACE("[LG] sharp copy: srv=%d rects=%u region=%u,%u,%u,%u target=%ux%u\n", backBufferSRV ? 1 : 0, static_cast<UINT>(rectangles.size()), copyRegionRect.left, copyRegionRect.top, copyRegionRect.right, copyRegionRect.bottom, backBufferDesc.Width, backBufferDesc.Height);
@@ -907,8 +908,23 @@ HRESULT CD3DGlassRealizer::Render(
 	return S_OK;
 }
 
+float CD3DGlassRealizer::GetLiquidGlassReach()
+{
+	const auto& lg = Shared::g_liquidGlass;
+	if (!lg.enabled)
+	{
+		return 0.f;
+	}
+	return std::ceil(std::min((lg.thickness + lg.gap) * lg.scale, 160.f));
+}
+
 float CD3DGlassRealizer::GetBlurExpansion()
 {
+	// Liquid Glass samples up to its reach plus the blur disc away, so DWM must redraw that much around changes.
+	if (Shared::g_liquidGlass.enabled)
+	{
+		return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f) + GetLiquidGlassReach() + std::ceil(Shared::g_liquidGlass.softness) + 2.f;
+	}
 	// Keep the existing conservative capture margin; the pass-local DWM kernel radius is ceil(σ × 2.3).
 	return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f);
 }

@@ -22,6 +22,7 @@ cbuffer BlurPSConstants : register(b0)
 	float4 lgLook;		// dispersion, saturation, readability, glass-to-background gap
 	float4 lgRim;		// rim light strength, shine exponent, light angle in radians, bezel profile
 	float4 lgFull;		// uv per pixel of the full-resolution copy (x, y), clarity, softness in pixels
+	float4 lgLimit;		// longest refraction shift in pixels, unused
 };
 
 Texture2D<float4> texture0 : register(t0);
@@ -152,6 +153,10 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	float2 pg = -n * LgLateral(N, 1.0f / ior, depth) * lgOptics.w;
 	float2 pr = -n * LgLateral(N, 1.0f / max(ior - lgLook.x, 1.0001f), depth) * lgOptics.w;
 	float2 pb = -n * LgLateral(N, 1.0f / (ior + lgLook.x), depth) * lgOptics.w;
+	// Only the redrawn region plus the blur expansion holds current pixels, so the shift stays inside it.
+	pg = clamp(pg, -lgLimit.x, lgLimit.x);
+	pr = clamp(pr, -lgLimit.x, lgLimit.x);
+	pb = clamp(pb, -lgLimit.x, lgLimit.x);
 
 	float4 g = LgBlurAt(input, pg * lgTex.xy);
 	background = float4(LgBlurAt(input, pr * lgTex.xy).r, g.g, LgBlurAt(input, pb * lgTex.xy).b, g.a);
