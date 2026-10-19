@@ -124,6 +124,74 @@ namespace OpenGlass::ModernTheme
 			}
 		}
 
+		// Drop-downs keep the native list but draw their closed field as a rounded box with a chevron.
+		void StyleChoice(wxChoice* choice)
+		{
+			const auto hwnd = static_cast<HWND>(choice->GetHWND());
+			// Taller selection field, like the concept's roomy inputs.
+			SendMessageW(hwnd, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), choice->FromDIP(24));
+			choice->InvalidateBestSize();
+			// The wider padding and chevron need room beyond the native best width.
+			choice->SetMinSize(wxSize(choice->GetBestSize().x + choice->FromDIP(24), choice->FromDIP(32)));
+
+			auto hover = std::make_shared<bool>(false);
+			choice->Bind(wxEVT_ENTER_WINDOW, [choice, hover](wxMouseEvent& event) { *hover = true; choice->Refresh(false); event.Skip(); });
+			choice->Bind(wxEVT_LEAVE_WINDOW, [choice, hover](wxMouseEvent& event) { *hover = false; choice->Refresh(false); event.Skip(); });
+			choice->Bind(wxEVT_SET_FOCUS, [choice](wxFocusEvent& event) { choice->Refresh(false); event.Skip(); });
+			choice->Bind(wxEVT_KILL_FOCUS, [choice](wxFocusEvent& event) { choice->Refresh(false); event.Skip(); });
+			choice->Bind(wxEVT_CHOICE, [choice](wxCommandEvent& event) { choice->Refresh(false); event.Skip(); });
+			choice->Bind(wxEVT_ERASE_BACKGROUND, [](wxEraseEvent&) {});
+			choice->Bind(wxEVT_PAINT, [choice, hover](wxPaintEvent&)
+			{
+				wxAutoBufferedPaintDC dc(choice);
+				const auto& palette = Get();
+				const wxSize size = choice->GetClientSize();
+				dc.SetBackground(wxBrush(choice->GetParent()->GetBackgroundColour()));
+				dc.Clear();
+				std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) };
+				if (!gc)
+				{
+					return;
+				}
+				const bool enabled = choice->IsEnabled();
+				const bool focused = choice->HasFocus();
+				const wxColour field = palette.dark ? (*hover && enabled ? wxColour(32, 52, 82) : wxColour(24, 41, 66)) : (*hover && enabled ? wxColour(246, 249, 253) : *wxWHITE);
+				const wxColour outline = focused ? palette.accent : *hover && enabled ? palette.subtext : palette.border;
+				gc->SetPen(wxPen(outline, choice->FromDIP(1)));
+				gc->SetBrush(wxBrush(field));
+				gc->DrawRoundedRectangle(0.5, 0.5, size.x - 1.0, size.y - 1.0, choice->FromDIP(6));
+
+				const wxColour foreground = enabled ? palette.text : palette.subtext;
+				const double padding = choice->FromDIP(12);
+				const wxString chevron(wxUniChar(0xE70D));
+				double chevronWidth{}, chevronHeight{};
+				gc->SetFont(IconFont(choice, 8), enabled ? palette.subtext : palette.border);
+				gc->GetTextExtent(chevron, &chevronWidth, &chevronHeight);
+				const double chevronX = size.x - padding - chevronWidth;
+				gc->DrawText(chevron, chevronX, (size.y - chevronHeight) / 2);
+
+				gc->SetFont(choice->GetFont(), foreground);
+				gc->Clip(padding, 0, std::max(chevronX - padding - choice->FromDIP(6), 0.0), size.y);
+				double textWidth{}, textHeight{};
+				const wxString text = choice->GetStringSelection();
+				gc->GetTextExtent(text, &textWidth, &textHeight);
+				gc->DrawText(text, padding, (size.y - textHeight) / 2);
+				gc->ResetClip();
+			});
+		}
+
+		void StyleChoices(wxWindow* window)
+		{
+			for (auto* child : window->GetChildren())
+			{
+				if (auto* choice = wxDynamicCast(child, wxChoice))
+				{
+					StyleChoice(choice);
+				}
+				StyleChoices(child);
+			}
+		}
+
 		// Row labels read cleaner without trailing colons, like the concept.
 		void StripColons(wxWindow* window)
 		{
@@ -259,6 +327,7 @@ namespace OpenGlass::ModernTheme
 			CollectLooseWindows(page, page->GetSizer(), false, loose, *cards);
 		}
 		StripColons(page);
+		StyleChoices(page);
 		ColorLists(page, palette.card);
 		for (auto* window : loose)
 		{
