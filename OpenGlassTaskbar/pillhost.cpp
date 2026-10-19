@@ -1,7 +1,7 @@
 // Liquid Glass taskbar, our side. Loads pilltap.dll into explorer, then keeps one glass window
 // (accent blur marked as a pill, which our OpenGlass rounds) under each group the TAP reports.
 // While this runs the TAP hides the taskbar's own background; when it exits the background returns.
-// Sizes come from pills.ini next to the exe and are picked up while running.
+// Settings come from HKCU\Software\OpenGlass\Taskbar (the Taskbar tab of OpenGlassGUI) and apply while running.
 // pillhost.exe --stop closes a running copy.
 #include <windows.h>
 #include <algorithm>
@@ -17,13 +17,11 @@ namespace
 	constexpr DWORD AccentFlagPill = 0x80000000;	// OpenGlass: cut the glass to a fully rounded outline
 	constexpr UINT_PTR FollowTimer = 1;
 
-	// In taskbar units (pixels at 100% scale).
+	// In taskbar units (pixels at 100% scale); see pillshare.h.
 	struct Settings
 	{
-		int height = 40;	// pill height; the taskbar is 48
-		int padding = 6;	// room left and right of the icons
-		int gap = 6;	// space between the tray and the clock
-		bool join = false;	// tray and clock in one pill
+		int height, padding, gap;
+		bool join;
 	};
 
 	HWND g_host{};
@@ -32,22 +30,21 @@ namespace
 	const PillShare* g_share{};
 	DWORD g_explorer{};
 	Settings g_settings{};
-	wchar_t g_ini[MAX_PATH]{};
-	FILETIME g_iniTime{};
 	int g_ticks{};
 
-	// Reads pills.ini again whenever it changes, so sizes can be tuned live.
+	// Read twice a second, so the Taskbar tab's changes show while it is being tuned.
+	// Turning the taskbar off there closes this host, which brings the normal taskbar back.
 	void LoadSettings()
 	{
-		WIN32_FILE_ATTRIBUTE_DATA info{};
-		const FILETIME time = GetFileAttributesExW(g_ini, GetFileExInfoStandard, &info) ? info.ftLastWriteTime : FILETIME{};
-		if (CompareFileTime(&time, &g_iniTime) == 0) return;
-		g_iniTime = time;
-		const Settings defaults{};
-		g_settings.height = std::clamp<int>(GetPrivateProfileIntW(L"Pills", L"Height", defaults.height, g_ini), 8, 200);
-		g_settings.padding = std::clamp<int>(GetPrivateProfileIntW(L"Pills", L"Padding", defaults.padding, g_ini), 0, 100);
-		g_settings.gap = std::clamp<int>(GetPrivateProfileIntW(L"Pills", L"Gap", defaults.gap, g_ini), 0, 100);
-		g_settings.join = GetPrivateProfileIntW(L"Pills", L"Join", defaults.join, g_ini) != 0;
+		if (!ReadPillSetting(PillEnabled))
+		{
+			PostMessageW(g_host, WM_CLOSE, 0, 0);
+			return;
+		}
+		g_settings.height = static_cast<int>(ReadPillSetting(PillHeight));
+		g_settings.padding = static_cast<int>(ReadPillSetting(PillPadding));
+		g_settings.gap = static_cast<int>(ReadPillSetting(PillGap));
+		g_settings.join = ReadPillSetting(PillJoin) != 0;
 	}
 
 	// Rare events (attach attempts, nudges) to %TEMP%\pillhost.txt, timestamped like the TAP's log.
@@ -364,11 +361,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 		if (const HWND running = FindWindowW(PillHostClass, nullptr)) PostMessageW(running, WM_CLOSE, 0, 0);
 		return 0;
 	}
-	if (FindWindowW(PillHostClass, nullptr)) return 0;
+	if (FindWindowW(PillHostClass, nullptr) || !ReadPillSetting(PillEnabled)) return 0;
 	// Pixels everywhere: the TAP reports physical pixels and the taskbar rectangle is physical too.
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-	GetModuleFileNameW(nullptr, g_ini, MAX_PATH);
-	wcscpy_s(wcsrchr(g_ini, L'\\') + 1, MAX_PATH - (wcsrchr(g_ini, L'\\') + 1 - g_ini), L"pills.ini");
+	wchar_t self[MAX_PATH];
+	const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
+	RegSetKeyValueW(HKEY_CURRENT_USER, PillSettingsKey, PillHostPathValue, REG_SZ, self, (length + 1) * sizeof(wchar_t));
 	CleanTapCopies();
 
 	WNDCLASSW type{};

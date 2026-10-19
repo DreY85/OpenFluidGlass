@@ -22,3 +22,20 @@ inline void PillEventName(wchar_t (&name)[96], DWORD explorer, const wchar_t* wh
 {
 	swprintf_s(name, L"Local\\LiquidGlassTaskbarTap%lu%s", explorer, what);
 }
+
+// Settings: written by the Taskbar tab of OpenGlassGUI, read live by the host. Sizes are pixels at 100% scale.
+constexpr wchar_t PillSettingsKey[] = L"Software\\OpenGlass\\Taskbar";
+constexpr wchar_t PillHostPathValue[] = L"HostPath";	// where the host last ran from, so the GUI can start it
+struct PillSetting { const wchar_t* name; DWORD minimum, maximum, fallback; };
+constexpr PillSetting PillEnabled{ L"Enabled", 0, 1, 1 };
+constexpr PillSetting PillHeight{ L"Height", 24, 48, 40 };	// the taskbar is 48
+constexpr PillSetting PillPadding{ L"Padding", 0, 24, 6 };	// room left and right of the icons
+constexpr PillSetting PillGap{ L"Gap", 0, 32, 6 };	// space between the tray and the clock
+constexpr PillSetting PillJoin{ L"Join", 0, 1, 0 };	// tray and clock in one pill
+
+inline DWORD ReadPillSetting(const PillSetting& setting)
+{
+	DWORD value{}, size = sizeof(value);
+	if (RegGetValueW(HKEY_CURRENT_USER, PillSettingsKey, setting.name, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS) return setting.fallback;
+	return value < setting.minimum ? setting.minimum : value > setting.maximum ? setting.maximum : value;
+}

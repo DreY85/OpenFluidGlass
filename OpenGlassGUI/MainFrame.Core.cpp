@@ -101,6 +101,7 @@ namespace OpenGlass
 		CreateAppearanceTab();
 		CreateGlassColorsTab();
 		CreateLiquidGlassTab();
+		CreateTaskbarTab();
 		CreatePresetsTab();
 		CreateDiagnosticsTab();
 
