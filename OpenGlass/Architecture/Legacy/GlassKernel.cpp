@@ -631,6 +631,7 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		lg.shine = std::clamp(lgValue(L"LiquidGlassShine", 2.f), 0.1f, 16.f);
 		lg.lightDegrees = lgValue(L"LiquidGlassLight", 360.f - 135.f) - 360.f;
 		lg.radius = std::clamp(lgValue(L"LiquidGlassRadius", 8.f), 0.f, 200.f);
+		lg.pillRadius = std::clamp(lgValue(L"LiquidGlassPillRadius", 1000.f), 0.f, 1000.f);
 		lg.profile = std::min(GlassEngine::GetDwordFromRegistry(L"LiquidGlassProfile", 0), 2ul);
 		lg.clarity = std::clamp(lgValue(L"LiquidGlassClarity", 0.75f), 0.f, 1.f);
 		lg.softness = std::clamp(lgValue(L"LiquidGlassSoftness", 1.5f), 0.f, 20.f);

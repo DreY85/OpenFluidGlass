@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MainFrame.hpp"
 #include "UiControls.hpp"
+#include "DwmSettings.hpp"
 #include "..\OpenGlassTaskbar\pillshare.h"
 #include <exdisp.h>
 #include <shldisp.h>
@@ -75,6 +76,34 @@ namespace OpenGlass
 			wil::unique_bstr file{ SysAllocString(path.c_str()) };
 			RETURN_IF_NULL_ALLOC(file);
 			return shell->ShellExecute(file.get(), empty, empty, empty, empty);
+		}
+
+		// The corners are drawn by OpenGlass, so they are a DWM value like the Liquid Glass tab's:
+		// pixels times 100. The slider's last step stands for fully round, any radius past half the height.
+		constexpr PCWSTR c_pillRadiusValue = L"LiquidGlassPillRadius";
+		constexpr int c_roundCorners = 25;
+		constexpr DWORD c_roundRadius = 1000;
+
+		int ReadCornerPosition()
+		{
+			wil::unique_hkey userKey{};
+			wil::unique_hkey machineKey{};
+			RegOpenKeyExW(HKEY_CURRENT_USER, DwmSettings::g_keyPath, 0, KEY_READ, userKey.put());
+			RegOpenKeyExW(HKEY_LOCAL_MACHINE, DwmSettings::g_keyPath, 0, KEY_READ, machineKey.put());
+			const DWORD radius = DwmSettings::GetDword(userKey.get(), machineKey.get(), c_pillRadiusValue, c_roundRadius * 100) / 100;
+			return static_cast<int>(std::min<DWORD>(radius, c_roundCorners));
+		}
+
+		void WriteCornerPosition(int position)
+		{
+			const DWORD value = (position >= c_roundCorners ? c_roundRadius : static_cast<DWORD>(position)) * 100;
+			RegSetKeyValueW(HKEY_CURRENT_USER, DwmSettings::g_keyPath, c_pillRadiusValue, REG_DWORD, &value, sizeof(value));
+			DwmSettings::NotifyChange(FindWindowW(L"Dwm", nullptr), DwmSettings::UpdateType::Backdrop);
+		}
+
+		wxString FormatCornerPosition(int position)
+		{
+			return position >= c_roundCorners ? wxString(L"Round") : wxString::Format(L"%d px", position);
 		}
 
 		struct TaskbarSlider
@@ -156,6 +185,27 @@ namespace OpenGlass
 			rows->push_back({ &slider, control, value });
 		}
 
+		wxSlider* corners{};
+		wxStaticText* cornersValue{};
+		{
+			constexpr PCWSTR hintText = L"Rounding of the pill corners. The last step makes the ends fully round.";
+			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
+			auto* label = new wxStaticText(panel, wxID_ANY, L"Corner radius:", wxDefaultPosition, FromDIP(wxSize(160, -1)));
+			row->Add(label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			corners = new NativeSlider(panel, wxID_ANY, c_roundCorners, 0, c_roundCorners);
+			row->Add(corners, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			cornersValue = new wxStaticText(panel, wxID_ANY, wxEmptyString, wxDefaultPosition, FromDIP(wxSize(64, -1)), wxALIGN_RIGHT | wxST_NO_AUTORESIZE);
+			row->Add(cornersValue, 0, wxALIGN_CENTER_VERTICAL);
+			label->SetToolTip(hintText);
+			corners->SetToolTip(hintText);
+			pillsGroup->Add(row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
+
+			auto* hint = new wxStaticText(panel, wxID_ANY, hintText);
+			hint->SetForegroundColour(hintColour);
+			hint->SetFont(hintFont);
+			pillsGroup->Add(hint, 0, wxLEFT | wxBOTTOM, FromDIP(8));
+		}
+
 		auto* join = new wxCheckBox(panel, wxID_ANY, L"Put the tray icons and the clock in one pill");
 		join->SetToolTip(L"One pill around both instead of two side by side.");
 		pillsGroup->Add(join, 0, wxALL, 4);
@@ -163,7 +213,7 @@ namespace OpenGlass
 
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
 		auto* resetButton = new wxButton(panel, wxID_ANY, L"Reset to defaults");
-		resetButton->SetToolTip(L"Write the default pill sizes to HKCU and apply them.");
+		resetButton->SetToolTip(L"Write the default pill sizes and round corners to HKCU and apply them.");
 		buttons->AddStretchSpacer();
 		buttons->Add(resetButton, 0);
 		sizer->Add(buttons, 0, wxEXPAND | wxALL, 6);
@@ -207,13 +257,15 @@ namespace OpenGlass
 			}
 		};
 
-		auto load = [rows, enabled, join, showValue, findGapRow, showStatus]()
+		auto load = [rows, enabled, join, corners, cornersValue, showValue, findGapRow, showStatus]()
 		{
 			for (auto& row : *rows)
 			{
 				row.control->SetValue(static_cast<int>(ReadPillSetting(*row.slider->setting)));
 				showValue(row);
 			}
+			corners->SetValue(ReadCornerPosition());
+			cornersValue->SetLabel(FormatCornerPosition(corners->GetValue()));
 			enabled->SetValue(ReadPillSetting(PillEnabled) != 0);
 			join->SetValue(ReadPillSetting(PillJoin) != 0);
 			if (auto* gap = findGapRow())
@@ -232,6 +284,19 @@ namespace OpenGlass
 				WriteTaskbarSetting(*row.slider->setting, static_cast<DWORD>(row.control->GetValue()));
 			});
 		}
+
+		// DWM reloads all of its settings on each change, so dragging writes at most every 100 ms.
+		auto* cornersTimer = new wxTimer(panel);
+		corners->Bind(wxEVT_SLIDER, [corners, cornersValue, cornersTimer](wxCommandEvent&)
+		{
+			cornersValue->SetLabel(FormatCornerPosition(corners->GetValue()));
+			cornersTimer->StartOnce(100);
+		});
+		panel->Bind(wxEVT_TIMER, [this, corners](wxTimerEvent&)
+		{
+			WriteCornerPosition(corners->GetValue());
+			SetStatusText(L"Taskbar: corners applied");
+		}, cornersTimer->GetId());
 
 		join->Bind(wxEVT_CHECKBOX, [this, join, findGapRow](wxCommandEvent&)
 		{
@@ -297,6 +362,7 @@ namespace OpenGlass
 				WriteTaskbarSetting(*row.slider->setting, row.slider->setting->fallback);
 			}
 			WriteTaskbarSetting(PillJoin, PillJoin.fallback);
+			WriteCornerPosition(c_roundCorners);
 			load();
 			SetStatusText(L"Taskbar: defaults applied");
 		});

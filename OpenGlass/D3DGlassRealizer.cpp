@@ -654,8 +654,8 @@ HRESULT CD3DGlassRealizer::Render(
 		const auto& lg = Shared::g_liquidGlass;
 		cbPS.lgRect = { geometryBounds.left, geometryBounds.top, geometryBounds.right, geometryBounds.bottom };
 		// Pass 2 samples the quarter-width buffer: u advances by 0.25 / quarterWidth per back-buffer pixel.
-		// A pill asks for more radius than any glass can hold; the shader clamps it to half the height.
-		cbPS.lgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), params.pill ? 10000.f : lg.radius, lg.enabled ? 1.f : 0.f };
+		// A pill takes its own corner radius; by default more than any glass can hold, which the shader clamps to half the height.
+		cbPS.lgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), params.pill ? lg.pillRadius : lg.radius, lg.enabled ? 1.f : 0.f };
 		cbPS.lgOptics = { lg.ior, lg.bezel, lg.thickness, lg.scale };
 		cbPS.lgLook = { lg.chroma, lg.saturation, lg.readability, lg.gap };
 		cbPS.lgRim = { lg.rim, lg.shine, lg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(lg.profile) };

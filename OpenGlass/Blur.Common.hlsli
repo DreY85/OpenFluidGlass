@@ -65,11 +65,16 @@ static const minfloat3 grayFactor = minfloat3(0.2126, 0.7152, 0.0722);
 // Each contour at depth t is the outline shrunk by t with its corner radius grown to r + t.
 // Plain distance keeps the corner radius shrinking to zero, so with a bezel wider than the
 // window's corner radius the contours meet at a sharp diagonal and the refraction tears along it.
+// A pill's bezel reaches its middle, where a growing radius would outgrow the shrinking contour
+// (r + t > shortHalf - t) and the top and bottom contours would meet in a crease along the middle line.
+// So from that depth on its contours keep the radius they can hold, shortHalf - t: concentric round ends.
 float LgDepth(float2 p)
 {
 	float2 halfSize = (lgRect.zw - lgRect.xy) * 0.5f;
-	float r = min(lgTex.z, min(halfSize.x, halfSize.y));
-	float2 A = abs(p - (lgRect.xy + lgRect.zw) * 0.5f) - halfSize + r;
+	float shortHalf = min(halfSize.x, halfSize.y);
+	float r = min(lgTex.z, shortHalf);
+	float2 offset = abs(p - (lgRect.xy + lgRect.zw) * 0.5f);
+	float2 A = offset - halfSize + r;
 	// Straight sides: the contour radius cancels out.
 	float t = r - max(A.x, A.y);
 	if (min(A.x, A.y) + 2.0f * t > 0.0f)
@@ -79,6 +84,11 @@ float LgDepth(float2 p)
 		float qb = 4.0f * (A.x + A.y) - 2.0f * r;
 		float qc = dot(A, A) - r * r;
 		t = (-qb + sqrt(max(qb * qb - 4.0f * qa * qc, 0.0f))) / (2.0f * qa);
+	}
+	if (lgLimit.y > 0.5f && t > (shortHalf - r) * 0.5f)
+	{
+		float2 B = offset - halfSize + shortHalf;
+		t = shortHalf - (length(max(B, 0.0f)) + min(max(B.x, B.y), 0.0f));
 	}
 	return t;
 }
