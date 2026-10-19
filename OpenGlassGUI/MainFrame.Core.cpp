@@ -1980,10 +1980,33 @@ namespace OpenGlass
 			event.Veto();
 			return;
 		}
-		if ((m_isDirty || m_colorPreference.IsDirty()) && !RevertSettings())
+		const auto pending = [this] { return m_isDirty || m_colorPreference.IsDirty(); };
+		if (pending())
 		{
-			event.Veto();
-			return;
+			// Closing used to revert silently, so previewed changes vanished without warning.
+			const int answer = event.CanVeto()
+				? wxMessageBox(L"Save your changes before closing?\n\nYes keeps them. No restores the settings from before.",
+					L"Unsaved changes", wxYES_NO | wxCANCEL | wxICON_QUESTION, this)
+				: wxNO;
+			if (answer == wxCANCEL)
+			{
+				event.Veto();
+				return;
+			}
+			if (answer == wxYES)
+			{
+				SaveSettings();
+				if (pending())
+				{
+					event.Veto();
+					return;
+				}
+			}
+			else if (!RevertSettings() && event.CanVeto())
+			{
+				event.Veto();
+				return;
+			}
 		}
 		event.Skip();
 	}
