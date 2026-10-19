@@ -775,6 +775,55 @@ namespace OpenGlass
 			sizer->Add(row, 0, wxEXPAND | wxALL, 8);
 		}
 
+		// Neutral glass without a hue, plus a visible way into the custom color editor.
+		{
+			wxStaticBoxSizer* tintGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Glass tint");
+
+			wxBoxSizer* clearRow = new wxBoxSizer(wxHORIZONTAL);
+			clearRow->Add(new wxStaticText(panel, wxID_ANY, L"Clear glass:", wxDefaultPosition, FromDIP(wxSize(150, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			clearRow->Add(new wxStaticText(panel, wxID_ANY, L"Darker"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			m_slClearGlass = new NativeSlider(panel, wxID_ANY, 0, -100, 100);
+			m_slClearGlass->SetToolTip(L"Colorless glass. Left adds a black tint, right a white tint. The ends are the strongest.");
+			clearRow->Add(m_slClearGlass, 1, wxALIGN_CENTER_VERTICAL);
+			clearRow->Add(new wxStaticText(panel, wxID_ANY, L"Lighter"), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
+			tintGroup->Add(clearRow, 0, wxEXPAND | wxALL, 4);
+
+			wxBoxSizer* pickRow = new wxBoxSizer(wxHORIZONTAL);
+			auto* pickButton = new wxButton(panel, wxID_ANY, L"Pick any color...");
+			pickButton->SetToolTip(L"Opens the full color picker. The chosen color uses the Color intensity above.");
+			pickRow->Add(pickButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+			auto* tintNote = new wxStaticText(panel, wxID_ANY, L"Both also set the Windows accent color, like the swatches above.");
+			tintNote->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+			pickRow->Add(tintNote, 1, wxALIGN_CENTER_VERTICAL);
+			tintGroup->Add(pickRow, 0, wxEXPAND | wxALL, 4);
+
+			sizer->Add(tintGroup, 0, wxEXPAND | wxALL, 2);
+
+			pickButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&)
+			{
+				wxCommandEvent event(wxEVT_CUSTOM_COLOR_EDIT_REQUESTED, m_colorPresetList->GetId());
+				event.SetEventObject(m_colorPresetList);
+				event.SetInt(static_cast<int>(m_colorPresetList->GetCustomIndex()));
+				m_colorPresetList->ProcessWindowEvent(event);
+			});
+
+			// Applying a color rewrites the accent, so wait until the thumb rests briefly.
+			auto* clearTimer = new wxTimer(panel);
+			m_slClearGlass->Bind(wxEVT_SLIDER, [clearTimer](wxCommandEvent&) { clearTimer->StartOnce(150); });
+			panel->Bind(wxEVT_TIMER, [this](wxTimerEvent&)
+			{
+				const int value = m_slClearGlass->GetValue();
+				const int intensity = ColorizationPresets::ClassicIntensityMinimum
+					+ (std::abs(value) * (ColorizationPresets::ClassicIntensityMaximum - ColorizationPresets::ClassicIntensityMinimum) + 50) / 100;
+				const DWORD rgb = value < 0 ? 0x000000 : 0xFFFFFF;
+				const DWORD argb = (ColorizationPresets::CalculateIntensityAlpha(static_cast<DWORD>(intensity)) << 24) | rgb;
+				const auto family = m_rbGlassType->GetSelection() == 0 ? ColorizationPresets::Family::Vista : ColorizationPresets::Family::Windows7;
+				m_colorPresetList->SetCustomColor(argb);
+				ApplyColorizationColor(argb, family);
+				UpdateColorizationPresetSelection();
+			}, clearTimer->GetId());
+		}
+
 		// Advanced colorization
 		auto* advancedColorizationPane = AddCollapsibleSection(
 			panel,

@@ -223,6 +223,7 @@ namespace OpenGlass
 		bool m_customColorsInitialized{ false };
 		wxCheckBox* m_chkEnableTransparency{ nullptr };
 		wxSlider* m_slColorIntensity{ nullptr };
+		wxSlider* m_slClearGlass{ nullptr };	// -100 darker (black tint) to 100 lighter (white tint)
 
 		wxChoice* m_chModeColorCaption{ nullptr };
 		wxColourPickerCtrl* m_cpColorCaption{ nullptr };

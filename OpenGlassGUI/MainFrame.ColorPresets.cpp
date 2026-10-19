@@ -206,5 +206,16 @@ namespace OpenGlass
 		}
 		m_colorPresetList->SetCurrentSelection(selection);
 		m_customColorsInitialized = true;
+
+		// The clear glass slider shows black and white tints; any hue leaves it in the middle.
+		if (m_slClearGlass)
+		{
+			const int opacity = std::clamp(static_cast<int>(m_config->GetDword(L"GlassOpacity", 63)),
+				ColorizationPresets::ClassicIntensityMinimum, ColorizationPresets::ClassicIntensityMaximum);
+			const int strength = (opacity - ColorizationPresets::ClassicIntensityMinimum) * 100
+				/ (ColorizationPresets::ClassicIntensityMaximum - ColorizationPresets::ClassicIntensityMinimum);
+			const DWORD rgb = color & 0xFFFFFF;
+			m_slClearGlass->SetValue(!manual ? 0 : rgb == 0x000000 ? -strength : rgb == 0xFFFFFF ? strength : 0);
+		}
 	}
 }
