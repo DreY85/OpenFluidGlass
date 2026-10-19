@@ -90,6 +90,7 @@
     <ClCompile Include="MainFrame.Core.cpp" />
     <ClCompile Include="MainFrame.State.cpp" />
     <ClCompile Include="MainFrame.Tabs.cpp" />
+    <ClCompile Include="MainFrame.LiquidGlass.cpp" />
     <ClCompile Include="ConfigurationResources.cpp" />
     <ClCompile Include="PresetPackage.cpp" />
     <ClCompile Include="RegistryConfig.cpp" />

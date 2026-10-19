@@ -736,7 +736,7 @@ HRESULT CD3DGlassRealizer::Render(
 		{
 			// Refraction samples the sharp copy anywhere under the glass, not only inside the
 			// rectangles being redrawn, so copy the whole glass plus the blur reach.
-			const float margin = expansion + static_cast<float>(m_dwmHwSamples.radius + 1);
+			const float margin = std::max(expansion + static_cast<float>(m_dwmHwSamples.radius + 1), Shared::g_liquidGlass.softness + 2.f);
 			const auto copyRegionRect = RectF::ToRectU(
 				D2D1::RectF(
 					std::max(std::min(geometryBounds.left, samplingWorldBounds.left) - margin, 0.f),

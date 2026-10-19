@@ -97,6 +97,7 @@ namespace OpenGlass
 		CreateThemeTab();
 		CreateAppearanceTab();
 		CreateGlassColorsTab();
+		CreateLiquidGlassTab();
 		CreatePresetsTab();
 		CreateDiagnosticsTab();
 

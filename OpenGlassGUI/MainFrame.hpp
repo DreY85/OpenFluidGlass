@@ -27,6 +27,7 @@ namespace OpenGlass
 		void CreateThemeTab();
 		void CreateAppearanceTab(); // Text and Caption settings
 		void CreateGlassColorsTab();
+		void CreateLiquidGlassTab();
 		void CreateBottomControls(wxSizer* parentSizer);
 		bool CanSwitchEditingScope() const;
 		void SwitchEditingScope();

@@ -106,16 +106,22 @@ float4 LgBlurAt(PS_INPUT input, float2 duv)
 	return s;
 }
 
-// The sharp backdrop at a full-resolution uv, softened by a small cross of samples.
+// The full-resolution backdrop, blurred with a radius of lgFull.w pixels.
+// Twelve taps on a golden-angle spiral with Gaussian weights cover the disc evenly.
 float4 LgSharpAt(float2 uv)
 {
-	float2 o = lgFull.xy * lgFull.w;
-	float4 s = texture1.Sample(sampler0, uv) * 0.4f;
-	s += texture1.Sample(sampler0, uv + float2(o.x, 0.0f)) * 0.15f;
-	s += texture1.Sample(sampler0, uv - float2(o.x, 0.0f)) * 0.15f;
-	s += texture1.Sample(sampler0, uv + float2(0.0f, o.y)) * 0.15f;
-	s += texture1.Sample(sampler0, uv - float2(0.0f, o.y)) * 0.15f;
-	return s;
+	float4 center = texture1.Sample(sampler0, uv);
+	float4 sum = center;
+	float weight = 1.0f;
+	[unroll] for (int i = 0; i < 12; ++i)
+	{
+		float r = sqrt((i + 0.5f) / 12.0f);
+		float a = i * 2.39996323f;
+		float w = exp(-2.0f * r * r);
+		sum += texture1.Sample(sampler0, uv + float2(cos(a), sin(a)) * r * lgFull.w * lgFull.xy) * w;
+		weight += w;
+	}
+	return lgFull.w < 0.05f ? center : sum / weight;
 }
 
 // The blurred background seen through the glass, plus the light caught by the rim.
