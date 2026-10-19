@@ -286,7 +286,7 @@ namespace OpenGlass::Elevation
 			&& elevation.TokenIsElevated;
 	}
 
-	StartupResult PrepareElevatedStartup(Settings::Scope scope, bool systemTransparency)
+	StartupResult PrepareElevatedStartup(Settings::Scope scope, bool systemTransparency, bool uiPreview)
 	{
 		try
 		{
@@ -299,7 +299,7 @@ namespace OpenGlass::Elevation
 				return ReceiveStartupIdentity(*pipeName);
 			}
 			const auto userSid = GetProcessUserSid(GetCurrentProcess());
-			if (IsProcessElevated())
+			if (uiPreview || IsProcessElevated())
 			{
 				return { true, userSid };
 			}

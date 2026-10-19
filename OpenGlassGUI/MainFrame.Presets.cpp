@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainFrame.hpp"
+#include "ModernTheme.hpp"
 #include "ColorPresetList.hpp"
 #include "EffectiveConfiguration.hpp"
 #include <wx/imagpng.h>
@@ -638,10 +639,12 @@ namespace OpenGlass
 		const int widths[]{ 180, 90, 100, 100, 80 };
 		for (int column = 0; column < 5; ++column) m_lstPresetPackages->InsertColumn(column, headings[column], wxLIST_FORMAT_LEFT, FromDIP(widths[column]));
 		ListView_SetExtendedListViewStyleEx(reinterpret_cast<HWND>(m_lstPresetPackages->GetHandle()), LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-		root->Add(m_lstPresetPackages, 1, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 8);
-		root->Add(new wxStaticText(panel, wxID_ANY, wxString::Format(L"Apply to %s. Double-click to preview; Save accepts and Revert restores your checkpoint.", m_editScope == Settings::Scope::User ? L"HKCU" : L"HKLM")), 0, wxEXPAND | wxALL, 8);
+		auto* card = ModernTheme::MakeCard(panel, L"Installed presets");
+		root->Add(card, 1, wxEXPAND | wxALL, 2);
+		card->Add(m_lstPresetPackages, 1, wxEXPAND);
+		card->Add(new wxStaticText(panel, wxID_ANY, wxString::Format(L"Apply to %s. Double-click to preview; Save accepts and Revert restores your checkpoint.", m_editScope == Settings::Scope::User ? L"HKCU" : L"HKLM")), 0, wxEXPAND | wxTOP, 8);
 		m_lblPresetEmpty = new wxStaticText(panel, wxID_ANY, L"Right-click to import or create a preset. You can also drop ZIP files here.");
-		root->Add(m_lblPresetEmpty, 0, wxEXPAND | wxALL, 8);
+		card->Add(m_lblPresetEmpty, 0, wxEXPAND | wxTOP, 4);
 		panel->SetSizer(root); m_notebook->AddPage(panel, L"Preset library");
 		m_lstPresetPackages->Bind(wxEVT_LIST_ITEM_ACTIVATED, [this](wxListEvent&) { ApplySelectedPresetPackage(); });
 		m_lstPresetPackages->Bind(wxEVT_CONTEXT_MENU, [this](wxContextMenuEvent& event) { ShowPresetContextMenu(event.GetPosition()); });

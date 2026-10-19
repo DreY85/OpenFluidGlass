@@ -10,6 +10,7 @@ namespace OpenGlass::Elevation
 		std::wstring userSid;
 	};
 
-	[[nodiscard]] StartupResult PrepareElevatedStartup(Settings::Scope scope, bool systemTransparency);
+	// uiPreview skips elevation so the window can be opened for screenshots; saving HKLM then fails.
+	[[nodiscard]] StartupResult PrepareElevatedStartup(Settings::Scope scope, bool systemTransparency, bool uiPreview = false);
 	[[nodiscard]] bool IsProcessElevated() noexcept;
 }

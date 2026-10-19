@@ -176,7 +176,7 @@ namespace OpenGlass
 		auto pending = std::make_shared<std::map<std::wstring, DWORD>>();
 		auto* applyTimer = new wxTimer(panel);
 
-		wxStaticBoxSizer* generalGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Liquid Glass");
+		auto* generalGroup = ModernTheme::MakeCard(panel, L"Liquid Glass");
 		auto* note = new wxStaticText(panel, wxID_ANY,
 			L"Refraction for the Direct3D renderer. Changes apply instantly and are saved to HKCU, so Save and Revert do not affect them.");
 		note->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
@@ -228,7 +228,7 @@ namespace OpenGlass
 
 		for (const auto& group : c_liquidGlassGroups)
 		{
-			wxStaticBoxSizer* groupSizer = new wxStaticBoxSizer(wxVERTICAL, panel, group.title);
+			auto* groupSizer = ModernTheme::MakeCard(panel, group.title);
 			for (const auto& parameter : group.parameters)
 			{
 				wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);

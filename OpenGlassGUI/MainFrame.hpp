@@ -18,6 +18,7 @@ namespace OpenGlass
 	{
 	public:
 		MainFrame(std::wstring userSid, Settings::Scope scope, bool systemTransparency);
+		void SetStatusText(const wxString& text, int number = 0) override;
 
 	private:
 		void CreateControls();
@@ -126,7 +127,8 @@ namespace OpenGlass
 		void RestoreDefaults();
 
 		// UI Elements
-		wxNotebook* m_notebook{ nullptr };
+		wxSimplebook* m_notebook{ nullptr };
+		wxStaticText* m_statusText{ nullptr };
 
 		// Buttons
 		wxButton* m_btnSave{ nullptr };
@@ -218,7 +220,7 @@ namespace OpenGlass
 		// Glass Colors Tab
 		wxScrolledWindow* m_glassColorsPanel{ nullptr };
 		wxRadioBox* m_rbGlassType{ nullptr };
-		wxStaticBoxSizer* m_colorPresetsGroupSizer{ nullptr };
+		wxBoxSizer* m_colorPresetsGroupSizer{ nullptr };
 		ColorPresetList* m_colorPresetList{ nullptr };
 		bool m_customColorsInitialized{ false };
 		wxCheckBox* m_chkEnableTransparency{ nullptr };

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainFrame.hpp"
+#include "ModernTheme.hpp"
 #include "WrappingLayout.hpp"
 #include "ColorPresetList.hpp"
 #include "Symbols.hpp"
@@ -91,7 +92,9 @@ namespace OpenGlass
 
 	void MainFrame::CreateControls()
 	{
-		m_notebook = new wxNotebook(this, wxID_ANY);
+		SetBackgroundColour(ModernTheme::Get().page);
+		m_notebook = new wxSimplebook(this, wxID_ANY);
+		m_notebook->SetBackgroundColour(ModernTheme::Get().page);
 
 		CreateSystemTab();
 		CreateThemeTab();
@@ -101,10 +104,24 @@ namespace OpenGlass
 		CreatePresetsTab();
 		CreateDiagnosticsTab();
 
+		for (size_t page = 0; page < m_notebook->GetPageCount(); ++page)
+		{
+			ModernTheme::SkinPage(m_notebook->GetPage(page));
+		}
+		// The swatch list copies its parent's color only when created.
+		m_colorPresetList->SetBackgroundColour(ModernTheme::Get().card);
 		m_notebook->SetSelection(2);
+		for (int index = 1; index < wxTheApp->argc; ++index)
+		{
+			long tab{};
+			if (wxTheApp->argv[index].StartsWith(L"--ui-tab=") && wxTheApp->argv[index].Mid(9).ToLong(&tab) && tab >= 0 && tab < static_cast<long>(m_notebook->GetPageCount()))
+			{
+				m_notebook->SetSelection(static_cast<size_t>(tab));
+			}
+		}
 
-		GetSizer()->Add(m_notebook, 1, wxEXPAND | wxALL, 5);
-		CreateStatusBar();
+		GetSizer()->Add(new ModernTheme::TabBar(this, m_notebook), 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(8));
+		GetSizer()->Add(m_notebook, 1, wxEXPAND | wxALL, FromDIP(6));
 	}
 
 	void MainFrame::CreateBottomControls(wxSizer* parentSizer)
@@ -154,12 +171,31 @@ namespace OpenGlass
 		m_btnSave->SetToolTip(L"Save changes (Ctrl+S)");
 		m_btnRevert->SetToolTip(L"Revert pending changes");
 
-		btnSizer->Add(more, 0);
-		btnSizer->AddStretchSpacer();
-		btnSizer->Add(m_btnSave, 0, wxRIGHT, 5);
-		btnSizer->Add(m_btnRevert, 0);
+		ModernTheme::StyleAccentButton(m_btnSave);
+		const wxSize buttonSize = FromDIP(wxSize(110, 34));
+		m_btnSave->SetMinSize(buttonSize);
+		m_btnRevert->SetMinSize(buttonSize);
+		more->SetMinSize(wxSize(-1, buttonSize.y));
 
-		parentSizer->Add(btnSizer, 0, wxEXPAND | wxALL, 5);
+		// Status messages live next to the buttons; the native status bar drew a black strip in dark mode.
+		m_statusText = new wxStaticText(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
+		m_statusText->SetForegroundColour(ModernTheme::Get().subtext);
+
+		btnSizer->Add(more, 0);
+		btnSizer->Add(m_statusText, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(12));
+		btnSizer->Add(m_btnRevert, 0, wxRIGHT, FromDIP(8));
+		btnSizer->Add(m_btnSave, 0);
+
+		parentSizer->Add(btnSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(12));
+	}
+
+	void MainFrame::SetStatusText(const wxString& text, int)
+	{
+		if (m_statusText)
+		{
+			m_statusText->SetLabel(text);
+			m_statusText->SetToolTip(text);
+		}
 	}
 
 	bool MainFrame::CanSwitchEditingScope() const
@@ -216,6 +252,7 @@ namespace OpenGlass
 			if (m_btnSave)
 			{
 				m_btnSave->Enable(m_isDirty);
+				ModernTheme::StyleAccentButton(m_btnSave);
 			}
 			if (m_btnRevert)
 			{

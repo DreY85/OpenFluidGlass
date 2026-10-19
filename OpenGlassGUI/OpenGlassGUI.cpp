@@ -15,6 +15,8 @@ namespace OpenGlass
 		wxApp::OnInitCmdLine(parser);
 		parser.AddLongOption(L"scope", L"Configuration target: hkcu or hklm", wxCMD_LINE_VAL_STRING);
 		parser.AddLongSwitch(L"no-system-transparency", L"Use the editing layer's ColorizationOpaqueBlend instead of Windows transparency");
+		parser.AddLongSwitch(L"ui-preview", L"open without elevation or the session lock, for screenshots", wxCMD_LINE_HIDDEN);
+		parser.AddLongOption(L"ui-tab", L"tab to open first, for screenshots", wxCMD_LINE_VAL_NUMBER, wxCMD_LINE_HIDDEN);
 		parser.AddLongOption(
 			L"elevated-pipe",
 			L"internal elevation handshake pipe",
@@ -39,7 +41,8 @@ namespace OpenGlass
 			return false;
 		}
 		const bool systemTransparency = std::ranges::find(arguments, L"--no-system-transparency") == arguments.end();
-		const auto startup = Elevation::PrepareElevatedStartup(*scope, systemTransparency);
+		const bool uiPreview = std::ranges::find(arguments, L"--ui-preview") != arguments.end();
+		const auto startup = Elevation::PrepareElevatedStartup(*scope, systemTransparency, uiPreview);
 		if (!startup.continueStartup)
 		{
 			return false;
@@ -51,7 +54,7 @@ namespace OpenGlass
 			wxMessageBox(L"Unable to establish the session editor lock. Close the other editor or retry.", L"OpenGlass", wxOK | wxICON_ERROR);
 			return false;
 		}
-		if (m_singleInstanceChecker.IsAnotherRunning())
+		if (!uiPreview && m_singleInstanceChecker.IsAnotherRunning())
 			return false;
 
 		MainFrame* frame = new MainFrame(startup.userSid, *scope, systemTransparency);

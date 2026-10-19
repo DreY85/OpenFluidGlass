@@ -65,6 +65,7 @@
     <ClInclude Include="EffectiveConfiguration.hpp" />
     <ClInclude Include="Symbols.hpp" />
     <ClInclude Include="UiControls.hpp" />
+    <ClInclude Include="ModernTheme.hpp" />
     <ClInclude Include="WrappingLayout.hpp" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="resource.h" />
@@ -91,6 +92,7 @@
     <ClCompile Include="MainFrame.State.cpp" />
     <ClCompile Include="MainFrame.Tabs.cpp" />
     <ClCompile Include="MainFrame.LiquidGlass.cpp" />
+    <ClCompile Include="ModernTheme.cpp" />
     <ClCompile Include="ConfigurationResources.cpp" />
     <ClCompile Include="PresetPackage.cpp" />
     <ClCompile Include="RegistryConfig.cpp" />

@@ -90,7 +90,7 @@ namespace OpenGlass
 		wxPanel* panel = new wxPanel(m_notebook);
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 		
-		wxStaticBoxSizer* globalGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Global");
+		auto* globalGroup = ModernTheme::MakeCard(panel, L"Global");
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
 			m_chkDisableGlassOnBattery = new wxCheckBox(panel, wxID_ANY, L"Disable transparency on battery");
@@ -145,7 +145,7 @@ namespace OpenGlass
 		panel->SetScrollRate(5, 5);
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 
-		wxStaticBoxSizer* transparencyGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Transparency status");
+		auto* transparencyGroup = ModernTheme::MakeCard(panel, L"Transparency status");
 		const wxString transparencyDescriptionText = L"Current conditions that can make glass opaque.";
 		auto* transparencyDescription = CreateWrappingLabel(panel, transparencyDescriptionText);
 		transparencyGroup->Add(transparencyDescription, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
@@ -190,7 +190,7 @@ namespace OpenGlass
 		transparencyButtonRow->Add(m_btnRefreshTransparencyDiagnostics, 0);
 		transparencyGroup->Add(transparencyButtonRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
 
-		wxStaticBoxSizer* downloadGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Symbols");
+		auto* downloadGroup = ModernTheme::MakeCard(panel, L"Symbols");
 		const wxString descriptionText =
 			L"Use this only when OpenGlass reports that it could not download symbols automatically for the current uDWM.dll or dwmcore.dll. "
 			L"It prefetches the exact public PDB files into a cache; it does not repair DWM crashes, change rendering, or perform any other repair.";
@@ -286,7 +286,7 @@ namespace OpenGlass
 		buttonRow->Add(m_btnCancelSymbolDownload, 0);
 		downloadGroup->Add(buttonRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
 
-		wxStaticBoxSizer* statusGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Symbol download status");
+		auto* statusGroup = ModernTheme::MakeCard(panel, L"Symbol download status");
 		m_gaugeSymbolDownload = new wxGauge(panel, wxID_ANY, 100);
 		statusGroup->Add(m_gaugeSymbolDownload, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
 
@@ -317,7 +317,7 @@ namespace OpenGlass
 		m_pnlSymbolDownloadResult->Hide();
 		statusGroup->Add(m_pnlSymbolDownloadResult, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
 
-		wxStaticBoxSizer* dumpGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"WER crash dumps");
+		auto* dumpGroup = ModernTheme::MakeCard(panel, L"WER crash dumps");
 		const wxString dumpDescriptionText = L"Collect full user-mode crash dumps for dwm.exe using its per-application Windows Error Reporting configuration. Full dumps can be large. The default folder is %ProgramData%\\OpenGlass\\dumps.";
 		wxStaticText* dumpDescription = CreateWrappingLabel(panel, dumpDescriptionText);
 		dumpGroup->Add(dumpDescription, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
@@ -407,7 +407,7 @@ namespace OpenGlass
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 
 		// Theme Resources Group
-		wxStaticBoxSizer* themeGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Theme");
+		auto* themeGroup = ModernTheme::MakeCard(panel, L"Theme");
 
 		// Custom Theme Atlas Row
 		{
@@ -430,7 +430,7 @@ namespace OpenGlass
 		sizer->Add(themeGroup, 0, wxEXPAND | wxALL, 2);
 
 		// Reflection Group
-		wxStaticBoxSizer* reflectionGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Reflection");
+		auto* reflectionGroup = ModernTheme::MakeCard(panel, L"Reflection");
 
 		// Custom Reflection Row
 		{
@@ -510,7 +510,7 @@ namespace OpenGlass
 		sizer->Add(reflectionGroup, 0, wxEXPAND | wxALL, 2);
 
 		// Material Group
-		wxStaticBoxSizer* materialGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Material");
+		auto* materialGroup = ModernTheme::MakeCard(panel, L"Material");
 
 		// CustomThemeMaterial
 		{
@@ -545,7 +545,7 @@ namespace OpenGlass
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 
 		// General Group
-		wxStaticBoxSizer* generalGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"General");
+		auto* generalGroup = ModernTheme::MakeCard(panel, L"General");
 		
 		// CCustomBlur's projected BlurAmount. BlurDeviation is its historical registry encoding.
 		m_slBlurAmount = new NativeSlider(
@@ -579,7 +579,7 @@ namespace OpenGlass
 
 		sizer->Add(generalGroup, 0, wxEXPAND | wxALL, 2);
 		// Window Group
-		wxStaticBoxSizer* geometryGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Window");
+		auto* geometryGroup = ModernTheme::MakeCard(panel, L"Window");
 
 		// Round Rect Radius
 		{
@@ -622,7 +622,7 @@ namespace OpenGlass
 		sizer->Add(geometryGroup, 0, wxEXPAND | wxALL, 2);
 
 		// Caption Group
-		wxStaticBoxSizer* textGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Caption");
+		auto* textGroup = ModernTheme::MakeCard(panel, L"Caption");
 
 		// Center Caption
 		{
@@ -703,7 +703,7 @@ namespace OpenGlass
 
 		sizer->Add(textGroup, 0, wxEXPAND | wxALL, 2);
 
-		wxStaticBoxSizer* accentGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Accent");
+		auto* accentGroup = ModernTheme::MakeCard(panel, L"Accent");
 		wxBoxSizer* accentRow = new wxBoxSizer(wxHORIZONTAL);
 		m_chkGlassOverrideAccent = new wxCheckBox(panel, wxID_ANY, L"Override accent");
 		m_chkGlassOverrideAccent->SetToolTip(L"Overrides accent blur surfaces with OpenGlass effects.");
@@ -725,6 +725,10 @@ namespace OpenGlass
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 		m_glassColorsPanel = panel;
 
+		// Glass type, transparency and intensity share one card at the top.
+		auto* glassGroup = ModernTheme::MakeCard(panel, L"Glass");
+		sizer->Add(glassGroup, 0, wxEXPAND | wxALL, 2);
+
 		// Glass Type
 		wxArrayString glassTypes;
 		glassTypes.Add(L"Windows Vista Aero");
@@ -734,10 +738,10 @@ namespace OpenGlass
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
 			row->Add(m_rbGlassType, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 			AddOptionStatus(panel, row, Settings::Id::GlassType);
-			sizer->Add(row, 0, wxALL, 5);
+			glassGroup->Add(row, 0, wxALL, 2);
 		}
 
-		m_colorPresetsGroupSizer = new wxStaticBoxSizer(wxVERTICAL, panel, L"Color presets");
+		m_colorPresetsGroupSizer = ModernTheme::MakeCard(panel, L"Color presets");
 		m_colorPresetList = new ColorPresetList(panel);
 		m_colorPresetsGroupSizer->Add(m_colorPresetList, 0, wxEXPAND | wxALL, 2);
 		sizer->Add(m_colorPresetsGroupSizer, 0, wxEXPAND | wxALL, 2);
@@ -750,7 +754,7 @@ namespace OpenGlass
 			if (m_systemTransparency) m_chkEnableTransparency->SetToolTip(L"Windows transparency effects for the current user.");
 			row->Add(m_chkEnableTransparency, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 			if (!m_systemTransparency) AddOptionStatus(panel, row, Settings::Id::ColorizationOpaqueBlend);
-			sizer->Add(row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
+			glassGroup->Add(row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
 		}
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
@@ -772,12 +776,12 @@ namespace OpenGlass
 			);
 			row->Add(m_slColorIntensity, 1, wxALIGN_CENTER_VERTICAL);
 			AddOptionStatus(panel, row, Settings::Id::GlassOpacity);
-			sizer->Add(row, 0, wxEXPAND | wxALL, 8);
+			glassGroup->Add(row, 0, wxEXPAND | wxALL, 4);
 		}
 
 		// Neutral glass without a hue, plus a visible way into the custom color editor.
 		{
-			wxStaticBoxSizer* tintGroup = new wxStaticBoxSizer(wxVERTICAL, panel, L"Glass tint");
+			auto* tintGroup = ModernTheme::MakeCard(panel, L"Glass tint");
 
 			wxBoxSizer* clearRow = new wxBoxSizer(wxHORIZONTAL);
 			clearRow->Add(new wxStaticText(panel, wxID_ANY, L"Clear glass:", wxDefaultPosition, FromDIP(wxSize(150, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
