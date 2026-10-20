@@ -141,6 +141,8 @@ namespace OpenGlass::ModernTheme
 			choice->Bind(wxEVT_KILL_FOCUS, [choice](wxFocusEvent& event) { choice->Refresh(false); event.Skip(); });
 			choice->Bind(wxEVT_CHOICE, [choice](wxCommandEvent& event) { choice->Refresh(false); event.Skip(); });
 			choice->Bind(wxEVT_ERASE_BACKGROUND, [](wxEraseEvent&) {});
+			// Windows repaints only the newly exposed strip of a resized control, which would leave the old box behind.
+			choice->Bind(wxEVT_SIZE, [choice](wxSizeEvent& event) { choice->Refresh(false); event.Skip(); });
 			choice->Bind(wxEVT_PAINT, [choice, hover](wxPaintEvent&)
 			{
 				wxAutoBufferedPaintDC dc(choice);
@@ -296,13 +298,14 @@ namespace OpenGlass::ModernTheme
 		{
 			// Tabs
 			{ L"System", 0xE713 }, { L"Theme", 0xE771 }, { L"Appearance", 0xE7F4 }, { L"Glass colors", 0xE790 },
-			{ L"Liquid Glass", 0xEB42 }, { L"Preset library", 0xE8F1 }, { L"Diagnostics", 0xE9D9 },
+			{ L"Liquid Glass", 0xEB42 }, { L"Taskbar", 0xE7C4 }, { L"Preset library", 0xE8F1 }, { L"Diagnostics", 0xE9D9 },
 			// Cards
 			{ L"Global", 0xE774 }, { L"Transparency status", 0xE7B3 }, { L"Symbols", 0xE943 },
 			{ L"Symbol download status", 0xE896 }, { L"WER crash dumps", 0xE7BA }, { L"Reflection", 0xE706 },
 			{ L"Material", 0xE8B9 }, { L"General", 0xE713 }, { L"Window", 0xE922 }, { L"Caption", 0xE8D2 },
 			{ L"Accent", 0xE790 }, { L"Glass", 0xE706 }, { L"Installed presets", 0xE8F1 }, { L"Color presets", 0xE790 }, { L"Glass tint", 0xEB42 },
-			{ L"Refraction", 0xEB42 }, { L"Blur", 0xE706 }, { L"Color", 0xE790 }, { L"Rim light", 0xE706 }
+			{ L"Refraction", 0xEB42 }, { L"Blur", 0xE706 }, { L"Color", 0xE790 }, { L"Rim light", 0xE706 },
+			{ L"Floating taskbar", 0xE7C4 }, { L"Pills", 0xEB42 }
 		};
 		const auto found = icons.find(title.ToStdWstring());
 		return found == icons.end() ? wxString() : wxString(found->second);
@@ -358,7 +361,10 @@ namespace OpenGlass::ModernTheme
 					PaintCard(*gc, *page, *card, wxRect(card->GetPosition() + offset, card->GetSize()));
 				}
 			}
-		});		page->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED, [page](wxCollapsiblePaneEvent& event) { page->Refresh(); event.Skip(); });
+		});
+		// The cards move and stretch with the window; a partial repaint would leave pieces of them behind.
+		page->Bind(wxEVT_SIZE, [page](wxSizeEvent& event) { page->Refresh(false); event.Skip(); });
+		page->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED, [page](wxCollapsiblePaneEvent& event) { page->Refresh(); event.Skip(); });
 		page->Refresh();
 	}
 
@@ -401,11 +407,39 @@ namespace OpenGlass::ModernTheme
 			}
 		});
 		m_book->Bind(wxEVT_BOOKCTRL_PAGE_CHANGED, [this](wxBookCtrlEvent& event) { Refresh(false); event.Skip(); });
+		Bind(wxEVT_SIZE, [this](wxSizeEvent& event) { Refresh(false); event.Skip(); });
 	}
 
+	// Wide enough for every tab, measured the way OnPaint lays them out (bold, as when selected).
 	wxSize TabBar::DoGetBestClientSize() const
 	{
-		return FromDIP(wxSize(480, 48));
+		wxBitmap bitmap(1, 1);
+		wxMemoryDC dc(bitmap);
+		std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) };
+		if (!gc)
+		{
+			return FromDIP(wxSize(480, 48));
+		}
+		const wxFont iconFont = IconFont(const_cast<TabBar*>(this), 12);
+		wxFont textFont = GetFont();
+		textFont.SetFractionalPointSize(textFont.GetFractionalPointSize() * 1.1);
+		textFont.SetWeight(wxFONTWEIGHT_SEMIBOLD);
+		double x = FromDIP(4);
+		for (size_t index = 0; index < m_book->GetPageCount(); ++index)
+		{
+			const wxString label = m_book->GetPageText(index);
+			const wxString icon = IconFor(label);
+			double iconWidth{}, height{}, textWidth{};
+			if (!icon.empty())
+			{
+				gc->SetFont(iconFont, Get().text);
+				gc->GetTextExtent(icon, &iconWidth, &height);
+			}
+			gc->SetFont(textFont, Get().text);
+			gc->GetTextExtent(label, &textWidth, &height);
+			x += (icon.empty() ? 0 : iconWidth + FromDIP(8)) + textWidth + FromDIP(14) * 2 + FromDIP(4);
+		}
+		return wxSize(static_cast<int>(std::ceil(x)), FromDIP(48));
 	}
 
 	int TabBar::HitTest(const wxPoint& point) const

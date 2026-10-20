@@ -121,7 +121,16 @@ namespace OpenGlass
 			}
 		}
 
-		GetSizer()->Add(new ModernTheme::TabBar(this, m_notebook), 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(8));
+		auto* tabBar = new ModernTheme::TabBar(this, m_notebook);
+		GetSizer()->Add(tabBar, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(8));
+		// Every tab stays in view: the window opens wide enough for all of them and cannot be made narrower.
+		const int tabsWidth = tabBar->GetBestSize().x + FromDIP(16);
+		SetMinClientSize(wxSize(tabsWidth, FromDIP(480)));
+		const wxSize client = GetClientSize();
+		if (client.x < tabsWidth)
+		{
+			SetClientSize(tabsWidth, client.y);
+		}
 		GetSizer()->Add(m_notebook, 1, wxEXPAND | wxALL, FromDIP(6));
 	}
 
