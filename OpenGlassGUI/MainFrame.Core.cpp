@@ -884,16 +884,8 @@ namespace OpenGlass
 		{
 			return;
 		}
-		if (!RunPreview([&]
-		{
-			const auto sid = m_targetUserSid.ToStdWstring();
-			DWORD rgb{};
-			THROW_IF_FAILED(m_colorPreference.ReadRgb(sid, rgb));
-			THROW_IF_FAILED(m_colorPreference.SaveAccent(sid, rgb, [this](const auto& before)
-			{
-				m_resources.TrackColor(before);
-			}));
-		}, Settings::UpdateType::Backdrop)) return;
+		// Save no longer copies the glass color into the Windows accent (AccentColorMenu): the glass
+		// keeps its own color, and the accent stays whatever Windows Settings has.
 		try { m_resources.Accept(); }
 		catch (...) { wxMessageBox(L"The recovery record could not be completed. Retry Save or Revert.", L"Configuration recovery", wxOK | wxICON_ERROR, this); return; }
 		if (m_resources.TakeCleanupWarning()) wxMessageBox(L"The configuration checkpoint is complete. Temporary-file cleanup will be retried on the next operation.", L"Configuration cleanup", wxOK | wxICON_INFORMATION, this);

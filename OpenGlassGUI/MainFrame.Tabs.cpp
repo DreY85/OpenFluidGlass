@@ -798,7 +798,7 @@ namespace OpenGlass
 			auto* pickButton = new wxButton(panel, wxID_ANY, L"Pick any color...");
 			pickButton->SetToolTip(L"Opens the full color picker. The chosen color uses the Color intensity above.");
 			pickRow->Add(pickButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
-			auto* tintNote = new wxStaticText(panel, wxID_ANY, L"Both also set the Windows accent color, like the swatches above.");
+			auto* tintNote = new wxStaticText(panel, wxID_ANY, L"Only the glass changes. The Windows accent color stays as set in Windows Settings.");
 			tintNote->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
 			pickRow->Add(tintNote, 1, wxALIGN_CENTER_VERTICAL);
 			tintGroup->Add(pickRow, 0, wxEXPAND | wxALL, 4);

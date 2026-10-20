@@ -118,7 +118,7 @@ namespace OpenGlass
 		bool RunPreview(const std::function<void()>& operation,
 			Settings::UpdateType impact = Settings::UpdateType::Backdrop | Settings::UpdateType::Theme);
 		ColorPreference m_colorPreference;
-		void ApplyAccentColor(std::optional<DWORD> argb);
+		void WriteGlassColor(DWORD argb);
 		ConfigurationResources m_resources;
 		wil::unique_hfile m_previewWriter;
 		void EnsurePreviewWriter();

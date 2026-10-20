@@ -937,7 +937,6 @@ namespace OpenGlass
 				}
 				THROW_IF_FAILED(m_userConfig->CheckDeleteAccess());
 				THROW_IF_FAILED(m_systemConfig->CheckDeleteAccess());
-				ApplyAccentColor(package.accentColor);
 				m_resources.Install(*prepared);
 				for (const auto& change : plan)
 				{
@@ -945,6 +944,9 @@ namespace OpenGlass
 					TrackSettingChange(change.scope, change.id);
 					THROW_IF_FAILED(GetConfigForScope(change.scope)->WriteRaw(change.Name(), change.after));
 				}
+				// The plan removed the color overrides; a preset with a color gives the glass its own again,
+				// one without leaves it following the Windows accent. The accent itself is never changed.
+				if (package.accentColor) WriteGlassColor(*package.accentColor);
 			});
 			if (applied)
 			{

@@ -24,23 +24,22 @@ namespace OpenGlass
 		}
 	}
 
-	void MainFrame::ApplyAccentColor(std::optional<DWORD> argb)
+	// The user's own glass color: both overrides take its hue and keep the alpha Windows gave each base color.
+	void MainFrame::WriteGlassColor(DWORD argb)
 	{
-		THROW_IF_FAILED(m_colorPreference.Apply(m_targetUserSid.ToStdWstring(), argb, [this](const auto& before)
+		const auto writeOverride = [this, rgb = argb & 0xFFFFFF](Settings::Id id, PCWSTR base)
 		{
-			m_resources.TrackColor(before);
-			TrackSettingChange(Settings::Scope::User, Settings::Id::ColorizationColor);
-			TrackSettingChange(Settings::Scope::User, Settings::Id::ColorizationAfterglow);
-		}));
-		const auto baseline = m_colorPreference.Baseline();
-		if (!argb && (!baseline || !baseline->applyChoice || baseline->RestoresAutomatic()))
-		{
-			// Returning to Automatic leaves no fixed RGB customization to undo.
-			m_preview.DiscardBaseline({ Settings::Scope::User, Settings::Id::ColorizationColor });
-			m_preview.DiscardBaseline({ Settings::Scope::User, Settings::Id::ColorizationAfterglow });
-		}
+			TrackSettingChange(Settings::Scope::User, id);
+			THROW_IF_FAILED(m_userConfig->SetDword(std::wstring(Settings::Get(id).name), (m_userConfig->GetDword(base, 0xFF000000) & 0xFF000000) | rgb));
+		};
+		writeOverride(Settings::Id::ColorizationColorOverride, L"ColorizationColor");
+		writeOverride(Settings::Id::ColorizationAfterglowOverride, L"ColorizationAfterglow");
 	}
 
+	// The glass color belongs to OpenGlass alone. A fixed or custom color goes into the user's
+	// ColorizationColorOverride and ColorizationAfterglowOverride, which OpenGlass reads before the
+	// Windows accent, so the accent color set in Windows Settings stays untouched. Automatic removes
+	// both overrides: the glass then follows the Windows accent color again.
 	void MainFrame::ApplyColorizationColor(std::optional<DWORD> argb, ColorizationPresets::Family family)
 	{
 		if (!m_config)
@@ -56,20 +55,20 @@ namespace OpenGlass
 				THROW_IF_FAILED(m_config->SetDword(name, value));
 			};
 
+			// Overrides in either hive would mask the choice; the user's own are rewritten below.
 			const auto cleanup = EffectiveConfiguration::PlanColorCleanup(EffectiveConfiguration::Read(*m_userConfig, false), EffectiveConfiguration::Read(*m_systemConfig));
 			THROW_IF_FAILED(m_userConfig->CheckDeleteAccess());
 			THROW_IF_FAILED(m_systemConfig->CheckDeleteAccess());
-			ApplyAccentColor(argb);
 			for (const auto& change : cleanup)
 			{
+				if (argb && change.scope == Settings::Scope::User) continue;
 				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_RETRY), GetConfigForScope(change.scope)->ReadRaw(change.Name()) != change.before);
 				TrackSettingChange(change.scope, change.id);
 				THROW_IF_FAILED(GetConfigForScope(change.scope)->WriteRaw(change.Name(), change.after));
 			}
-			DWORD color = argb.value_or(0);
-			// Native image calculation requires Automatic to be enabled. Its alpha
-			// is independent of the Shell's final ColorizationColor alpha.
-			if (!argb) THROW_IF_FAILED(m_colorPreference.ComputeWallpaperColor(m_targetUserSid.ToStdWstring(), color));
+
+			const DWORD color = argb.value_or(m_userConfig->GetDword(L"ColorizationColor", 0xFF000000));
+			if (argb) WriteGlassColor(*argb);
 			setDword(Settings::Id::GlassOpacity, ColorizationPresets::CalculateVistaOpacity(color));
 			if (family == ColorizationPresets::Family::Windows7) ApplyColorizationBalances(color);
 		}, Settings::UpdateType::Backdrop)) LoadSettings();
@@ -87,8 +86,12 @@ namespace OpenGlass
 			return nullptr;
 		}
 
-		const DWORD color = m_userConfig->GetDword(L"ColorizationColor", 0xFF000000);
-		const DWORD afterglow = m_userConfig->GetDword(L"ColorizationAfterglow", 0);
+		const auto glass = [this](PCWSTR overrideName, PCWSTR baseName, DWORD fallback)
+		{
+			return m_userConfig->ReadRaw(overrideName).present ? m_userConfig->GetDword(overrideName, fallback) : m_userConfig->GetDword(baseName, fallback);
+		};
+		const DWORD color = glass(L"ColorizationColorOverride", L"ColorizationColor", 0xFF000000);
+		const DWORD afterglow = glass(L"ColorizationAfterglowOverride", L"ColorizationAfterglow", 0);
 		const DWORD colorBalance = m_config->GetDword(L"ColorizationColorBalanceOverride", 10);
 		const DWORD afterglowBalance = m_config->GetDword(L"ColorizationAfterglowBalanceOverride", 10);
 		const DWORD blurBalance = m_config->GetDword(L"ColorizationBlurBalanceOverride", 50);
@@ -150,15 +153,17 @@ namespace OpenGlass
 			return;
 		}
 
-		bool automatic{};
-		const auto modeResult = m_colorPreference.ReadAutoColorization(m_targetUserSid.ToStdWstring(), automatic);
-		const bool manual = SUCCEEDED(modeResult) && !automatic;
-		m_colorPresetList->SetAutomaticDescription(SUCCEEDED(modeResult) ? wxString(L"Automatic accent color from the wallpaper")
-			: wxString::Format(L"Could not read the automatic accent color setting (0x%08lX).", modeResult));
+		// The glass has its own color while the user's override exists; without it, it follows Windows.
+		const auto own = m_userConfig->ReadRaw(L"ColorizationColorOverride");
+		const bool automatic = !own.present;
+		const bool manual = !automatic;
+		const HRESULT modeResult = S_OK;
+		const DWORD glassColor = m_userConfig->GetDword(manual ? L"ColorizationColorOverride" : L"ColorizationColor", 0xFF000000);
+		m_colorPresetList->SetAutomaticDescription(L"Follow the Windows accent color");
 		const ColorizationPresets::Preset* selectedPreset = nullptr;
 		if (m_rbGlassType->GetSelection() == 0)
 		{
-			const DWORD color = m_userConfig->GetDword(L"ColorizationColor", 0xFF000000);
+			const DWORD color = glassColor;
 			const DWORD opacity = m_config->GetDword(L"GlassOpacity", 63);
 			for (const auto& preset : ColorizationPresets::Vista)
 			{
@@ -178,9 +183,9 @@ namespace OpenGlass
 				m_chkEnableTransparency && !m_chkEnableTransparency->IsChecked()
 			);
 		}
-		DWORD color = m_userConfig->GetDword(L"ColorizationColor", 0xFF000000);
+		DWORD color = glassColor;
 		bool colorAvailable = true;
-		if (SUCCEEDED(modeResult) && automatic)
+		if (automatic)
 		{
 			// Read the original user's current accent, never the elevated account or message payload.
 			colorAvailable = SUCCEEDED(m_colorPreference.ReadRgb(m_targetUserSid.ToStdWstring(), color));
