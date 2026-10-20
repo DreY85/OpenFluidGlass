@@ -193,6 +193,7 @@ namespace OpenGlass
 		m_chCaptionButtons->SetSelection(std::clamp<int>(m_config->GetDword(L"CaptionButtons", 0), 0, 3));
 		m_chCenterCaption->SetSelection(std::clamp<int>(m_config->GetDword(L"CenterCaption", 0), 0, 2));
 		m_chkDisableModernBorders->SetValue(m_config->GetDword(L"DisableModernBorders", 0) != 0);
+		m_chkCaptionTextBold->SetValue(m_config->GetDword(L"CaptionTextBold", 0) != 0);
 
 		// Colors
 		auto dwordToColor = [](DWORD dw) -> wxColour {

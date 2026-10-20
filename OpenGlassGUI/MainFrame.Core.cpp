@@ -55,7 +55,7 @@ namespace OpenGlass
 	}
 
 	MainFrame::MainFrame(std::wstring userSid, Settings::Scope scope, bool systemTransparency)
-		: wxFrame(nullptr, wxID_ANY, L"Aero Glass for Win10+", wxDefaultPosition, wxSize(900, 750))
+		: wxFrame(nullptr, wxID_ANY, L"Open Liquid Glass", wxDefaultPosition, wxSize(900, 750))
 	{
 		SetIcons(wxIconBundle(wxString::Format(L"#%d", IDI_OPENGLASS), reinterpret_cast<WXHINSTANCE>(GetModuleHandleW(nullptr))));
 		m_isAdmin = Elevation::IsProcessElevated();
@@ -1650,6 +1650,16 @@ namespace OpenGlass
 			else
 			{
 				updateDword(Settings::Id::DisableModernBorders, 1);
+			}
+		});
+		m_chkCaptionTextBold->Bind(wxEVT_CHECKBOX, [this, updateDword, deleteValue]([[maybe_unused]] wxCommandEvent& e) {
+			if (!e.IsChecked())
+			{
+				deleteValue(Settings::Id::CaptionTextBold);
+			}
+			else
+			{
+				updateDword(Settings::Id::CaptionTextBold, 1);
 			}
 		});
 

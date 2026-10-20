@@ -640,6 +640,16 @@ namespace OpenGlass
 			textGroup->Add(row, 0, wxEXPAND | wxALL, 2);
 		}
 
+		// Bold Caption Text
+		{
+			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
+			m_chkCaptionTextBold = new wxCheckBox(panel, wxID_ANY, L"Bold title text");
+			m_chkCaptionTextBold->SetToolTip(L"Draws window titles semibold. Windows 11 titles only.");
+			row->Add(m_chkCaptionTextBold, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+			AddOptionStatus(panel, row, Settings::Id::CaptionTextBold);
+			textGroup->Add(row, 0, wxEXPAND | wxALL, 2);
+		}
+
 		// Text Glow Mode
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);

@@ -166,6 +166,22 @@ namespace OpenGlass::CaptionTextHandler
 	int g_textGlowSize{};
 	int g_textGlowIntensity{};
 	int g_centerCaption{ 0 };
+	bool g_boldCaption{ false };
+	// Bold glyphs are a little wider than the regular ones uDWM measured the title with.
+	constexpr float c_boldWidening{ 1.08f };
+
+	bool IsLightColor(COLORREF color)
+	{
+		return 0.2126 * GetRValue(color) + 0.7152 * GetGValue(color) + 0.0722 * GetBValue(color) > 140.0;
+	}
+
+	// Windows dark or light mode for apps, read from the user's Personalize key that the service hands DWM.
+	bool AppsUseDarkMode()
+	{
+		DWORD value{ 1 }, size{ sizeof(value) };
+		RegGetValueW(GlassEngine::GetPersonalizeKey(), nullptr, L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size);
+		return value == 0;
+	}
 	int CaptionCenterOffset(double visualWidth, double textWidth, double visualX, double parentWidth, double scale)
 	{
 		const int localOffset = std::max(
@@ -309,7 +325,8 @@ int WINAPI CaptionTextHandler::MyDrawTextW(
 	});
 	IntersectClipRect(hdc, glowClipRect.left, glowClipRect.top, glowClipRect.right, glowClipRect.bottom);
 
-	if (Shared::g_textGlowMode == 1 || Shared::g_textGlowMode == 2)
+	// The theme's light glow would wash out light text, so it only goes behind dark text.
+	if (!IsLightColor(options.crText) && (Shared::g_textGlowMode == 1 || Shared::g_textGlowMode == 2))
 	{
 		if (!g_textGlowRT)
 		{
@@ -577,6 +594,16 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 	{
 		solidColorBrush->SetColor(Color::FromAbgr(textColorOverride));
 	}
+	const auto drawnColor = solidColorBrush->GetColor();
+	const bool lightText = 0.2126f * drawnColor.r + 0.7152f * drawnColor.g + 0.0722f * drawnColor.b > 0.55f;
+
+	// uDWM may draw the same layout again; only widen it the first time it turns bold.
+	DWRITE_FONT_WEIGHT weight{};
+	if (g_boldCaption && SUCCEEDED(textLayout->GetFontWeight(0, &weight)) && weight < DWRITE_FONT_WEIGHT_SEMI_BOLD)
+	{
+		textLayout->SetMaxWidth(textLayout->GetMaxWidth() * c_boldWidening);
+		textLayout->SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE{ 0, UINT32_MAX });
+	}
 
 	DWRITE_LINE_METRICS lineMetrics{};
 	UINT32 lineCount{};
@@ -694,7 +721,8 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		THROW_IF_FAILED(
 			g_textGlowEffect->SetValue(
 				D2D1_SHADOW_PROP_COLOR,
-				Color::FromAbgr(g_textGlowColor | (std::min(g_textGlowIntensity, 255) << 24), false)
+				// Light text gets a dark halo instead of the theme's light one.
+				Color::FromAbgr((lightText ? RGB(0, 0, 0) : g_textGlowColor) | (std::min(g_textGlowIntensity, 255) << 24), false)
 			)
 		);
 		THROW_IF_FAILED(
@@ -723,7 +751,8 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		);
 		return;
 	}
-	if (Shared::g_textGlowMode == 1 || Shared::g_textGlowMode == 2)
+	// The theme's light glow would wash out light text, so it only goes behind dark text.
+	if (!lightText && (Shared::g_textGlowMode == 1 || Shared::g_textGlowMode == 2))
 	{
 		if (!g_textGlowD2DBitmap)
 		{
@@ -840,6 +869,10 @@ HRESULT CaptionTextHandler::MyICompositionGraphicsDevice_CreateDrawingSurface(
 {
 	if (g_dwriteTextVisual)
 	{
+		if (g_boldCaption)
+		{
+			sizePixels.Width = std::ceil(sizePixels.Width * c_boldWidening);
+		}
 		g_textSizeF = sizePixels;
 		sizePixels.Width += g_textGlowSize * 2;
 		sizePixels.Height += g_textGlowSize * 2;
@@ -1107,11 +1140,16 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 	if (type & GlassEngine::UpdateType::Backdrop || type & GlassEngine::UpdateType::Theme)
 	{
 		g_centerCaption = std::clamp(static_cast<int>(GlassEngine::GetDwordFromRegistry(L"CenterCaption", FALSE)), 0, 2);
+		g_boldCaption = GlassEngine::GetDwordFromRegistry(L"CaptionTextBold", 0) != 0;
 		g_captionActiveColor = GlassEngine::GetDwordFromRegistry(L"ColorizationColorCaption", 0xFFFFFFFD);
 		g_captionInactiveColor = GlassEngine::GetDwordFromRegistry(L"ColorizationColorCaptionInactive", g_captionActiveColor);
 		g_captionActiveColorMaximized = GlassEngine::GetDwordFromRegistry(L"ColorizationColorCaptionMaximized", g_captionActiveColor);
 		g_captionInactiveColorMaximized = GlassEngine::GetDwordFromRegistry(L"ColorizationColorCaptionInactiveMaximized", g_captionInactiveColor);
 
+		// Auto follows the Windows app mode: light text on dark mode, black on light mode as in Windows 7.
+		const bool darkMode = AppsUseDarkMode();
+		const COLORREF autoActive = darkMode ? RGB(255, 255, 255) : RGB(0, 0, 0);
+		const COLORREF autoInactive = darkMode ? RGB(190, 190, 190) : RGB(0, 0, 0);
 		const auto themeHandle = CustomThemeAtlasLoader::GetThemeHandle();
 		if (themeHandle)
 		{
@@ -1121,7 +1159,7 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 			}
 			else if (g_captionActiveColor == 0xFFFFFFFD)
 			{
-				g_captionActiveColor = RGB(0, 0, 0);
+				g_captionActiveColor = autoActive;
 			}
 			if (g_captionInactiveColor == 0xFFFFFFFE)
 			{
@@ -1129,7 +1167,7 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 			}
 			else if (g_captionInactiveColor == 0xFFFFFFFD)
 			{
-				g_captionInactiveColor = RGB(0, 0, 0);
+				g_captionInactiveColor = autoInactive;
 			}
 			if (g_captionActiveColorMaximized == 0xFFFFFFFE)
 			{
@@ -1139,7 +1177,7 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 			{
 				if (Shared::g_type == Shared::GlassType::Aero)
 				{
-					g_captionActiveColorMaximized = RGB(0, 0, 0);
+					g_captionActiveColorMaximized = autoActive;
 				}
 				else
 				{
@@ -1154,7 +1192,7 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 			{
 				if (Shared::g_type == Shared::GlassType::Aero)
 				{
-					g_captionInactiveColorMaximized = RGB(0, 0, 0);
+					g_captionInactiveColorMaximized = autoInactive;
 				}
 				else
 				{
