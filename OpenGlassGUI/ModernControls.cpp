@@ -64,7 +64,7 @@ namespace OpenGlass::ModernTheme
 
 		wxColour SurfaceOf(wxWindow* window)
 		{
-			return window->UseBgCol() ? window->GetBackgroundColour() : window->GetParent()->GetBackgroundColour();
+			return SurfaceBehind(window);
 		}
 
 		wxColour Mix(const wxColour& from, const wxColour& to, double amount)

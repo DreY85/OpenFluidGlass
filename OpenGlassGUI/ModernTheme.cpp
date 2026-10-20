@@ -124,46 +124,69 @@ namespace OpenGlass::ModernTheme
 			}
 		}
 
+		// Every field is the same height as the buttons, whatever height Windows gives the control
+		// inside it: drop-downs stay 23 px tall, so the field is centered on the control and
+		// drawn partly by its parent.
+		wxRect FieldRect(const wxWindow* window, const wxRect& control)
+		{
+			const int height = std::max(window->FromDIP(32), control.height);
+			return wxRect(control.x, control.y + (control.height - height) / 2, control.width, height);
+		}
+
+		void DrawField(wxGraphicsContext& gc, const wxWindow* window, const wxRect& field, bool focused, bool hover)
+		{
+			const auto& palette = Get();
+			const bool active = hover && window->IsEnabled();
+			gc.SetPen(wxPen(focused ? palette.accent : active ? palette.subtext : palette.border, window->FromDIP(1)));
+			gc.SetBrush(wxBrush(FieldColour(active)));
+			gc.DrawRoundedRectangle(field.x + 0.5, field.y + 0.5, field.width - 1.0, field.height - 1.0, window->FromDIP(6));
+		}
+
+		// Drop-downs under the pointer; their parent draws the part of the field outside them.
+		std::set<const wxWindow*>& HoveredChoices()
+		{
+			static std::set<const wxWindow*> hovered;
+			return hovered;
+		}
+
+		void RefreshField(wxWindow* control)
+		{
+			control->Refresh(false);
+			control->GetParent()->RefreshRect(FieldRect(control, control->GetRect()).Inflate(2), false);
+		}
+
 		// Drop-downs keep the native list but draw their closed field as a rounded box with a chevron.
 		void StyleChoice(wxChoice* choice)
 		{
-			const auto hwnd = static_cast<HWND>(choice->GetHWND());
-			// Taller selection field, like the concept's roomy inputs.
-			SendMessageW(hwnd, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), choice->FromDIP(24));
-			choice->InvalidateBestSize();
 			// The wider padding and chevron need room beyond the native best width.
-			choice->SetMinSize(wxSize(choice->GetBestSize().x + choice->FromDIP(24), choice->FromDIP(32)));
+			choice->SetMinSize(wxSize(choice->GetBestSize().x + choice->FromDIP(24), -1));
 
-			auto hover = std::make_shared<bool>(false);
-			choice->Bind(wxEVT_ENTER_WINDOW, [choice, hover](wxMouseEvent& event) { *hover = true; choice->Refresh(false); event.Skip(); });
-			choice->Bind(wxEVT_LEAVE_WINDOW, [choice, hover](wxMouseEvent& event) { *hover = false; choice->Refresh(false); event.Skip(); });
-			choice->Bind(wxEVT_SET_FOCUS, [choice](wxFocusEvent& event) { choice->Refresh(false); event.Skip(); });
-			choice->Bind(wxEVT_KILL_FOCUS, [choice](wxFocusEvent& event) { choice->Refresh(false); event.Skip(); });
+			choice->Bind(wxEVT_ENTER_WINDOW, [choice](wxMouseEvent& event) { HoveredChoices().insert(choice); RefreshField(choice); event.Skip(); });
+			choice->Bind(wxEVT_LEAVE_WINDOW, [choice](wxMouseEvent& event) { HoveredChoices().erase(choice); RefreshField(choice); event.Skip(); });
+			choice->Bind(wxEVT_DESTROY, [choice](wxWindowDestroyEvent& event) { if (event.GetEventObject() == choice) HoveredChoices().erase(choice); event.Skip(); });
+			choice->Bind(wxEVT_SET_FOCUS, [choice](wxFocusEvent& event) { RefreshField(choice); event.Skip(); });
+			choice->Bind(wxEVT_KILL_FOCUS, [choice](wxFocusEvent& event) { RefreshField(choice); event.Skip(); });
 			choice->Bind(wxEVT_CHOICE, [choice](wxCommandEvent& event) { choice->Refresh(false); event.Skip(); });
 			choice->Bind(wxEVT_ERASE_BACKGROUND, [](wxEraseEvent&) {});
 			// Windows repaints only the newly exposed strip of a resized control, which would leave the old box behind.
-			choice->Bind(wxEVT_SIZE, [choice](wxSizeEvent& event) { choice->Refresh(false); event.Skip(); });
-			choice->Bind(wxEVT_PAINT, [choice, hover](wxPaintEvent&)
+			choice->Bind(wxEVT_SIZE, [choice](wxSizeEvent& event) { RefreshField(choice); event.Skip(); });
+			choice->Bind(wxEVT_MOVE, [choice](wxMoveEvent& event) { RefreshField(choice); event.Skip(); });
+			choice->Bind(wxEVT_PAINT, [choice](wxPaintEvent&)
 			{
 				wxAutoBufferedPaintDC dc(choice);
 				const auto& palette = Get();
 				const wxSize size = choice->GetClientSize();
-				dc.SetBackground(wxBrush(choice->GetParent()->GetBackgroundColour()));
+				dc.SetBackground(wxBrush(SurfaceBehind(choice->GetParent())));
 				dc.Clear();
 				std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) };
 				if (!gc)
 				{
 					return;
 				}
-				const bool enabled = choice->IsEnabled();
-				const bool focused = choice->HasFocus();
-				const wxColour field = palette.dark ? (*hover && enabled ? wxColour(32, 52, 82) : wxColour(24, 41, 66)) : (*hover && enabled ? wxColour(246, 249, 253) : *wxWHITE);
-				const wxColour outline = focused ? palette.accent : *hover && enabled ? palette.subtext : palette.border;
-				gc->SetPen(wxPen(outline, choice->FromDIP(1)));
-				gc->SetBrush(wxBrush(field));
-				gc->DrawRoundedRectangle(0.5, 0.5, size.x - 1.0, size.y - 1.0, choice->FromDIP(6));
+				// The same field the parent draws, in this control's coordinates; the window cuts it.
+				DrawField(*gc, choice, FieldRect(choice, wxRect(size)), choice->HasFocus(), HoveredChoices().contains(choice));
 
-				const wxColour foreground = enabled ? palette.text : palette.subtext;
+				const bool enabled = choice->IsEnabled();
 				const double padding = choice->FromDIP(12);
 				const wxString chevron(wxUniChar(0xE70D));
 				double chevronWidth{}, chevronHeight{};
@@ -172,7 +195,7 @@ namespace OpenGlass::ModernTheme
 				const double chevronX = size.x - padding - chevronWidth;
 				gc->DrawText(chevron, chevronX, (size.y - chevronHeight) / 2);
 
-				gc->SetFont(choice->GetFont(), foreground);
+				gc->SetFont(choice->GetFont(), enabled ? palette.text : palette.subtext);
 				gc->Clip(padding, 0, std::max(chevronX - padding - choice->FromDIP(6), 0.0), size.y);
 				double textWidth{}, textHeight{};
 				const wxString text = choice->GetStringSelection();
@@ -213,37 +236,40 @@ namespace OpenGlass::ModernTheme
 			const auto& palette = Get();
 			for (auto* child : parent.GetChildren())
 			{
-				if (auto* text = wxDynamicCast(child, wxTextCtrl); text && text->GetName() == c_textFieldName && text->IsShown())
+				if (!child->IsShown())
 				{
-					const wxRect field = text->GetRect().Inflate(text->FromDIP(4), text->FromDIP(4));
-					gc.SetPen(wxPen(text->HasFocus() ? palette.accent : palette.border, text->FromDIP(1)));
-					gc.SetBrush(wxBrush(FieldColour(false)));
-					gc.DrawRoundedRectangle(field.x + 0.5, field.y + 0.5, field.width - 1.0, field.height - 1.0, text->FromDIP(6));
+					continue;
+				}
+				if (auto* choice = wxDynamicCast(child, wxChoice))
+				{
+					DrawField(gc, choice, FieldRect(choice, choice->GetRect()), choice->HasFocus(), HoveredChoices().contains(choice));
+					continue;
+				}
+				if (auto* text = wxDynamicCast(child, wxTextCtrl); text && text->GetName() == c_textFieldName)
+				{
+					DrawField(gc, text, FieldRect(text, text->GetRect()), text->HasFocus(), false);
 					continue;
 				}
 				auto* spin = wxDynamicCast(child, wxSpinCtrl);
-				if (!spin || spin->GetName() != c_numberBoxName || !spin->IsShown())
+				if (!spin || spin->GetName() != c_numberBoxName)
 				{
 					continue;
 				}
 				const wxRect arrows = ParentRectOf(spin, UpDownOf(spin));
-				const wxRect field = ParentRectOf(spin, EditOf(spin)).Union(arrows).Inflate(spin->FromDIP(4), spin->FromDIP(4));
-				const bool enabled = spin->IsEnabled();
-				const bool focused = GetFocus() == EditOf(spin);
-				gc.SetPen(wxPen(focused ? palette.accent : palette.border, spin->FromDIP(1)));
-				gc.SetBrush(wxBrush(FieldColour(false)));
-				gc.DrawRoundedRectangle(field.x + 0.5, field.y + 0.5, field.width - 1.0, field.height - 1.0, spin->FromDIP(6));
+				const wxRect field = FieldRect(spin, ParentRectOf(spin, EditOf(spin)).Union(arrows));
+				DrawField(gc, spin, field, GetFocus() == EditOf(spin), false);
 
-				const wxColour chevronColour = enabled ? palette.subtext : palette.border;
+				const wxColour chevronColour = spin->IsEnabled() ? palette.subtext : palette.border;
 				const wxFont font = IconFont(spin, 6.5);
+				const double centerY = field.y + field.height / 2.0;
 				for (const bool up : { true, false })
 				{
 					const wxString chevron(wxUniChar(up ? 0xE70E : 0xE70D));
 					double width{}, height{};
 					gc.SetFont(font, chevronColour);
 					gc.GetTextExtent(chevron, &width, &height);
-					const double centerY = arrows.y + arrows.height * (up ? 0.3 : 0.7);
-					gc.DrawText(chevron, arrows.x + (arrows.width - width) / 2, centerY - height / 2);
+					const double chevronY = centerY + (up ? -1 : 1) * spin->FromDIP(5);
+					gc.DrawText(chevron, arrows.x + (arrows.width - width) / 2, chevronY - height / 2);
 				}
 			}
 		}
@@ -307,6 +333,7 @@ namespace OpenGlass::ModernTheme
 			};
 			clip();
 			spin->Bind(wxEVT_SIZE, [clip](wxSizeEvent& event) { event.Skip(); clip(); });
+			SendMessageW(edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(spin->FromDIP(11), spin->FromDIP(4)));
 			spin->SetBackgroundColour(FieldColour(false));
 			spin->SetForegroundColour(Get().text);
 
@@ -337,7 +364,7 @@ namespace OpenGlass::ModernTheme
 			};
 			clip();
 			text->Bind(wxEVT_SIZE, [clip](wxSizeEvent& event) { event.Skip(); clip(); });
-			SendMessageW(hwnd, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(text->FromDIP(4), text->FromDIP(4)));
+			SendMessageW(hwnd, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(text->FromDIP(11), text->FromDIP(8)));
 			text->SetBackgroundColour(FieldColour(false));
 			text->SetForegroundColour(Get().text);
 
@@ -427,6 +454,21 @@ namespace OpenGlass::ModernTheme
 			list->Refresh();
 		}
 
+		// A field is taller than the control inside it. Its sizer item gets room above and below, so
+		// stacked rows keep a gap between their fields instead of touching.
+		void MakeRoomForField(wxWindow* control)
+		{
+			const int need = (control->FromDIP(34) - control->GetSize().y + 1) / 2;
+			wxSizer* sizer = control->GetContainingSizer();
+			wxSizerItem* item = sizer ? sizer->GetItem(control) : nullptr;
+			if (need <= 0 || !item)
+			{
+				return;
+			}
+			item->SetFlag(item->GetFlag() | wxTOP | wxBOTTOM);
+			item->SetBorder(std::max(item->GetBorder(), need));
+		}
+
 		// Themes every control below a window. Field parents collect the windows that must paint fields.
 		void StyleTree(wxWindow* window, std::set<wxWindow*>& fieldParents)
 		{
@@ -439,10 +481,13 @@ namespace OpenGlass::ModernTheme
 				if (auto* choice = wxDynamicCast(child, wxChoice))
 				{
 					StyleChoice(choice);
+					MakeRoomForField(choice);
+					fieldParents.insert(window);
 				}
 				else if (auto* spin = wxDynamicCast(child, wxSpinCtrl))
 				{
 					StyleNumberBox(spin);
+					MakeRoomForField(spin);
 					fieldParents.insert(window);
 				}
 				else if (auto* text = wxDynamicCast(child, wxTextCtrl))
@@ -454,9 +499,10 @@ namespace OpenGlass::ModernTheme
 					{
 						if (auto* item = picker->GetSizer()->GetItem(text))
 						{
-							item->SetBorder(text->FromDIP(12));
+							item->SetBorder(text->FromDIP(6));
 						}
 					}
+					MakeRoomForField(text);
 				}
 				else if (auto* button = wxDynamicCast(child, wxButton))
 				{
@@ -501,7 +547,7 @@ namespace OpenGlass::ModernTheme
 			parent->Bind(wxEVT_PAINT, [parent](wxPaintEvent&)
 			{
 				wxAutoBufferedPaintDC dc(parent);
-				dc.SetBackground(wxBrush(parent->GetBackgroundColour()));
+				dc.SetBackground(wxBrush(SurfaceBehind(parent)));
 				dc.Clear();
 				if (std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) })
 				{
@@ -594,6 +640,15 @@ namespace OpenGlass::ModernTheme
 				}
 			}
 		}
+	}
+
+	wxColour SurfaceBehind(wxWindow* window)
+	{
+		while (!window->UseBgCol() && window->GetParent() && !window->IsTopLevel())
+		{
+			window = window->GetParent();
+		}
+		return window->GetBackgroundColour();
 	}
 
 	const Palette& Get()

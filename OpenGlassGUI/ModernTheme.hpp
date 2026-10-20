@@ -43,6 +43,8 @@ namespace OpenGlass::ModernTheme
 	void StyleDialog(wxDialog* dialog);
 	// Background of text, number and drop-down fields.
 	wxColour FieldColour(bool hover);
+	// The color a window shows: its own if set, otherwise the nearest ancestor's that set one.
+	wxColour SurfaceBehind(wxWindow* window);
 
 	// Sets the renderer for generic controls and themes every dialog as it opens. Called once at startup.
 	void Install();
