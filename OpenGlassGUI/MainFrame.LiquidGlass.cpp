@@ -422,11 +422,11 @@ namespace OpenGlass
 			const wxString name = dialog.GetValue().Strip(wxString::both);
 			if (name.empty() || name.length() > 64 || name.find_first_of(L"\\/") != wxString::npos)
 			{
-				wxMessageBox(L"Use a name of 1 to 64 characters without \\ or /.", L"Save Liquid Glass preset", wxOK | wxICON_WARNING, this);
+				ModernTheme::ShowMessage(L"Use a name of 1 to 64 characters without \\ or /.", L"Save Liquid Glass preset", wxOK | wxICON_WARNING, this);
 				return;
 			}
 			if (ListUserPresets().Index(name, false) != wxNOT_FOUND
-				&& wxMessageBox(L"A preset named \"" + name + L"\" already exists. Replace it?", L"Save Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
+				&& ModernTheme::ShowMessage(L"A preset named \"" + name + L"\" already exists. Replace it?", L"Save Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
 			{
 				return;
 			}
@@ -475,7 +475,7 @@ namespace OpenGlass
 		{
 			const wxString name = userPresets->GetStringSelection();
 			if (name.empty()
-				|| wxMessageBox(L"Delete the preset \"" + name + L"\"?", L"Delete Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
+				|| ModernTheme::ShowMessage(L"Delete the preset \"" + name + L"\"?", L"Delete Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
 			{
 				return;
 			}

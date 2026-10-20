@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "ModernTheme.hpp"
 #include "OpenGlassGUI.hpp"
 #include "MainFrame.hpp"
 #include "Elevation.hpp"
@@ -28,6 +29,7 @@ namespace OpenGlass
 	bool OpenGlassApp::OnInit()
 	{
 		MSWEnableDarkMode(wxApp::DarkMode_Auto);
+		ModernTheme::Install();
 		if (!wxApp::OnInit())
 			return false;
 
@@ -37,7 +39,7 @@ namespace OpenGlass
 		const auto scope = Settings::ParseEditorScope(arguments);
 		if (!scope)
 		{
-			wxMessageBox(L"Use --scope=hkcu or --scope=hklm. Conflicting scopes are not allowed.", L"Invalid scope", wxOK | wxICON_ERROR);
+			ModernTheme::ShowMessage(L"Use --scope=hkcu or --scope=hklm. Conflicting scopes are not allowed.", L"Invalid scope", wxOK | wxICON_ERROR);
 			return false;
 		}
 		const bool systemTransparency = std::ranges::find(arguments, L"--no-system-transparency") == arguments.end();
@@ -51,7 +53,7 @@ namespace OpenGlass
 		// Accent color previews are shared by both editor scopes in this session.
 		if (!m_singleInstanceChecker.Create(L"OpenGlassGUI.SingleInstance"))
 		{
-			wxMessageBox(L"Unable to establish the session editor lock. Close the other editor or retry.", L"OpenGlass", wxOK | wxICON_ERROR);
+			ModernTheme::ShowMessage(L"Unable to establish the session editor lock. Close the other editor or retry.", L"OpenGlass", wxOK | wxICON_ERROR);
 			return false;
 		}
 		if (!uiPreview && m_singleInstanceChecker.IsAnotherRunning())

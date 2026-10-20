@@ -33,14 +33,26 @@ namespace OpenGlass
 			const wxValidator& validator = wxDefaultValidator,
 			const wxString& name = wxSliderNameStr)
 		{
-			if (!wxSlider::Create(parent, id, value, minValue, maxValue, pos, size, style, validator, name))
+			// No tick marks: the gradient fill already shows where the value sits.
+			if (!wxSlider::Create(parent, id, value, minValue, maxValue, pos, size, style & ~wxSL_AUTOTICKS, validator, name))
 			{
 				return false;
 			}
+			SendMessageW(static_cast<HWND>(GetHWND()), WM_UPDATEUISTATE, MAKEWPARAM(UIS_SET, UISF_HIDEFOCUS), 0);
 			// The round thumb is wider than the native one, so repaint the whole control as it moves.
 			Bind(wxEVT_SLIDER, [this](wxCommandEvent& event) { Refresh(false); event.Skip(); });
 			Bind(wxEVT_SCROLL_THUMBTRACK, [this](wxScrollEvent& event) { Refresh(false); event.Skip(); });
 			return true;
+		}
+
+		// The trackbar's dotted focus rectangle is never shown; the thumb stays the only focus cue.
+		WXLRESULT MSWWindowProc(WXUINT message, WXWPARAM wParam, WXLPARAM lParam) override
+		{
+			if (message == WM_UPDATEUISTATE)
+			{
+				wParam = MAKEWPARAM(UIS_SET, UISF_HIDEFOCUS);
+			}
+			return wxSlider::MSWWindowProc(message, wParam, lParam);
 		}
 
 		void SetValue(int value) override
@@ -128,5 +140,47 @@ namespace OpenGlass
 			gc->SetBrush(wxBrush(palette.dark ? wxColour(234, 244, 255) : *wxWHITE));
 			gc->DrawEllipse(centerX - inner, centerY - inner, inner * 2, inner * 2);
 		}
+	};
+
+	// A column of switches in place of a check list box, with the same item calls and event.
+	class CheckGroup final : public wxPanel
+	{
+	public:
+		CheckGroup(wxWindow* parent, const wxArrayString& items) : wxPanel(parent)
+		{
+			// Same color as the parent, set explicitly so the page skin recolors it with its card.
+			SetBackgroundColour(parent->GetBackgroundColour());
+			auto* sizer = new wxBoxSizer(wxVERTICAL);
+			for (const auto& item : items)
+			{
+				auto* box = new wxCheckBox(this, wxID_ANY, item);
+				box->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&)
+				{
+					wxCommandEvent changed(wxEVT_CHECKLISTBOX, GetId());
+					changed.SetEventObject(this);
+					ProcessWindowEvent(changed);
+				});
+				sizer->Add(box, 0, wxBOTTOM, FromDIP(4));
+				m_boxes.push_back(box);
+			}
+			SetSizer(sizer);
+		}
+
+		bool IsChecked(unsigned int index) const { return m_boxes.at(index)->GetValue(); }
+		void Check(unsigned int index, bool check = true) { m_boxes.at(index)->SetValue(check); m_boxes.at(index)->Refresh(false); }
+
+		bool Enable(bool enable = true) override
+		{
+			for (auto* box : m_boxes) box->Enable(enable);
+			return wxPanel::Enable(enable);
+		}
+
+		void SetToolTip(const wxString& tip)
+		{
+			for (auto* box : m_boxes) box->SetToolTip(tip);
+		}
+
+	private:
+		std::vector<wxCheckBox*> m_boxes;
 	};
 }

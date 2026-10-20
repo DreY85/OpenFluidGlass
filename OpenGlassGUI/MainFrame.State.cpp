@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainFrame.hpp"
+#include "UiControls.hpp"
 #include "WrappingLayout.hpp"
 #include "ColorPresetList.hpp"
 #include "BlurSettings.hpp"

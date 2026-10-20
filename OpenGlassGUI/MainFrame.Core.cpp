@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainFrame.hpp"
+#include "UiControls.hpp"
 #include "ModernTheme.hpp"
 #include "WrappingLayout.hpp"
 #include "ColorPresetList.hpp"
@@ -181,11 +182,13 @@ namespace OpenGlass
 		m_btnSave->SetToolTip(L"Save changes (Ctrl+S)");
 		m_btnRevert->SetToolTip(L"Revert pending changes");
 
-		ModernTheme::StyleAccentButton(m_btnSave);
 		const wxSize buttonSize = FromDIP(wxSize(110, 34));
 		m_btnSave->SetMinSize(buttonSize);
 		m_btnRevert->SetMinSize(buttonSize);
 		more->SetMinSize(wxSize(-1, buttonSize.y));
+		ModernTheme::StyleAccentButton(m_btnSave);
+		ModernTheme::StyleButton(m_btnRevert);
+		ModernTheme::StyleButton(more);
 
 		// Status messages live next to the buttons; the native status bar drew a black strip in dark mode.
 		m_statusText = new wxStaticText(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
@@ -236,7 +239,7 @@ namespace OpenGlass
 		catch (...)
 		{
 			if (replacement) replacement->Destroy();
-			wxMessageBox(wxString::Format(L"The other editing view could not be opened (HRESULT 0x%08lX).",
+			ModernTheme::ShowMessage(wxString::Format(L"The other editing view could not be opened (HRESULT 0x%08lX).",
 				static_cast<unsigned long>(wil::ResultFromCaughtException())), L"Switch editing scope", wxOK | wxICON_ERROR, this);
 			return;
 		}
@@ -626,7 +629,7 @@ namespace OpenGlass
 
 		if (FAILED(result))
 		{
-			wxMessageBox(
+			ModernTheme::ShowMessage(
 				wxString::Format(
 					enabled
 						? L"Failed to enable WER crash dumps (HRESULT 0x%08lX)."
@@ -654,12 +657,12 @@ namespace OpenGlass
 		if (m_resources.HasForeignRecovery())
 		{
 			m_previewWriter.reset();
-			wxMessageBox(L"An interrupted operation belongs to another user. Open the editor as that user to recover it before changing configuration.", L"Configuration recovery", wxOK | wxICON_WARNING, this);
+			ModernTheme::ShowMessage(L"An interrupted operation belongs to another user. Open the editor as that user to recover it before changing configuration.", L"Configuration recovery", wxOK | wxICON_WARNING, this);
 			THROW_HR(HRESULT_FROM_WIN32(ERROR_RECOVERY_FAILURE));
 		}
 		if (m_resources.HasRecovery())
 		{
-			if (wxMessageBox(L"An interrupted configuration operation needs recovery before editing. Restore its previous state now?", L"Recover configuration", wxYES_NO | wxICON_WARNING, this) != wxYES)
+			if (ModernTheme::ShowMessage(L"An interrupted configuration operation needs recovery before editing. Restore its previous state now?", L"Recover configuration", wxYES_NO | wxICON_WARNING, this) != wxYES)
 			{
 				m_previewWriter.reset(); THROW_HR(HRESULT_FROM_WIN32(ERROR_RECOVERY_FAILURE));
 			}
@@ -706,7 +709,7 @@ namespace OpenGlass
 		SetDirty(m_preview.IsDirty() || m_colorPreference.IsDirty() || m_resources.IsDirty());
 		NotifySettingsChange();
 		LoadSettings();
-		wxMessageBox(
+		ModernTheme::ShowMessage(
 			wxString::Format(L"The setting '%s' could not be updated (HRESULT 0x%08lX).", name.c_str(), static_cast<unsigned long>(result)),
 			L"OpenGlass configuration",
 			wxOK | wxICON_ERROR,
@@ -717,7 +720,7 @@ namespace OpenGlass
 	void MainFrame::RestoreDefaults()
 	{
 		if (!m_config || (m_editScope == Settings::Scope::Machine && !m_isAdmin)) return;
-		if (wxMessageBox(wxString::Format(
+		if (ModernTheme::ShowMessage(wxString::Format(
 			L"Restore all OpenGlass settings in %s to defaults? This removes custom values in this scope; values from the other scope may still apply. Windows accent color and diagnostics settings will be preserved. Use Revert to undo this preview.",
 			m_editScope == Settings::Scope::User ? L"HKCU" : L"HKLM"), L"Restore defaults", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this) != wxYES) return;
 		bool restartRequired{};
@@ -733,7 +736,7 @@ namespace OpenGlass
 			}
 		});
 		if (applied) LoadSettings();
-		if (applied && restartRequired) wxMessageBox(L"Some settings take effect after restarting DWM or signing out. DWM has not been restarted.",
+		if (applied && restartRequired) ModernTheme::ShowMessage(L"Some settings take effect after restarting DWM or signing out. DWM has not been restarted.",
 			L"Restore defaults", wxOK | wxICON_INFORMATION, this);
 	}
 
@@ -743,7 +746,7 @@ namespace OpenGlass
 		const wxString title = m_editScope == Settings::Scope::User ? L"Merge into HKCU" : L"Merge into HKLM";
 		if (m_isDirty)
 		{
-			wxMessageBox(L"Save pending changes before merging configuration.", title, wxOK | wxICON_INFORMATION, this);
+			ModernTheme::ShowMessage(L"Save pending changes before merging configuration.", title, wxOK | wxICON_INFORMATION, this);
 			return;
 		}
 		try
@@ -767,7 +770,7 @@ namespace OpenGlass
 			const auto changes = prepareChanges();
 			if (changes.empty())
 			{
-				wxMessageBox(L"No configuration values need merging.", L"Merge configuration", wxOK, this);
+				ModernTheme::ShowMessage(L"No configuration values need merging.", L"Merge configuration", wxOK, this);
 				return;
 			}
 			wxString description = m_editScope == Settings::Scope::User
@@ -809,7 +812,7 @@ namespace OpenGlass
 		{
 			const auto failure = wil::ResultFromCaughtException();
 			const bool restored = RevertSettings();
-			wxMessageBox(wxString::Format(L"Merge failed (0x%08lX). %s", failure,
+			ModernTheme::ShowMessage(wxString::Format(L"Merge failed (0x%08lX). %s", failure,
 				restored ? L"The previous state was restored." : L"Recovery is incomplete. Use Revert to retry."),
 				L"Merge configuration", wxOK | wxICON_ERROR, this);
 		}
@@ -851,7 +854,7 @@ namespace OpenGlass
 			UpdateColorizationPresetSelection();
 			if (!m_isDirty) m_presetProvenance.Revert();
 			m_resources.CommitAttempt();
-			if (m_resources.TakeCleanupWarning()) wxMessageBox(L"Configuration was updated, but temporary-file cleanup is pending. It will be retried on the next operation.", L"Configuration cleanup", wxOK | wxICON_INFORMATION, this);
+			if (m_resources.TakeCleanupWarning()) ModernTheme::ShowMessage(L"Configuration was updated, but temporary-file cleanup is pending. It will be retried on the next operation.", L"Configuration cleanup", wxOK | wxICON_INFORMATION, this);
 			m_preview.CommitAttempt();
 			m_colorPreference.CommitAttempt();
 			if (!m_isDirty) m_previewWriter.reset();
@@ -880,7 +883,7 @@ namespace OpenGlass
 			SetDirty(wasDirty || !restored || m_preview.IsDirty() || m_colorPreference.IsDirty() || m_resources.IsDirty());
 			if (!m_isDirty && !m_resources.HasRecovery()) m_previewWriter.reset();
 			LoadSettings();
-			wxMessageBox(wxString::Format(L"Preview failed (0x%08lX). %s", failure,
+			ModernTheme::ShowMessage(wxString::Format(L"Preview failed (0x%08lX). %s", failure,
 				restored ? L"This attempt was restored; earlier previews are preserved." : L"Recovery is incomplete. Use Revert to retry."),
 				L"Configuration preview", wxOK | wxICON_ERROR, this);
 			return false;
@@ -896,8 +899,8 @@ namespace OpenGlass
 		// Save no longer copies the glass color into the Windows accent (AccentColorMenu): the glass
 		// keeps its own color, and the accent stays whatever Windows Settings has.
 		try { m_resources.Accept(); }
-		catch (...) { wxMessageBox(L"The recovery record could not be completed. Retry Save or Revert.", L"Configuration recovery", wxOK | wxICON_ERROR, this); return; }
-		if (m_resources.TakeCleanupWarning()) wxMessageBox(L"The configuration checkpoint is complete. Temporary-file cleanup will be retried on the next operation.", L"Configuration cleanup", wxOK | wxICON_INFORMATION, this);
+		catch (...) { ModernTheme::ShowMessage(L"The recovery record could not be completed. Retry Save or Revert.", L"Configuration recovery", wxOK | wxICON_ERROR, this); return; }
+		if (m_resources.TakeCleanupWarning()) ModernTheme::ShowMessage(L"The configuration checkpoint is complete. Temporary-file cleanup will be retried on the next operation.", L"Configuration cleanup", wxOK | wxICON_INFORMATION, this);
 		m_previewWriter.reset();
 		m_colorPreference.Accept();
 		m_preview.Accept();
@@ -920,7 +923,7 @@ namespace OpenGlass
 			m_preview.VisitRestore(false, [&](const TrackedSetting& key, const RegistryConfig::RawValue& value) { registry.push_back({ key.scope, key.id, value }); });
 			m_resources.PrepareRevert(std::move(registry), m_colorPreference.Baseline());
 		}
-		catch (...) { wxMessageBox(L"The recovery record could not be prepared. No Revert changes were made; retry Revert.", L"Configuration recovery", wxOK | wxICON_ERROR, this); return false; }
+		catch (...) { ModernTheme::ShowMessage(L"The recovery record could not be prepared. No Revert changes were made; retry Revert.", L"Configuration recovery", wxOK | wxICON_ERROR, this); return false; }
 		const auto colorBefore = m_colorPreference.Baseline();
 		const auto colorResult = m_colorPreference.Revert();
 		const bool filesRestored = m_resources.Revert();
@@ -934,14 +937,14 @@ namespace OpenGlass
 		if (!restored)
 		{
 			SetDirty(true);
-			wxMessageBox(L"Recovery is incomplete. The preview remains pending; use Revert to retry.", L"Revert", wxOK | wxICON_ERROR, this);
+			ModernTheme::ShowMessage(L"Recovery is incomplete. The preview remains pending; use Revert to retry.", L"Revert", wxOK | wxICON_ERROR, this);
 			return false;
 		}
 		NotifySettingsChange();
 		LoadSettings();
 		try { m_resources.Accept(); }
-		catch (...) { wxMessageBox(L"The recovery record could not be completed. Retry Save or Revert.", L"Configuration recovery", wxOK | wxICON_ERROR, this); return false; }
-		if (m_resources.TakeCleanupWarning()) wxMessageBox(L"The configuration checkpoint is complete. Temporary-file cleanup will be retried on the next operation.", L"Configuration cleanup", wxOK | wxICON_INFORMATION, this);
+		catch (...) { ModernTheme::ShowMessage(L"The recovery record could not be completed. Retry Save or Revert.", L"Configuration recovery", wxOK | wxICON_ERROR, this); return false; }
+		if (m_resources.TakeCleanupWarning()) ModernTheme::ShowMessage(L"The configuration checkpoint is complete. Temporary-file cleanup will be retried on the next operation.", L"Configuration cleanup", wxOK | wxICON_INFORMATION, this);
 		m_previewWriter.reset();
 		m_colorPreference.Accept();
 		m_preview.Accept();
@@ -1684,20 +1687,14 @@ namespace OpenGlass
 		});
 
 		m_colorPresetList->Bind(wxEVT_CUSTOM_COLOR_EDIT_REQUESTED, [this](wxCommandEvent&) {
-			wxColourData colorData;
-			colorData.SetChooseFull(true);
-			colorData.SetChooseAlpha(false);
 			const DWORD currentValue = m_colorPresetList->GetCustomColor();
-			colorData.SetColour(wxColour(
+			wxColour selected(
 				(currentValue >> 16) & 0xFF,
 				(currentValue >> 8) & 0xFF,
 				currentValue & 0xFF
-			));
-
-			wxColourDialog dialog(this, &colorData);
-			if (dialog.ShowModal() == wxID_OK)
+			);
+			if (ModernTheme::PickColour(this, selected, L"Glass color"))
 			{
-				const wxColour selected = dialog.GetColourData().GetColour();
 				const DWORD alpha = ColorizationPresets::CalculateIntensityAlpha(m_slColorIntensity->GetValue()) << 24;
 				const DWORD argb = alpha
 					| (static_cast<DWORD>(selected.Red()) << 16)
@@ -1853,21 +1850,21 @@ namespace OpenGlass
 			WCHAR themeFileName[MAX_PATH]{};
 			if (FAILED(GetCurrentThemeName(themeFileName, MAX_PATH, nullptr, 0, nullptr, 0)))
 			{
-				wxMessageBox(L"Failed to get current system theme name.", L"Export Failed", wxICON_ERROR);
+				ModernTheme::ShowMessage(L"Failed to get current system theme name.", L"Export Failed", wxICON_ERROR);
 				return;
 			}
 
 			wil::unique_hmodule themeResource{ LoadLibraryExW(themeFileName, nullptr, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_SEARCH_SYSTEM32) };
 			if (!themeResource)
 			{
-				wxMessageBox(L"Failed to load msstyle.", L"Export Failed", wxICON_ERROR);
+				ModernTheme::ShowMessage(L"Failed to load msstyle.", L"Export Failed", wxICON_ERROR);
 				return;
 			}
 
 			HTHEME hTheme = OpenThemeData(nullptr, L"DWMWindow");
 			if (!hTheme)
 			{
-				wxMessageBox(L"Failed to open DWMWindow theme data.", L"Export Failed", wxICON_ERROR);
+				ModernTheme::ShowMessage(L"Failed to open DWMWindow theme data.", L"Export Failed", wxICON_ERROR);
 				return;
 			}
 			auto closeTheme = wil::scope_exit([&] { CloseThemeData(hTheme); });
@@ -1877,13 +1874,13 @@ namespace OpenGlass
 
 			if (FAILED(GetThemeStream(hTheme, 0, 0, TMT_DISKSTREAM, &streamAddress, &streamSize, themeResource.get())))
 			{
-				wxMessageBox(L"Failed to retrieve theme stream (Atlas).", L"Export Failed", wxICON_ERROR);
+				ModernTheme::ShowMessage(L"Failed to retrieve theme stream (Atlas).", L"Export Failed", wxICON_ERROR);
 				return;
 			}
 
 			if (streamSize == 0 || !streamAddress)
 			{
-				wxMessageBox(L"Retrieved atlas stream is empty.", L"Export Failed", wxICON_ERROR);
+				ModernTheme::ShowMessage(L"Retrieved atlas stream is empty.", L"Export Failed", wxICON_ERROR);
 				return;
 			}
 
@@ -1891,14 +1888,14 @@ namespace OpenGlass
 				wil::unique_hfile file{ CreateFileW(saveDialog.GetPath().wc_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr) };
 				if (!file)
 				{
-					wxMessageBox(L"Failed to create output file.", L"Export Failed", wxICON_ERROR);
+					ModernTheme::ShowMessage(L"Failed to create output file.", L"Export Failed", wxICON_ERROR);
 					return;
 				}
 
 				DWORD bytesWritten = 0;
 				if (!WriteFile(file.get(), streamAddress, streamSize, &bytesWritten, nullptr) || bytesWritten != streamSize)
 				{
-					wxMessageBox(L"Failed to write all data to file.", L"Export Failed", wxICON_ERROR);
+					ModernTheme::ShowMessage(L"Failed to write all data to file.", L"Export Failed", wxICON_ERROR);
 					return;
 				}
 			}
@@ -2024,7 +2021,7 @@ namespace OpenGlass
 		{
 			// Closing used to revert silently, so previewed changes vanished without warning.
 			const int answer = event.CanVeto()
-				? wxMessageBox(L"Save your changes before closing?\n\nYes keeps them. No restores the settings from before.",
+				? ModernTheme::ShowMessage(L"Save your changes before closing?\n\nYes keeps them. No restores the settings from before.",
 					L"Unsaved changes", wxYES_NO | wxCANCEL | wxICON_QUESTION, this)
 				: wxNO;
 			if (answer == wxCANCEL)

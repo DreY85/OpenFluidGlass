@@ -2,7 +2,8 @@
 #include "pch.h"
 
 // Fluent-style skin over the native wxWidgets controls: rounded cards, an icon tab bar and accent colors.
-// Native inputs (choices, spin boxes, checkboxes) keep their system look; only the surfaces around them change.
+// The native controls keep their behavior, but the theme paints them: rounded buttons and fields,
+// switches for check boxes, chevrons for collapsible sections, and its own message box and color dialog.
 namespace OpenGlass::ModernTheme
 {
 	struct Palette
@@ -31,7 +32,25 @@ namespace OpenGlass::ModernTheme
 	wxBoxSizer* MakeCard(wxWindow* parent, const wxString& title);
 	// Recolors a finished page: card surfaces for content inside cards, the page color for everything else.
 	void SkinPage(wxWindow* page);
+	// Themes every control in a window tree that is not a skinned page, such as a dialog's.
+	void StyleControls(wxWindow* root);
+	void StyleButton(wxButton* button);
+	// The window's primary action: an accent gradient while it is enabled.
 	void StyleAccentButton(wxButton* button);
+	// Check boxes become switches.
+	void StyleCheckBox(wxCheckBox* box);
+	void StyleGauge(wxGauge* gauge);
+	void StyleDialog(wxDialog* dialog);
+	// Background of text, number and drop-down fields.
+	wxColour FieldColour(bool hover);
+
+	// Sets the renderer for generic controls and themes every dialog as it opens. Called once at startup.
+	void Install();
+	// Replaces wxMessageBox, with the same arguments and return values.
+	int ShowMessage(const wxString& message, const wxString& caption = wxMessageBoxCaptionStr, long style = wxOK | wxCENTRE,
+		wxWindow* parent = nullptr, int x = wxDefaultCoord, int y = wxDefaultCoord);
+	// Replaces wxColourDialog: a saturation and brightness plane, a hue strip and a hex field.
+	bool PickColour(wxWindow* parent, wxColour& colour, const wxString& title = wxEmptyString);
 
 	class TabBar : public wxControl
 	{

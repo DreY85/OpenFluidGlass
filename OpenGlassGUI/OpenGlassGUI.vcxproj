@@ -94,6 +94,7 @@
     <ClCompile Include="MainFrame.LiquidGlass.cpp" />
     <ClCompile Include="MainFrame.Taskbar.cpp" />
     <ClCompile Include="ModernTheme.cpp" />
+    <ClCompile Include="ModernControls.cpp" />
     <ClCompile Include="ConfigurationResources.cpp" />
     <ClCompile Include="PresetPackage.cpp" />
     <ClCompile Include="RegistryConfig.cpp" />

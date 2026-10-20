@@ -121,7 +121,7 @@ namespace OpenGlass
 		hooks.Add(L"Glass frame handler");     // 0x4
 		hooks.Add(L"Glass reflection handler");// 0x8
 		hooks.Add(L"Caption metrics tweaker");// 0x10
-		m_clDisabledHooks = new wxCheckListBox(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, hooks);
+		m_clDisabledHooks = new CheckGroup(panel, hooks);
 		globalGroup->Add(m_clDisabledHooks, 0, wxEXPAND | wxALL, 2);
 		m_clDisabledHooks->SetToolTip(L"Controls which module's hooks are disabled.\nDo not modify unless maintaining compatibility.");
 

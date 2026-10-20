@@ -204,11 +204,8 @@ namespace OpenGlass::ModernTheme
 			return wxRect(spin->GetParent()->ScreenToClient(wxPoint(screen.left, screen.top)), wxSize(screen.right - screen.left, screen.bottom - screen.top));
 		}
 
-		wxColour NumberFieldColour(bool hover)
-		{
-			const auto& palette = Get();
-			return palette.dark ? (hover ? wxColour(32, 52, 82) : wxColour(24, 41, 66)) : (hover ? wxColour(246, 249, 253) : *wxWHITE);
-		}
+		// Text fields are drawn the same way: a borderless edit inside a rounded field the parent paints.
+		constexpr wchar_t c_textFieldName[] = L"ModernTextField";
 
 		// Called by whatever paints the parent, after its own background.
 		void DrawNumberBoxes(wxGraphicsContext& gc, wxWindow& parent)
@@ -216,6 +213,14 @@ namespace OpenGlass::ModernTheme
 			const auto& palette = Get();
 			for (auto* child : parent.GetChildren())
 			{
+				if (auto* text = wxDynamicCast(child, wxTextCtrl); text && text->GetName() == c_textFieldName && text->IsShown())
+				{
+					const wxRect field = text->GetRect().Inflate(text->FromDIP(4), text->FromDIP(4));
+					gc.SetPen(wxPen(text->HasFocus() ? palette.accent : palette.border, text->FromDIP(1)));
+					gc.SetBrush(wxBrush(FieldColour(false)));
+					gc.DrawRoundedRectangle(field.x + 0.5, field.y + 0.5, field.width - 1.0, field.height - 1.0, text->FromDIP(6));
+					continue;
+				}
 				auto* spin = wxDynamicCast(child, wxSpinCtrl);
 				if (!spin || spin->GetName() != c_numberBoxName || !spin->IsShown())
 				{
@@ -226,7 +231,7 @@ namespace OpenGlass::ModernTheme
 				const bool enabled = spin->IsEnabled();
 				const bool focused = GetFocus() == EditOf(spin);
 				gc.SetPen(wxPen(focused ? palette.accent : palette.border, spin->FromDIP(1)));
-				gc.SetBrush(wxBrush(NumberFieldColour(false)));
+				gc.SetBrush(wxBrush(FieldColour(false)));
 				gc.DrawRoundedRectangle(field.x + 0.5, field.y + 0.5, field.width - 1.0, field.height - 1.0, spin->FromDIP(6));
 
 				const wxColour chevronColour = enabled ? palette.subtext : palette.border;
@@ -302,7 +307,7 @@ namespace OpenGlass::ModernTheme
 			};
 			clip();
 			spin->Bind(wxEVT_SIZE, [clip](wxSizeEvent& event) { event.Skip(); clip(); });
-			spin->SetBackgroundColour(NumberFieldColour(false));
+			spin->SetBackgroundColour(FieldColour(false));
 			spin->SetForegroundColour(Get().text);
 
 			wxWindow* parent = spin->GetParent();
@@ -315,29 +320,195 @@ namespace OpenGlass::ModernTheme
 			BindNumberBoxClicks(parent);
 		}
 
-		void StyleNumberBoxes(wxWindow* window, std::set<wxWindow*>& parents)
+		void StyleTextField(wxTextCtrl* text)
 		{
-			for (auto* child : window->GetChildren())
+			text->SetName(c_textFieldName);
+			text->SetWindowStyleFlag((text->GetWindowStyleFlag() & ~wxBORDER_MASK) | wxBORDER_NONE);
+			const HWND hwnd = static_cast<HWND>(text->GetHWND());
+			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
+			SetWindowLongPtrW(hwnd, GWL_STYLE, GetWindowLongPtrW(hwnd, GWL_STYLE) & ~WS_BORDER);
+			SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+			// The same dark-mode outline as the number boxes' edit, clipped the same way.
+			const auto clip = [hwnd]
 			{
-				if (auto* spin = wxDynamicCast(child, wxSpinCtrl))
-				{
-					StyleNumberBox(spin);
-					parents.insert(window);
-				}
-				StyleNumberBoxes(child, parents);
-			}
+				RECT client{};
+				GetClientRect(hwnd, &client);
+				SetWindowRgn(hwnd, CreateRectRgn(1, 1, std::max(client.right - 1, 1L), std::max(client.bottom - 1, 1L)), TRUE);
+			};
+			clip();
+			text->Bind(wxEVT_SIZE, [clip](wxSizeEvent& event) { event.Skip(); clip(); });
+			SendMessageW(hwnd, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(text->FromDIP(4), text->FromDIP(4)));
+			text->SetBackgroundColour(FieldColour(false));
+			text->SetForegroundColour(Get().text);
+
+			wxWindow* parent = text->GetParent();
+			const auto repaint = [text, parent] { parent->RefreshRect(text->GetRect().Inflate(text->FromDIP(6)), false); };
+			text->Bind(wxEVT_SET_FOCUS, [repaint](wxFocusEvent& event) { repaint(); event.Skip(); });
+			text->Bind(wxEVT_KILL_FOCUS, [repaint](wxFocusEvent& event) { repaint(); event.Skip(); });
+			text->Bind(wxEVT_MOVE, [repaint](wxMoveEvent& event) { repaint(); event.Skip(); });
 		}
 
-		void StyleChoices(wxWindow* window)
+		// The native header keeps its mouse handling (column resizing) but is painted here: column
+		// titles in the card's colors over a thin rule, instead of the gray dark-mode strip.
+		LRESULT CALLBACK HeaderProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR data)
+		{
+			if (message == WM_ERASEBKGND)
+			{
+				return 1;
+			}
+			if (message == WM_NCDESTROY)
+			{
+				RemoveWindowSubclass(hwnd, HeaderProc, id);
+			}
+			if (message != WM_PAINT)
+			{
+				return DefSubclassProc(hwnd, message, wParam, lParam);
+			}
+			const auto* list = reinterpret_cast<wxListCtrl*>(data);
+			const auto& palette = Get();
+			PAINTSTRUCT paint{};
+			const HDC target = BeginPaint(hwnd, &paint);
+			RECT client{};
+			GetClientRect(hwnd, &client);
+			if (client.right > 0 && client.bottom > 0)
+			{
+				wxBitmap bitmap(client.right, client.bottom);
+				wxMemoryDC dc(bitmap);
+				dc.SetBackground(wxBrush(list->GetBackgroundColour()));
+				dc.Clear();
+				if (std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) })
+				{
+					wxFont font = list->GetFont();
+					font.SetWeight(wxFONTWEIGHT_SEMIBOLD);
+					gc->SetFont(font, palette.subtext);
+					gc->SetPen(wxPen(palette.border, 1));
+					const int count = static_cast<int>(SendMessageW(hwnd, HDM_GETITEMCOUNT, 0, 0));
+					for (int index = 0; index < count; ++index)
+					{
+						RECT item{};
+						SendMessageW(hwnd, HDM_GETITEMRECT, index, reinterpret_cast<LPARAM>(&item));
+						wchar_t text[256]{};
+						HDITEMW info{ HDI_TEXT };
+						info.pszText = text;
+						info.cchTextMax = static_cast<int>(std::size(text));
+						SendMessageW(hwnd, HDM_GETITEMW, index, reinterpret_cast<LPARAM>(&info));
+						double width{}, height{};
+						gc->GetTextExtent(text, &width, &height);
+						const double padding = list->FromDIP(8);
+						gc->Clip(item.left + padding, 0, std::max(item.right - item.left - padding * 2, 0.0), client.bottom);
+						gc->DrawText(text, item.left + padding, (client.bottom - height) / 2);
+						gc->ResetClip();
+						if (index + 1 < count)
+						{
+							gc->StrokeLine(item.right - 0.5, client.bottom * 0.3, item.right - 0.5, client.bottom * 0.7);
+						}
+					}
+					gc->StrokeLine(0, client.bottom - 0.5, client.right, client.bottom - 0.5);
+				}
+				BitBlt(target, 0, 0, client.right, client.bottom, static_cast<HDC>(dc.GetHDC()), 0, 0, SRCCOPY);
+			}
+			EndPaint(hwnd, &paint);
+			return 0;
+		}
+
+		// Report lists lose the sunken frame, and their header takes the card's colors.
+		void StyleList(wxListCtrl* list)
+		{
+			if (!list->InReportView())
+			{
+				return;
+			}
+			list->SetWindowStyleFlag((list->GetWindowStyleFlag() & ~wxBORDER_MASK) | wxBORDER_NONE);
+			if (const HWND header = ListView_GetHeader(static_cast<HWND>(list->GetHWND())))
+			{
+				SetWindowSubclass(header, HeaderProc, 1, reinterpret_cast<DWORD_PTR>(list));
+				InvalidateRect(header, nullptr, TRUE);
+			}
+			list->Refresh();
+		}
+
+		// Themes every control below a window. Field parents collect the windows that must paint fields.
+		void StyleTree(wxWindow* window, std::set<wxWindow*>& fieldParents)
 		{
 			for (auto* child : window->GetChildren())
 			{
+				if (child->IsTopLevel())
+				{
+					continue;
+				}
 				if (auto* choice = wxDynamicCast(child, wxChoice))
 				{
 					StyleChoice(choice);
 				}
-				StyleChoices(child);
+				else if (auto* spin = wxDynamicCast(child, wxSpinCtrl))
+				{
+					StyleNumberBox(spin);
+					fieldParents.insert(window);
+				}
+				else if (auto* text = wxDynamicCast(child, wxTextCtrl))
+				{
+					StyleTextField(text);
+					fieldParents.insert(window);
+					// A picker's text sits right next to its button; leave room for the field around it.
+					if (auto* picker = wxDynamicCast(window, wxPickerBase); picker && picker->GetSizer())
+					{
+						if (auto* item = picker->GetSizer()->GetItem(text))
+						{
+							item->SetBorder(text->FromDIP(12));
+						}
+					}
+				}
+				else if (auto* button = wxDynamicCast(child, wxButton))
+				{
+					StyleButton(button);
+				}
+				else if (auto* box = wxDynamicCast(child, wxCheckBox))
+				{
+					StyleCheckBox(box);
+				}
+				else if (auto* gauge = wxDynamicCast(child, wxGauge))
+				{
+					StyleGauge(gauge);
+				}
+				else if (auto* list = wxDynamicCast(child, wxListCtrl))
+				{
+					StyleList(list);
+				}
+				else if (auto* link = wxDynamicCast(child, wxHyperlinkCtrl))
+				{
+					link->SetNormalColour(Get().accent);
+					link->SetVisitedColour(Get().accent);
+					link->SetHoverColour(Get().accent.ChangeLightness(120));
+				}
+				StyleTree(child, fieldParents);
 			}
+		}
+
+		// A window other than a skinned page draws the fields of its children over its plain color.
+		void PaintFieldsOn(wxWindow* parent)
+		{
+			static std::set<wxWindow*> bound;
+			if (!bound.insert(parent).second)
+			{
+				return;
+			}
+			parent->Bind(wxEVT_DESTROY, [parent](wxWindowDestroyEvent& event)
+			{
+				if (event.GetEventObject() == parent) bound.erase(parent);
+				event.Skip();
+			});
+			parent->SetBackgroundStyle(wxBG_STYLE_PAINT);
+			parent->Bind(wxEVT_PAINT, [parent](wxPaintEvent&)
+			{
+				wxAutoBufferedPaintDC dc(parent);
+				dc.SetBackground(wxBrush(parent->GetBackgroundColour()));
+				dc.Clear();
+				if (std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) })
+				{
+					DrawNumberBoxes(*gc, *parent);
+				}
+			});
+			parent->Bind(wxEVT_SIZE, [parent](wxSizeEvent& event) { parent->Refresh(false); event.Skip(); });
 		}
 
 		// Row labels read cleaner without trailing colons, like the concept.
@@ -476,29 +647,6 @@ namespace OpenGlass::ModernTheme
 			CollectLooseWindows(page, page->GetSizer(), false, loose, *cards);
 		}
 		StripColons(page);
-		StyleChoices(page);
-		std::set<wxWindow*> numberParents;
-		StyleNumberBoxes(page, numberParents);
-		for (auto* parent : numberParents)
-		{
-			if (parent == page)
-			{
-				continue;	// the page's own paint below draws them
-			}
-			// A panel nested in the page (a collapsible section) draws its own boxes over its plain color.
-			parent->SetBackgroundStyle(wxBG_STYLE_PAINT);
-			parent->Bind(wxEVT_PAINT, [parent](wxPaintEvent&)
-			{
-				wxAutoBufferedPaintDC dc(parent);
-				dc.SetBackground(wxBrush(parent->GetBackgroundColour()));
-				dc.Clear();
-				if (std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) })
-				{
-					DrawNumberBoxes(*gc, *parent);
-				}
-			});
-			parent->Bind(wxEVT_SIZE, [parent](wxSizeEvent& event) { parent->Refresh(false); event.Skip(); });
-		}
 		ColorLists(page, palette.card);
 		for (auto* window : loose)
 		{
@@ -508,6 +656,15 @@ namespace OpenGlass::ModernTheme
 				Recolor(window, palette.card, palette.page);
 			}
 		}
+		std::set<wxWindow*> fieldParents;
+		StyleTree(page, fieldParents);
+		for (auto* parent : fieldParents)
+		{
+			// The page's own paint below draws its fields; nested panels, such as collapsible sections, draw theirs.
+			if (parent != page) PaintFieldsOn(parent);
+		}
+		// The themed controls are larger than the native ones.
+		page->Layout();
 
 		// The page shows through between cards; controls inside a card inherit the card color.
 		page->SetBackgroundStyle(wxBG_STYLE_PAINT);
@@ -537,13 +694,14 @@ namespace OpenGlass::ModernTheme
 		page->Refresh();
 	}
 
-	void StyleAccentButton(wxButton* button)
+	void StyleControls(wxWindow* root)
 	{
-		const auto& palette = Get();
-		const bool enabled = button->IsEnabled();
-		button->SetBackgroundColour(enabled ? palette.accent : palette.hover);
-		button->SetForegroundColour(enabled ? palette.accentText : palette.subtext);
-		button->Refresh();
+		std::set<wxWindow*> fieldParents;
+		StyleTree(root, fieldParents);
+		for (auto* parent : fieldParents)
+		{
+			PaintFieldsOn(parent);
+		}
 	}
 
 	TabBar::TabBar(wxWindow* parent, wxBookCtrlBase* book) : m_book{ book }

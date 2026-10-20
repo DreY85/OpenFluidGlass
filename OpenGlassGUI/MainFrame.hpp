@@ -12,6 +12,7 @@
 namespace OpenGlass
 {
 	class ColorPresetList;
+	class CheckGroup;
 
 
 	class MainFrame : public wxFrame
@@ -137,7 +138,7 @@ namespace OpenGlass
 
 		// System Tab
 		wxCheckBox* m_chkDisableGlassOnBattery{ nullptr };
-		wxCheckListBox* m_clDisabledHooks{ nullptr };
+		CheckGroup* m_clDisabledHooks{ nullptr };
 
 		// Diagnostics Tab
 		wxStaticText* m_lblWindowsTransparencyStatus{ nullptr };

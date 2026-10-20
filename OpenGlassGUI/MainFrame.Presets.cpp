@@ -34,7 +34,7 @@ namespace OpenGlass
 		void OpenConfirmedUrl(wxWindow* parent, const std::wstring& url)
 		{
 			if (url.empty()) return;
-			if (wxMessageBox(
+			if (ModernTheme::ShowMessage(
 				L"Open this unverified external link in your default browser?\n\n" + url,
 				L"Open external link",
 				wxYES_NO | wxNO_DEFAULT | wxICON_WARNING,
@@ -181,7 +181,7 @@ namespace OpenGlass
 			dialog.SetClientSize(dialog.FromDIP(wxSize(680, 520)));
 			dialog.SetMinSize(dialog.FromDIP(wxSize(540, 440)));
 			auto* root = new wxBoxSizer(wxVERTICAL);
-			auto* pages = new wxNotebook(&dialog, wxID_ANY);
+			auto* pages = new wxSimplebook(&dialog, wxID_ANY);
 			auto* general = new wxPanel(pages);
 			auto* summary = new wxBoxSizer(wxVERTICAL);
 			auto* name = new wxStaticText(general, wxID_ANY, package.metadata.name, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
@@ -288,6 +288,7 @@ namespace OpenGlass
 			addDetails(L"Contents", contents);
 			addDetails(L"License", std::wstring(authorMeaning) + L"\r\n\r\n" + RightsSummary(package)
 				+ L"\r\n\r\nLICENSE\r\n\r\n" + (package.licenseText.empty() ? wxString(L"Not provided.") : wxString::FromUTF8(package.licenseText)));
+			root->Add(new ModernTheme::TabBar(&dialog, pages), 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
 			root->Add(pages, 1, wxEXPAND | wxALL, 10);
 			if (importing)
 			{
@@ -336,7 +337,7 @@ namespace OpenGlass
 				}
 				catch (...)
 				{
-					wxMessageBox(wxString::Format(L"The preset could not be reviewed (0x%08lX). Cancel and import it again.", wil::ResultFromCaughtException()),
+					ModernTheme::ShowMessage(wxString::Format(L"The preset could not be reviewed (0x%08lX). Cancel and import it again.", wil::ResultFromCaughtException()),
 						L"Preset properties", wxOK | wxICON_ERROR, &dialog);
 				}
 			};
@@ -530,19 +531,19 @@ namespace OpenGlass
 					if (m_name->GetValue().Trim().empty()
 						|| m_author->GetValue().Trim().empty())
 					{
-						wxMessageBox(L"Name and author are required.", L"New preset", wxOK | wxICON_ERROR, this);
+						ModernTheme::ShowMessage(L"Name and author are required.", L"New preset", wxOK | wxICON_ERROR, this);
 						return;
 					}
 					if (m_name->GetValue().length() > 128
 						|| m_description->GetValue().length() > 4096
 						|| m_author->GetValue().length() > 256)
 					{
-						wxMessageBox(L"Name may contain at most 128 characters, description 4096, and author 256.", L"New preset", wxOK | wxICON_ERROR, this);
+						ModernTheme::ShowMessage(L"Name may contain at most 128 characters, description 4096, and author 256.", L"New preset", wxOK | wxICON_ERROR, this);
 						return;
 					}
 					if (!m_authorHomepage->GetValue().empty() && !PresetPackages::IsValidHomepageUrl(m_authorHomepage->GetValue().ToStdWstring()))
 					{
-						wxMessageBox(L"Author homepage must be a complete absolute http:// or https:// URL, for example https://example.com.", L"New preset", wxOK | wxICON_ERROR, this);
+						ModernTheme::ShowMessage(L"Author homepage must be a complete absolute http:// or https:// URL, for example https://example.com.", L"New preset", wxOK | wxICON_ERROR, this);
 						m_options->Expand();
 						m_authorHomepage->SetFocus();
 						m_authorHomepage->SelectAll();
@@ -551,7 +552,7 @@ namespace OpenGlass
 					if (m_includeLicense->GetValue() && m_licenseText->GetValue().Trim().empty())
 					{
 						m_options->Expand();
-						wxMessageBox(L"Enter or load LICENSE text, or clear Include LICENSE.", L"New preset", wxOK | wxICON_ERROR, this);
+						ModernTheme::ShowMessage(L"Enter or load LICENSE text, or clear Include LICENSE.", L"New preset", wxOK | wxICON_ERROR, this);
 						m_licenseText->SetFocus();
 						return;
 					}
@@ -733,14 +734,14 @@ namespace OpenGlass
 			if (!maintenance.empty())
 			{
 				std::wstring message; for (const auto& item : maintenance) message += item + L"\n";
-				wxMessageBox(message + L"Refresh retries cleanup; disk space has not yet been released.", L"Preset library maintenance", wxOK | wxICON_WARNING, this);
+				ModernTheme::ShowMessage(message + L"Refresh retries cleanup; disk space has not yet been released.", L"Preset library maintenance", wxOK | wxICON_WARNING, this);
 			}
 		}
 		catch (...)
 		{
 			const auto error = wil::ResultFromCaughtException();
 			m_presetPackages.clear();
-			wxMessageBox(wxString::Format(L"Installed preset packages could not be enumerated (HRESULT 0x%08lX).", static_cast<unsigned long>(error)), L"OpenGlass presets", wxOK | wxICON_ERROR, this);
+			ModernTheme::ShowMessage(wxString::Format(L"Installed preset packages could not be enumerated (HRESULT 0x%08lX).", static_cast<unsigned long>(error)), L"OpenGlass presets", wxOK | wxICON_ERROR, this);
 		}
 		RebuildPresetPackageList(id);
 	}
@@ -800,11 +801,11 @@ namespace OpenGlass
 		try
 		{
 			const auto& selected = m_presetPackages[row];
-			if (!selected.loadError.empty()) { wxMessageBox(selected.loadError, L"Preset properties", wxOK | wxICON_ERROR, this); return; }
+			if (!selected.loadError.empty()) { ModernTheme::ShowMessage(selected.loadError, L"Preset properties", wxOK | wxICON_ERROR, this); return; }
 			auto package = PresetPackages::LoadLibraryEntry(selected);
 			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_RETRY), package.digest != selected.digest);
 
-			if (!package.loadError.empty()) { wxMessageBox(package.loadError, L"Preset properties", wxOK | wxICON_ERROR, this); return; }
+			if (!package.loadError.empty()) { ModernTheme::ShowMessage(package.loadError, L"Preset properties", wxOK | wxICON_ERROR, this); return; }
 			const auto action = ShowPresetPreview(this, package, *m_config, !package.trusted, *m_userConfig, *m_systemConfig, m_systemTransparency);
 			if (!package.trusted && action == PresetPreviewAction::ImportOnly)
 			{
@@ -814,7 +815,7 @@ namespace OpenGlass
 				RefreshPresetPackages();
 			}
 		}
-		catch (...) { wxMessageBox(L"The preset could not be read. Refresh the library.", L"Preset properties", wxOK | wxICON_ERROR, this); }
+		catch (...) { ModernTheme::ShowMessage(L"The preset could not be read. Refresh the library.", L"Preset properties", wxOK | wxICON_ERROR, this); }
 	}
 
 	void MainFrame::ImportPresetPackage()
@@ -829,7 +830,7 @@ namespace OpenGlass
 		if (event.GetNumberOfFiles() == 0) return;
 		if (static_cast<std::size_t>(event.GetNumberOfFiles()) > MaximumBatchPackageCount)
 		{
-			wxMessageBox(wxString::Format(L"At most %zu preset ZIPs can be imported at once.", MaximumBatchPackageCount), L"Preset import", wxOK | wxICON_INFORMATION, this);
+			ModernTheme::ShowMessage(wxString::Format(L"At most %zu preset ZIPs can be imported at once.", MaximumBatchPackageCount), L"Preset import", wxOK | wxICON_INFORMATION, this);
 			return;
 		}
 		std::vector<std::filesystem::path> paths;
@@ -841,7 +842,7 @@ namespace OpenGlass
 			std::ranges::transform(extension, extension.begin(), [](wchar_t value) { return static_cast<wchar_t>(::towlower(value)); });
 			if (extension != L".zip")
 			{
-				wxMessageBox(L"Every dropped file must be a standard .zip preset package. Nothing was imported.", L"Preset import", wxOK | wxICON_INFORMATION, this);
+				ModernTheme::ShowMessage(L"Every dropped file must be a standard .zip preset package. Nothing was imported.", L"Preset import", wxOK | wxICON_INFORMATION, this);
 				return;
 			}
 			paths.push_back(std::move(path));
@@ -878,7 +879,7 @@ namespace OpenGlass
 		}
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"Import stopped (0x%08lX). %zu completed imports remain in the library. The configuration was not changed.",
+			ModernTheme::ShowMessage(wxString::Format(L"Import stopped (0x%08lX). %zu completed imports remain in the library. The configuration was not changed.",
 				wil::ResultFromCaughtException(), imported), L"Preset import", wxOK | wxICON_ERROR, this);
 		}
 		RefreshPresetPackages();
@@ -900,7 +901,7 @@ namespace OpenGlass
 		}
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"The preset could not be imported (0x%08lX).", wil::ResultFromCaughtException()),
+			ModernTheme::ShowMessage(wxString::Format(L"The preset could not be imported (0x%08lX).", wil::ResultFromCaughtException()),
 				L"Preset import", wxOK | wxICON_ERROR, this);
 		}
 	}
@@ -912,7 +913,7 @@ namespace OpenGlass
 		const auto selected = m_presetPackages[selection];
 		if (!selected.trusted || !selected.loadError.empty())
 		{
-			wxMessageBox(L"This content is not accepted. Refresh, then open Properties to validate and trust it before applying.", L"Preset apply", wxOK | wxICON_INFORMATION, this);
+			ModernTheme::ShowMessage(L"This content is not accepted. Refresh, then open Properties to validate and trust it before applying.", L"Preset apply", wxOK | wxICON_INFORMATION, this);
 			return;
 		}
 		ApplyPresetPackage(selected);
@@ -954,11 +955,11 @@ namespace OpenGlass
 				m_presetProvenance.SetOrigin(inputPackage, m_isDirty);
 				RebuildPresetPackageList(package.libraryId);
 			}
-			if (applied && restartRequired) wxMessageBox(L"Some settings take effect after restarting DWM or signing out. DWM has not been restarted.", L"Preset applied", wxOK | wxICON_INFORMATION, this);
+			if (applied && restartRequired) ModernTheme::ShowMessage(L"Some settings take effect after restarting DWM or signing out. DWM has not been restarted.", L"Preset applied", wxOK | wxICON_INFORMATION, this);
 		}
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"The preset could not be prepared (0x%08lX).", wil::ResultFromCaughtException()),
+			ModernTheme::ShowMessage(wxString::Format(L"The preset could not be prepared (0x%08lX).", wil::ResultFromCaughtException()),
 				L"Preset apply", wxOK | wxICON_ERROR, this);
 		}
 	}
@@ -999,7 +1000,7 @@ namespace OpenGlass
 	{
 		if (m_isDirty)
 		{
-			wxMessageBox(L"Save or Revert pending changes before creating or updating a preset.", L"New preset", wxOK | wxICON_INFORMATION, this);
+			ModernTheme::ShowMessage(L"Save or Revert pending changes before creating or updating a preset.", L"New preset", wxOK | wxICON_INFORMATION, this);
 			return;
 		}
 		wxString defaultAuthor = m_lastPresetAuthorName;
@@ -1020,7 +1021,7 @@ namespace OpenGlass
 		const auto colorModeResult = m_colorPreference.ReadAutoColorization(m_targetUserSid.ToStdWstring(), autoColorization);
 		if (FAILED(colorModeResult))
 		{
-			wxMessageBox(wxString::Format(L"Could not read the original user's automatic accent color setting (0x%08lX).", colorModeResult),
+			ModernTheme::ShowMessage(wxString::Format(L"Could not read the original user's automatic accent color setting (0x%08lX).", colorModeResult),
 				L"New preset", wxOK | wxICON_ERROR, this);
 			return;
 		}
@@ -1052,7 +1053,7 @@ namespace OpenGlass
 		}
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"The preset could not be saved (0x%08lX). The saved entry has not been replaced.", wil::ResultFromCaughtException()),
+			ModernTheme::ShowMessage(wxString::Format(L"The preset could not be saved (0x%08lX). The saved entry has not been replaced.", wil::ResultFromCaughtException()),
 				L"New preset", wxOK | wxICON_ERROR, this);
 		}
 	}
@@ -1069,7 +1070,7 @@ namespace OpenGlass
 		try { PresetPackages::ExportArchive(save.GetPath().ToStdWstring(), PresetPackages::LoadTrusted(package)); }
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"Export failed (0x%08lX). Choose a new file name if the destination already exists.", wil::ResultFromCaughtException()),
+			ModernTheme::ShowMessage(wxString::Format(L"Export failed (0x%08lX). Choose a new file name if the destination already exists.", wil::ResultFromCaughtException()),
 				L"Export preset", wxOK | wxICON_ERROR, this);
 		}
 	}
@@ -1081,14 +1082,14 @@ namespace OpenGlass
 		try
 		{
 			const auto& package = m_presetPackages[selection];
-			if (wxMessageBox(L"Delete this preset and its library files? Current configuration and Revert keep their independent resources.", L"Delete preset", wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) return;
+			if (ModernTheme::ShowMessage(L"Delete this preset and its library files? Current configuration and Revert keep their independent resources.", L"Delete preset", wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) return;
 			PresetPackages::RemoveLibraryEntry(package.libraryId);
 			RefreshPresetPackages();
 		}
 		catch (...)
 		{
 			const auto error = wil::ResultFromCaughtException();
-			wxMessageBox(wxString::Format(L"Deletion or cleanup is incomplete (HRESULT 0x%08lX). Refresh the library to retry cleanup.", static_cast<unsigned long>(error)), L"Delete preset", wxOK | wxICON_ERROR, this);
+			ModernTheme::ShowMessage(wxString::Format(L"Deletion or cleanup is incomplete (HRESULT 0x%08lX). Refresh the library to retry cleanup.", static_cast<unsigned long>(error)), L"Delete preset", wxOK | wxICON_ERROR, this);
 		}
 	}
 }
