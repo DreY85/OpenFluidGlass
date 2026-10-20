@@ -182,6 +182,152 @@ namespace OpenGlass::ModernTheme
 			});
 		}
 
+		// Number boxes keep the native edit for typing but lose its 3D frame and the old up-down arrows.
+		// Their parent draws a rounded field around each, like a drop-down's, with two chevrons where the
+		// arrows were; a click on a chevron steps the value. Styled boxes carry this name.
+		constexpr wchar_t c_numberBoxName[] = L"ModernNumberBox";
+
+		HWND UpDownOf(const wxSpinCtrl* spin)
+		{
+			return static_cast<HWND>(spin->GetHWND());
+		}
+
+		HWND EditOf(const wxSpinCtrl* spin)
+		{
+			return reinterpret_cast<HWND>(SendMessageW(UpDownOf(spin), UDM_GETBUDDY, 0, 0));
+		}
+
+		wxRect ParentRectOf(const wxSpinCtrl* spin, HWND hwnd)
+		{
+			RECT screen{};
+			GetWindowRect(hwnd, &screen);
+			return wxRect(spin->GetParent()->ScreenToClient(wxPoint(screen.left, screen.top)), wxSize(screen.right - screen.left, screen.bottom - screen.top));
+		}
+
+		wxColour NumberFieldColour(bool hover)
+		{
+			const auto& palette = Get();
+			return palette.dark ? (hover ? wxColour(32, 52, 82) : wxColour(24, 41, 66)) : (hover ? wxColour(246, 249, 253) : *wxWHITE);
+		}
+
+		// Called by whatever paints the parent, after its own background.
+		void DrawNumberBoxes(wxGraphicsContext& gc, wxWindow& parent)
+		{
+			const auto& palette = Get();
+			for (auto* child : parent.GetChildren())
+			{
+				auto* spin = wxDynamicCast(child, wxSpinCtrl);
+				if (!spin || spin->GetName() != c_numberBoxName || !spin->IsShown())
+				{
+					continue;
+				}
+				const wxRect arrows = ParentRectOf(spin, UpDownOf(spin));
+				const wxRect field = ParentRectOf(spin, EditOf(spin)).Union(arrows).Inflate(spin->FromDIP(4), spin->FromDIP(4));
+				const bool enabled = spin->IsEnabled();
+				const bool focused = GetFocus() == EditOf(spin);
+				gc.SetPen(wxPen(focused ? palette.accent : palette.border, spin->FromDIP(1)));
+				gc.SetBrush(wxBrush(NumberFieldColour(false)));
+				gc.DrawRoundedRectangle(field.x + 0.5, field.y + 0.5, field.width - 1.0, field.height - 1.0, spin->FromDIP(6));
+
+				const wxColour chevronColour = enabled ? palette.subtext : palette.border;
+				const wxFont font = IconFont(spin, 6.5);
+				for (const bool up : { true, false })
+				{
+					const wxString chevron(wxUniChar(up ? 0xE70E : 0xE70D));
+					double width{}, height{};
+					gc.SetFont(font, chevronColour);
+					gc.GetTextExtent(chevron, &width, &height);
+					const double centerY = arrows.y + arrows.height * (up ? 0.3 : 0.7);
+					gc.DrawText(chevron, arrows.x + (arrows.width - width) / 2, centerY - height / 2);
+				}
+			}
+		}
+
+		void BindNumberBoxClicks(wxWindow* parent)
+		{
+			static std::set<wxWindow*> bound;
+			if (!bound.insert(parent).second)
+			{
+				return;
+			}
+			parent->Bind(wxEVT_LEFT_DOWN, [parent](wxMouseEvent& event)
+			{
+				event.Skip();
+				for (auto* child : parent->GetChildren())
+				{
+					auto* spin = wxDynamicCast(child, wxSpinCtrl);
+					if (!spin || spin->GetName() != c_numberBoxName || !spin->IsShown() || !spin->IsEnabled())
+					{
+						continue;
+					}
+					const wxRect arrows = ParentRectOf(spin, UpDownOf(spin));
+					if (!arrows.Contains(event.GetPosition()))
+					{
+						continue;
+					}
+					const int step = event.GetPosition().y < arrows.y + arrows.height / 2 ? 1 : -1;
+					const int value = std::clamp(spin->GetValue() + step, spin->GetMin(), spin->GetMax());
+					if (value != spin->GetValue())
+					{
+						spin->SetValue(value);
+						wxSpinEvent changed(wxEVT_SPINCTRL, spin->GetId());
+						changed.SetEventObject(spin);
+						changed.SetPosition(value);
+						spin->ProcessWindowEvent(changed);
+					}
+					spin->SetFocus();
+					return;
+				}
+			});
+		}
+
+		void StyleNumberBox(wxSpinCtrl* spin)
+		{
+			spin->SetName(c_numberBoxName);
+			ShowWindow(UpDownOf(spin), SW_HIDE);
+			// wxWidgets draws a themed border itself for its default border, so it must forget it too.
+			spin->SetWindowStyleFlag((spin->GetWindowStyleFlag() & ~wxBORDER_MASK) | wxBORDER_NONE);
+			const HWND edit = EditOf(spin);
+			SetWindowLongPtrW(edit, GWL_EXSTYLE, GetWindowLongPtrW(edit, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
+			SetWindowLongPtrW(edit, GWL_STYLE, GetWindowLongPtrW(edit, GWL_STYLE) & ~WS_BORDER);
+			SetWindowPos(edit, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+			// Even without a border style, the dark mode still outlines the edit inside its client area.
+			// Clipping its outer pixel lets our field show there instead, at every size it is given.
+			const auto clip = [spin]
+			{
+				const HWND edit = EditOf(spin);
+				RECT client{};
+				GetClientRect(edit, &client);
+				SetWindowRgn(edit, CreateRectRgn(1, 1, std::max(client.right - 1, 1L), std::max(client.bottom - 1, 1L)), TRUE);
+			};
+			clip();
+			spin->Bind(wxEVT_SIZE, [clip](wxSizeEvent& event) { event.Skip(); clip(); });
+			spin->SetBackgroundColour(NumberFieldColour(false));
+			spin->SetForegroundColour(Get().text);
+
+			wxWindow* parent = spin->GetParent();
+			const auto repaint = [spin, parent]
+			{
+				parent->RefreshRect(ParentRectOf(spin, EditOf(spin)).Union(ParentRectOf(spin, UpDownOf(spin))).Inflate(spin->FromDIP(6)), false);
+			};
+			spin->Bind(wxEVT_SET_FOCUS, [repaint](wxFocusEvent& event) { repaint(); event.Skip(); });
+			spin->Bind(wxEVT_KILL_FOCUS, [repaint](wxFocusEvent& event) { repaint(); event.Skip(); });
+			BindNumberBoxClicks(parent);
+		}
+
+		void StyleNumberBoxes(wxWindow* window, std::set<wxWindow*>& parents)
+		{
+			for (auto* child : window->GetChildren())
+			{
+				if (auto* spin = wxDynamicCast(child, wxSpinCtrl))
+				{
+					StyleNumberBox(spin);
+					parents.insert(window);
+				}
+				StyleNumberBoxes(child, parents);
+			}
+		}
+
 		void StyleChoices(wxWindow* window)
 		{
 			for (auto* child : window->GetChildren())
@@ -331,6 +477,28 @@ namespace OpenGlass::ModernTheme
 		}
 		StripColons(page);
 		StyleChoices(page);
+		std::set<wxWindow*> numberParents;
+		StyleNumberBoxes(page, numberParents);
+		for (auto* parent : numberParents)
+		{
+			if (parent == page)
+			{
+				continue;	// the page's own paint below draws them
+			}
+			// A panel nested in the page (a collapsible section) draws its own boxes over its plain color.
+			parent->SetBackgroundStyle(wxBG_STYLE_PAINT);
+			parent->Bind(wxEVT_PAINT, [parent](wxPaintEvent&)
+			{
+				wxAutoBufferedPaintDC dc(parent);
+				dc.SetBackground(wxBrush(parent->GetBackgroundColour()));
+				dc.Clear();
+				if (std::unique_ptr<wxGraphicsContext> gc{ wxGraphicsContext::Create(dc) })
+				{
+					DrawNumberBoxes(*gc, *parent);
+				}
+			});
+			parent->Bind(wxEVT_SIZE, [parent](wxSizeEvent& event) { parent->Refresh(false); event.Skip(); });
+		}
 		ColorLists(page, palette.card);
 		for (auto* window : loose)
 		{
@@ -361,6 +529,7 @@ namespace OpenGlass::ModernTheme
 					PaintCard(*gc, *page, *card, wxRect(card->GetPosition() + offset, card->GetSize()));
 				}
 			}
+			DrawNumberBoxes(*gc, *page);
 		});
 		// The cards move and stretch with the window; a partial repaint would leave pieces of them behind.
 		page->Bind(wxEVT_SIZE, [page](wxSizeEvent& event) { page->Refresh(false); event.Skip(); });
