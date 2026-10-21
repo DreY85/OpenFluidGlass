@@ -106,20 +106,33 @@ namespace
 		FindClose(search);
 	}
 
+	// The copy the next attempt loads. The first one is made when the host starts, before explorer does:
+	// at sign-in the disk and the antivirus are busy, and a copy made then took seconds.
+	wchar_t g_staged[MAX_PATH]{};
+
+	bool StageTap()
+	{
+		wchar_t folder[MAX_PATH], source[MAX_PATH];
+		HostFolder(folder);
+		swprintf_s(source, L"%spilltap.dll", folder);
+		swprintf_s(g_staged, L"%stap", folder);
+		CreateDirectoryW(g_staged, nullptr);
+		swprintf_s(g_staged, L"%stap\\pilltap-%llu.dll", folder, GetTickCount64());
+		if (CopyFileW(source, g_staged, FALSE)) return true;
+		g_staged[0] = L'\0';
+		return false;
+	}
+
 	// Has explorer load a copy of pilltap.dll on a thread of its own, started at LoadLibraryW, which
 	// kernel32 maps at the same address in every process. A hook on the taskbar's thread would wait for
 	// that thread to be free, and while explorer starts, it is busy building the taskbar for seconds.
 	// The TAP drops this load's reference when its attempt ends; a successful attach pins the DLL.
 	void Inject(DWORD pid)
 	{
-		if (!pid) return;
-		wchar_t folder[MAX_PATH], source[MAX_PATH], dll[MAX_PATH];
-		HostFolder(folder);
-		swprintf_s(source, L"%spilltap.dll", folder);
-		swprintf_s(dll, L"%stap", folder);
-		CreateDirectoryW(dll, nullptr);
-		swprintf_s(dll, L"%stap\\pilltap-%lu-%llu.dll", folder, pid, GetTickCount64());
-		if (!CopyFileW(source, dll, FALSE)) return;
+		if (!pid || (!g_staged[0] && !StageTap())) return;
+		wchar_t dll[MAX_PATH];
+		wcscpy_s(dll, g_staged);
+		g_staged[0] = L'\0';
 		const HANDLE explorer = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE, FALSE, pid);
 		if (!explorer) { Log(L"cannot open explorer"); return; }
 		wchar_t name[96];
@@ -403,12 +416,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 		return 0;
 	}
 	if (FindWindowW(PillHostClass, nullptr) || !ReadPillSetting(PillEnabled)) return 0;
+	// The logon task starts us below normal, and at sign-in that left the host waiting
+	// seconds behind everything else while the old taskbar showed.
+	SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
+	MEMORY_PRIORITY_INFORMATION memory{ MEMORY_PRIORITY_NORMAL };
+	SetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &memory, sizeof(memory));
+	Log(L"host started");
 	// Pixels everywhere: the TAP reports physical pixels and the taskbar rectangle is physical too.
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	wchar_t self[MAX_PATH];
 	const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
 	RegSetKeyValueW(HKEY_CURRENT_USER, PillSettingsKey, PillHostPathValue, REG_SZ, self, (length + 1) * sizeof(wchar_t));
 	CleanTapCopies();
+	StageTap();
 
 	WNDCLASSW type{};
 	type.lpfnWndProc = HostProc;
