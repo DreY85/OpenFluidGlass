@@ -13,6 +13,31 @@ namespace OpenGlass
 		constexpr auto AdvancedSettingsWarning = L"These settings usually do not need to be changed. "
 			L"Modify them only if you fully understand how they work.";
 
+		// Apps that keep their own blur under Override accent. Like the Taskbar tab's values it is
+		// written straight to HKCU; OpenGlass falls back to the same default when the value is missing.
+		constexpr PCWSTR c_accentExclusionsValue = L"GlassOverrideAccentExclusions";
+		constexpr PCWSTR c_defaultAccentExclusions = L"egui.exe";
+
+		wxString ReadAccentExclusions()
+		{
+			for (const HKEY root : { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE })
+			{
+				WCHAR value[2048]{};
+				DWORD size = sizeof(value);
+				if (RegGetValueW(root, DwmSettings::g_keyPath, c_accentExclusionsValue, RRF_RT_REG_SZ, nullptr, value, &size) == ERROR_SUCCESS)
+					return value;
+			}
+			return c_defaultAccentExclusions;
+		}
+
+		void WriteAccentExclusions(const wxString& text)
+		{
+			const std::wstring value = text.ToStdWstring();
+			RegSetKeyValueW(HKEY_CURRENT_USER, DwmSettings::g_keyPath, c_accentExclusionsValue, REG_SZ,
+				value.c_str(), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+			DwmSettings::NotifyChange(FindWindowW(L"Dwm", nullptr), DwmSettings::UpdateType::Backdrop);
+		}
+
 		wxCollapsiblePane* AddCollapsibleSection(
 			wxScrolledWindow* panel,
 			wxSizer* parentSizer,
@@ -720,6 +745,39 @@ namespace OpenGlass
 		accentRow->Add(m_chkGlassOverrideAccent, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 		AddOptionStatus(panel, accentRow, Settings::Id::GlassOverrideAccent);
 		accentGroup->Add(accentRow, 0, wxEXPAND | wxALL, 2);
+
+		wxBoxSizer* exclusionsRow = new wxBoxSizer(wxHORIZONTAL);
+		exclusionsRow->Add(new wxStaticText(panel, wxID_ANY, L"Apps that keep their own blur:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+		auto* exclusions = new wxTextCtrl(panel, wxID_ANY, ReadAccentExclusions());
+		exclusions->SetToolTip(L"Program file names, separated by semicolons (for example egui.exe; app.exe). "
+			L"Their windows keep the blur they ask for while Override accent is on. An open window changes the next time it opens.");
+		exclusionsRow->Add(exclusions, 1, wxALIGN_CENTER_VERTICAL);
+		auto* addExclusion = new wxButton(panel, wxID_ANY, L"Add app...");
+		addExclusion->SetToolTip(L"Pick a program; its file name is added to the list.");
+		ModernTheme::StyleButton(addExclusion);
+		exclusionsRow->Add(addExclusion, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+		accentGroup->Add(exclusionsRow, 0, wxEXPAND | wxALL, 2);
+		// OpenGlass matches the file name only, so the folder the program was picked from does not matter.
+		addExclusion->Bind(wxEVT_BUTTON, [panel, exclusions](wxCommandEvent&)
+		{
+			wxFileDialog dialog(panel, L"Choose an app that keeps its own blur", wxEmptyString, wxEmptyString,
+				L"Programs (*.exe)|*.exe", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+			if (dialog.ShowModal() != wxID_OK) return;
+			const wxString name = wxFileName(dialog.GetPath()).GetFullName();
+			wxString list = exclusions->GetValue();
+			for (const auto& entry : wxSplit(list, L';'))
+			{
+				if (entry.Strip(wxString::both).IsSameAs(name, false)) return;
+			}
+			list.Trim();
+			if (!list.empty() && !list.EndsWith(L";")) list += L";";
+			exclusions->ChangeValue(list.empty() ? name : list + L" " + name);
+			WriteAccentExclusions(exclusions->GetValue());
+		});
+		// Saved on its own, half a second after typing stops.
+		auto* exclusionsTimer = PanelTimer(panel);
+		exclusions->Bind(wxEVT_TEXT, [exclusionsTimer](wxCommandEvent&) { exclusionsTimer->StartOnce(500); });
+		panel->Bind(wxEVT_TIMER, [exclusions](wxTimerEvent&) { WriteAccentExclusions(exclusions->GetValue()); }, exclusionsTimer->GetId());
 		sizer->Add(accentGroup, 0, wxEXPAND | wxALL, 2);
 
 		panel->SetSizer(sizer);

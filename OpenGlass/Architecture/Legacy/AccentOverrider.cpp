@@ -6,6 +6,7 @@
 #include "Shared.hpp"
 #include "GlassEffectBrush.hpp"
 #include "GlassReflectionBrush.hpp"
+#include <tlhelp32.h>
 
 using namespace OpenGlass;
 namespace OpenGlass::AccentOverrider
@@ -46,6 +47,62 @@ namespace OpenGlass::AccentOverrider
 	// Our own flag, unused by Windows: the window asks for its glass to be a pill, cut to an
 	// outline rounded by half its height. It is removed before the policy reaches uDWM's own accent code.
 	constexpr DWORD AccentFlagPill{ 0x80000000 };
+
+	// Apps that keep their own accent blur while the override is on. Their UI is drawn over a tinted
+	// acrylic, and over clear Liquid Glass it can't be read (ESET's egui.exe). GlassOverrideAccentExclusions
+	// lists executable names separated by semicolons; without the value, ESET is excluded.
+	constexpr PCWSTR c_exclusionsValue{ L"GlassOverrideAccentExclusions" };
+	constexpr PCWSTR c_defaultExclusions{ L"egui.exe" };
+	std::vector<std::wstring> g_exclusions{};
+	std::unordered_map<DWORD, bool> g_processExcluded{};	// by process id, cleared whenever the list is read
+
+	void LoadExclusions()
+	{
+		WCHAR value[2048]{};
+		if (
+			FAILED(wil::reg::get_value_string_nothrow(GlassEngine::GetDwmKey(), c_exclusionsValue, value)) &&
+			FAILED(wil::reg::get_value_string_nothrow(GlassEngine::GetMachineDwmKey(), c_exclusionsValue, value))
+		)
+		{
+			wcscpy_s(value, c_defaultExclusions);
+		}
+		g_exclusions.clear();
+		g_processExcluded.clear();
+		PWSTR context{};
+		for (PWSTR name = wcstok_s(value, L";\r\n", &context); name; name = wcstok_s(nullptr, L";\r\n", &context))
+		{
+			std::wstring_view entry{ name };
+			while (!entry.empty() && iswspace(entry.front())) entry.remove_prefix(1);
+			while (!entry.empty() && iswspace(entry.back())) entry.remove_suffix(1);
+			if (!entry.empty()) g_exclusions.emplace_back(entry);
+		}
+	}
+
+	// Looked up once per process. A process snapshot needs no access to the process itself,
+	// which DWM's account doesn't have for every app.
+	bool IsExcluded(uDWM::CTopLevelWindow* window)
+	{
+		if (g_exclusions.empty() || !window) return false;
+		const auto data = window->GetData();
+		DWORD processId{};
+		if (!data || !GetWindowThreadProcessId(data->GetHwnd(), &processId)) return false;
+		if (const auto it = g_processExcluded.find(processId); it != g_processExcluded.end()) return it->second;
+
+		bool excluded{ false };
+		if (const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0); snapshot != INVALID_HANDLE_VALUE)
+		{
+			PROCESSENTRY32W entry{ sizeof(entry) };
+			for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry))
+			{
+				if (entry.th32ProcessID != processId) continue;
+				excluded = std::any_of(g_exclusions.begin(), g_exclusions.end(), [&entry](const std::wstring& name) { return !_wcsicmp(name.c_str(), entry.szExeFile); });
+				break;
+			}
+			CloseHandle(snapshot);
+		}
+		g_processExcluded.emplace(processId, excluded);
+		return excluded;
+	}
 }
 
 HRESULT AccentOverrider::MyCAccent_UpdateAccentPolicy(
@@ -61,8 +118,9 @@ HRESULT AccentOverrider::MyCAccent_UpdateAccentPolicy(
 	}
 
 	if (
-		policy->AccentState != 3 &&
-		policy->AccentState != 4
+		(policy->AccentState != 3 &&
+		policy->AccentState != 4) ||
+		IsExcluded(uDWM::TryGetWindowFromVisual(This))
 	)
 	{
 		return g_CAccent_UpdateAccentPolicy_Org(This, rect, policy, geometry);
@@ -108,7 +166,7 @@ HRESULT AccentOverrider::MyCAccent__UpdateSolidFill(
 	}
 
 	const auto window = uDWM::TryGetWindowFromVisual(This);
-	if (!window)
+	if (!window || IsExcluded(window))
 	{
 		return result;
 	}
@@ -282,7 +340,7 @@ void AccentOverrider::MyCAccent_SetClipRegion(
 	}
 
 	const auto window = uDWM::TryGetWindowFromVisual(This);
-	if (!window)
+	if (!window || IsExcluded(window))
 	{
 		return g_CAccent_SetClipRegion_Org(This, geometry);
 	}
@@ -350,6 +408,7 @@ void AccentOverrider::Update(GlassEngine::UpdateType type)
 	if (type & GlassEngine::UpdateType::Backdrop)
 	{
 		Shared::g_overrideAccent = static_cast<bool>(GlassEngine::GetDwordFromRegistry(L"GlassOverrideAccent"));
+		LoadExclusions();
 		if (!Shared::g_overrideAccent)
 		{
 			g_accentClipRegions.clear();
