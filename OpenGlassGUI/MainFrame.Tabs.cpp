@@ -824,7 +824,7 @@ namespace OpenGlass
 			});
 
 			// Applying a color rewrites the accent, so wait until the thumb rests briefly.
-			auto* clearTimer = new wxTimer(panel);
+			auto* clearTimer = PanelTimer(panel);
 			m_slClearGlass->Bind(wxEVT_SLIDER, [clearTimer](wxCommandEvent&) { clearTimer->StartOnce(150); });
 			panel->Bind(wxEVT_TIMER, [this](wxTimerEvent&)
 			{

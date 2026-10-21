@@ -204,7 +204,7 @@ namespace OpenGlass
 
 		auto rows = std::make_shared<std::vector<LiquidGlassRow>>();
 		auto pending = std::make_shared<std::map<std::wstring, DWORD>>();
-		auto* applyTimer = new wxTimer(panel);
+		auto* applyTimer = PanelTimer(panel);
 
 		auto* generalGroup = ModernTheme::MakeCard(panel, L"Liquid Glass");
 		auto* note = new wxStaticText(panel, wxID_ANY,

@@ -4,6 +4,19 @@
 
 namespace OpenGlass
 {
+	// A timer that goes away with its panel. A wxTimer is not a window, so one made with new outlives
+	// the panel it reports to, and a running one then fires into the deleted panel (switching the editing view did).
+	inline wxTimer* PanelTimer(wxWindow* panel)
+	{
+		auto* timer = new wxTimer(panel);
+		panel->Bind(wxEVT_DESTROY, [panel, timer](wxWindowDestroyEvent& event)
+		{
+			if (event.GetEventObject() == panel) delete timer;
+			event.Skip();
+		});
+		return timer;
+	}
+
 	// Native trackbar with a custom-drawn track and thumb: a gradient fill up to a round thumb.
 	class NativeSlider : public wxSlider
 	{

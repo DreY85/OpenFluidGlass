@@ -287,7 +287,7 @@ namespace OpenGlass
 		}
 
 		// DWM reloads all of its settings on each change, so dragging writes at most every 100 ms.
-		auto* cornersTimer = new wxTimer(panel);
+		auto* cornersTimer = PanelTimer(panel);
 		corners->Bind(wxEVT_SLIDER, [corners, cornersValue, cornersTimer](wxCommandEvent&)
 		{
 			cornersValue->SetLabel(FormatCornerPosition(corners->GetValue()));
@@ -369,7 +369,7 @@ namespace OpenGlass
 		});
 
 		// The host can start or stop on its own (at sign-in, with explorer), so the status follows it.
-		auto* statusTimer = new wxTimer(panel);
+		auto* statusTimer = PanelTimer(panel);
 		panel->Bind(wxEVT_TIMER, [showStatus](wxTimerEvent&) { showStatus(); }, statusTimer->GetId());
 		statusTimer->Start(1000);
 
