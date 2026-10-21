@@ -4,6 +4,7 @@
 // Settings come from HKCU\Software\OpenGlass\Taskbar (the Taskbar tab of OpenGlassGUI) and apply while running.
 // pillhost.exe --stop closes a running copy.
 #include <windows.h>
+#include <tlhelp32.h>
 #include <algorithm>
 #include <cmath>
 #include "pillshare.h"
@@ -109,10 +110,9 @@ namespace
 	// kernel32 maps at the same address in every process. A hook on the taskbar's thread would wait for
 	// that thread to be free, and while explorer starts, it is busy building the taskbar for seconds.
 	// The TAP drops this load's reference when its attempt ends; a successful attach pins the DLL.
-	void Inject(HWND tray)
+	void Inject(DWORD pid)
 	{
-		DWORD pid{};
-		if (!GetWindowThreadProcessId(tray, &pid)) return;
+		if (!pid) return;
 		wchar_t folder[MAX_PATH], source[MAX_PATH], dll[MAX_PATH];
 		HostFolder(folder);
 		swprintf_s(source, L"%spilltap.dll", folder);
@@ -189,13 +189,13 @@ namespace
 		}
 	}
 
-	void Attach(HWND tray)
+	void Attach(DWORD explorer)
 	{
 		const ULONGLONG now = GetTickCount64();
-		if (g_tap == TapState::Idle && tray && now >= g_tapTime)
+		if (g_tap == TapState::Idle && explorer && now >= g_tapTime)
 		{
 			g_tapTime = now + TapRetryDelay;	// in case explorer cannot even be reached
-			Inject(tray);
+			Inject(explorer);
 			Log(L"loading the TAP into explorer");
 		}
 		else if (g_tap == TapState::Waiting)
@@ -276,6 +276,46 @@ namespace
 		}
 	}
 
+	// The explorer that will become the shell, before it has built its taskbar: the newest explorer.exe
+	// in this session. At sign-in, explorer starts about 20 s before the taskbar window appears, and a
+	// TAP loaded right away is ready when the taskbar's XAML starts, while one loaded once the window is
+	// up waits seconds for explorer, busy loading, to run it. Looked up four times a second at most.
+	DWORD StartingShell()
+	{
+		static ULONGLONG checked{};
+		static DWORD found{};
+		const ULONGLONG now = GetTickCount64();
+		if (now - checked < 250) return found;
+		checked = now;
+		found = 0;
+		DWORD session{};
+		ProcessIdToSessionId(GetCurrentProcessId(), &session);
+		const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (snapshot == INVALID_HANDLE_VALUE) return 0;
+		PROCESSENTRY32W entry{ sizeof(entry) };
+		ULONGLONG newest{};
+		// A process younger than a second may still be initializing; a thread of ours would only wait for it.
+		FILETIME clock{};
+		GetSystemTimeAsFileTime(&clock);
+		const ULONGLONG settled = ((static_cast<ULONGLONG>(clock.dwHighDateTime) << 32) | clock.dwLowDateTime) - 10'000'000;
+		for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry))
+		{
+			DWORD processSession{};
+			if (_wcsicmp(entry.szExeFile, L"explorer.exe") || !ProcessIdToSessionId(entry.th32ProcessID, &processSession) || processSession != session) continue;
+			const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+			if (!process) continue;
+			FILETIME created{}, exited{}, kernel{}, user{};
+			if (GetProcessTimes(process, &created, &exited, &kernel, &user))
+			{
+				const ULONGLONG time = (static_cast<ULONGLONG>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+				if (time > newest && time <= settled) { newest = time; found = entry.th32ProcessID; }
+			}
+			CloseHandle(process);
+		}
+		CloseHandle(snapshot);
+		return found;
+	}
+
 	// Places the pills right under the taskbar, in its band (topmost or not), following it as it moves.
 	void Follow()
 	{
@@ -283,10 +323,11 @@ namespace
 		const HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
 		DWORD pid{};
 		if (tray) GetWindowThreadProcessId(tray, &pid);
+		else pid = StartingShell();
 		if (pid != g_explorer)
 		{
 			// Explorer (re)started: the old TAP is gone with it.
-			Log(L"new explorer");
+			Log(tray || !pid ? L"new explorer" : L"new explorer, taskbar not built yet");
 			Disconnect();
 			EndNudge();
 			ReleaseTap();
@@ -294,7 +335,7 @@ namespace
 			g_tap = TapState::Idle;
 			g_tapTime = GetTickCount64();
 		}
-		Attach(tray);
+		Attach(pid);
 
 		RECT groups[PillCount]{}, pills[PillCount]{};
 		RECT bar{};
