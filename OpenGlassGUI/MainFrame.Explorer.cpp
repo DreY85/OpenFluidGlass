@@ -182,7 +182,7 @@ namespace OpenGlass
 			{
 				return RestartResult::NotStarted;
 			}
-			// First the shell goes away, then the script brings it back, at the latest about 6 seconds later.
+			// First the shell goes away, then the script brings it back, usually a second or two later.
 			for (int attempt = 0; attempt < 20 && ShellIsUp(); ++attempt)
 			{
 				Sleep(250);
