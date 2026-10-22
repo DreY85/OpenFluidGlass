@@ -670,14 +670,14 @@ namespace OpenGlass::ModernTheme
 		{
 			// Tabs
 			{ L"System", 0xE713 }, { L"Theme", 0xE771 }, { L"Appearance", 0xE7F4 }, { L"Glass colors", 0xE790 },
-			{ L"Liquid Glass", 0xEB42 }, { L"Taskbar", 0xE7C4 }, { L"Preset library", 0xE8F1 }, { L"Diagnostics", 0xE9D9 },
+			{ L"Liquid Glass", 0xEB42 }, { L"Taskbar", 0xE7C4 }, { L"File Explorer", 0xE838 }, { L"Preset library", 0xE8F1 }, { L"Diagnostics", 0xE9D9 },
 			// Cards
 			{ L"Global", 0xE774 }, { L"Transparency status", 0xE7B3 }, { L"Symbols", 0xE943 },
 			{ L"Symbol download status", 0xE896 }, { L"WER crash dumps", 0xE7BA }, { L"Reflection", 0xE706 },
 			{ L"Material", 0xE8B9 }, { L"General", 0xE713 }, { L"Window", 0xE922 }, { L"Caption", 0xE8D2 },
 			{ L"Accent", 0xE790 }, { L"Glass", 0xE706 }, { L"Installed presets", 0xE8F1 }, { L"Color presets", 0xE790 }, { L"Glass tint", 0xEB42 },
 			{ L"Refraction", 0xEB42 }, { L"Blur", 0xE706 }, { L"Color", 0xE790 }, { L"Rim light", 0xE706 },
-			{ L"Floating taskbar", 0xE7C4 }, { L"Pills", 0xEB42 }
+			{ L"Floating taskbar", 0xE7C4 }, { L"Pills", 0xEB42 }, { L"File Explorer glass", 0xE838 }, { L"Tint", 0xE790 }
 		};
 		const auto found = icons.find(title.ToStdWstring());
 		return found == icons.end() ? wxString() : wxString(found->second);

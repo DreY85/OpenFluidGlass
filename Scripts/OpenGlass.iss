@@ -22,6 +22,17 @@
 #endif
 #define MyAppOutputPath OutputPath
 
+; The taskbar and ExplorerBlurMica are not MSBuild projects. OpenGlassTaskbar\build.cmd builds the first,
+; ThirdParty\ExplorerBlurMica holds the second (unmodified, with its notice).
+#define TaskbarPath MyProjPath + "\Build\taskbar"
+#define EbmPath MyProjPath + "\ThirdParty\ExplorerBlurMica"
+#if !FileExists(SourcePath + "\" + TaskbarPath + "\pillhost.exe") || !FileExists(SourcePath + "\" + TaskbarPath + "\pilltap.dll")
+#error The taskbar is not built. Run OpenGlassTaskbar\build.cmd first.
+#endif
+#if !FileExists(SourcePath + "\" + EbmPath + "\ExplorerBlurMica.dll")
+#error ThirdParty\ExplorerBlurMica\ExplorerBlurMica.dll is missing.
+#endif
+
 [Setup]
 AppId={{#MyAppId}}
 AppName={#MyAppName}
@@ -57,7 +68,7 @@ MinVersion=10.0.17763
 SetupLogging=yes
 CloseApplications=yes
 RestartApplications=no
-CloseApplicationsFilter=OpenGlassGUI.exe,OpenGlassHost.exe
+CloseApplicationsFilter=OpenGlassGUI.exe,OpenGlassHost.exe,pillhost.exe
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName=OpenGlass v{#MyAppVersion}
 Uninstallable=yes
@@ -110,6 +121,10 @@ OtherUserConfigNotice=Settings in other Windows user profiles are preserved and 
 UninstallDeletePresetPackages=Delete the preset library and retained legacy packages (keep current resources)
 ContinueUninstall=Uninstall
 ServiceDescription=This service injects DLL into DWM for you and also maintains that user settings are correctly loaded.
+RestartExplorer=Restart Windows Explorer now to apply the glass effects (the screen flickers for a moment)
+StartTaskbar=Start the Liquid Glass taskbar now
+InstallingTaskbar=Registering the Liquid Glass taskbar...
+RemovingTaskbar=Removing the Liquid Glass taskbar...
 
 #if FileExists(CompilerPath + "Languages\\ChineseSimplified.isl")
 chinesesimplified.LaunchOpenGlassGUI=启动 OpenGlass GUI
@@ -138,6 +153,24 @@ Source: "{#MyAppBuildPath}\legacy\OpenGlass.dll"; DestDir: "{app}"; DestName: "O
 Source: "{#MyAppBuildPath}\milcomp\OpenGlass.dll"; DestDir: "{app}"; DestName: "OpenGlass.dll"; Flags: ignoreversion restartreplace; Check: ShouldInstallMILCompDll
 Source: "{#MyAppBuildPath}\OpenGlassHost.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "{#MyAppBuildPath}\OpenGlassGUI.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
+
+; Liquid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll.
+Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete
+Source: "{#TaskbarPath}\pilltap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete
+Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
+
+; ExplorerBlurMica (LGPL-3.0), unmodified. Registered below; its settings file sits beside the DLL.
+Source: "{#EbmPath}\ExplorerBlurMica.dll"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion restartreplace uninsrestartdelete
+Source: "{#EbmPath}\config.ini"; DestDir: "{app}\ExplorerBlurMica"; Flags: onlyifdoesntexist
+Source: "{#EbmPath}\ReadMe.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
+Source: "{#EbmPath}\NOTICE.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
+
+[Registry]
+; What "regsvr32 ExplorerBlurMica.dll" registers: a folder extension that explorer loads into every File Explorer window.
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; ValueType: string; ValueName: ""; ValueData: "ExplorerBlurMica DLL"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\ExplorerBlurMica\ExplorerBlurMica.dll"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"
+Root: HKLM; Subkey: "SOFTWARE\Classes\Drive\shellex\FolderExtensions\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; ValueType: dword; ValueName: "DriveMask"; ValueData: "255"; Flags: uninsdeletekey
 
 [Dirs]
 ; Mutable application data and immutable preset deployments live outside the installation directory.
@@ -194,12 +227,19 @@ Filename: "{sys}\sc.exe"; Parameters: "create OpenGlassHost binPath= ""{app}\Ope
 Filename: "{sys}\sc.exe"; Parameters: "description OpenGlassHost ""{cm:ServiceDescription}"""; Flags: runhidden
 ; Start the service (Automatic start, no checkbox)
 Filename: "{sys}\sc.exe"; Parameters: "start OpenGlassHost"; Flags: runhidden nowait
+; Logon task for the taskbar host (Users group, normal priority). The script runs from the hardened install folder.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -HostPath ""{app}\taskbar\pillhost.exe"""; StatusMsg: "{cm:InstallingTaskbar}"; Flags: runhidden waituntilterminated
+; Both of these start as the signed-in user, never elevated: explorer could not post to an elevated host.
+Filename: "{sys}\cmd.exe"; Parameters: "/c taskkill /F /IM explorer.exe & start """" explorer.exe"; Description: "{cm:RestartExplorer}"; Flags: postinstall nowait runasoriginaluser runhidden skipifsilent
+Filename: "{app}\taskbar\pillhost.exe"; Description: "{cm:StartTaskbar}"; Flags: postinstall nowait runasoriginaluser skipifsilent
 ; Start as the original user; the GUI performs its own authenticated elevation.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchOpenGlassGUI}"; Flags: postinstall nowait runasoriginaluser; Check: not WizardSilent
 
 [UninstallRun]
 Filename: "{sys}\sc.exe"; Parameters: "stop OpenGlassHost"; Flags: runhidden waituntilterminated; RunOnceId: "StopService"
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM ""{#MyAppExeName}"" /F"; Flags: runhidden; RunOnceId: "KillGUI"
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -Remove"; StatusMsg: "{cm:RemovingTaskbar}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveTaskbarTask"
+Filename: "{sys}\taskkill.exe"; Parameters: "/IM pillhost.exe /F"; Flags: runhidden; RunOnceId: "KillTaskbarHost"
 Filename: "{sys}\sc.exe"; Parameters: "delete OpenGlassHost"; Flags: runhidden; RunOnceId: "DeleteService"
 
 [Code]

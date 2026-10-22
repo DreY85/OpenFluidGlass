@@ -31,6 +31,7 @@ namespace OpenGlass
 		void CreateGlassColorsTab();
 		void CreateLiquidGlassTab();
 		void CreateTaskbarTab();
+		void CreateExplorerTab();
 		void CreateBottomControls(wxSizer* parentSizer);
 		bool CanSwitchEditingScope() const;
 		void SwitchEditingScope();

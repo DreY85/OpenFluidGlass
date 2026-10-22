@@ -65,7 +65,7 @@ namespace
 	// Attaching to explorer. A freshly started explorer refuses the TAP until its taskbar's XAML starts,
 	// so the host loads the TAP into it once, as early as it can, and the TAP keeps trying from inside. The host waits
 	// for the TAP to say how that ended and, if it failed, tries again. Every attempt loads its own copy
-	// of pilltap.dll, from the tap folder next to the exe, as XAML may keep refusing a file it refused once.
+	// of pilltap.dll, from the user's own tap folder, as XAML may keep refusing a file it refused once.
 	enum class TapState { Idle, Waiting, Attached };
 	TapState g_tap{ TapState::Idle };
 	ULONGLONG g_tapTime{};	// while idle: when to try next; while waiting: when the TAP was loaded
@@ -87,12 +87,27 @@ namespace
 		*(wcsrchr(path, L'\\') + 1) = L'\0';
 	}
 
+	// %LOCALAPPDATA%\OpenGlass\tap\, made if missing, with a trailing backslash. The copies live in the user's own
+	// profile because the exe may sit in Program Files, where a standard user cannot write, and because a folder
+	// shared between users would let one of them swap the DLL another user's explorer is about to load.
+	bool TapFolder(wchar_t (&path)[MAX_PATH])
+	{
+		wchar_t root[MAX_PATH];
+		const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", root, MAX_PATH);
+		if (!length || length >= MAX_PATH - 32) return false;
+		swprintf_s(path, L"%s\\OpenGlass", root);
+		CreateDirectoryW(path, nullptr);
+		swprintf_s(path, L"%s\\OpenGlass\\tap", root);
+		if (!CreateDirectoryW(path, nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+		wcscat_s(path, L"\\");
+		return true;
+	}
+
 	// Copies left by earlier runs; the ones explorer still holds stay locked and are skipped.
 	void CleanTapCopies()
 	{
 		wchar_t folder[MAX_PATH], pattern[MAX_PATH];
-		HostFolder(folder);
-		wcscat_s(folder, L"tap\\");
+		if (!TapFolder(folder)) return;
 		swprintf_s(pattern, L"%s*.dll", folder);
 		WIN32_FIND_DATAW found{};
 		const HANDLE search = FindFirstFileW(pattern, &found);
@@ -112,12 +127,11 @@ namespace
 
 	bool StageTap()
 	{
-		wchar_t folder[MAX_PATH], source[MAX_PATH];
+		wchar_t folder[MAX_PATH], tap[MAX_PATH], source[MAX_PATH];
 		HostFolder(folder);
 		swprintf_s(source, L"%spilltap.dll", folder);
-		swprintf_s(g_staged, L"%stap", folder);
-		CreateDirectoryW(g_staged, nullptr);
-		swprintf_s(g_staged, L"%stap\\pilltap-%llu.dll", folder, GetTickCount64());
+		if (!TapFolder(tap)) return false;
+		swprintf_s(g_staged, L"%spilltap-%llu.dll", tap, GetTickCount64());
 		if (CopyFileW(source, g_staged, FALSE)) return true;
 		g_staged[0] = L'\0';
 		return false;
