@@ -1,15 +1,14 @@
 ; Keep the product identity in one place. The outer doubled braces preserve
 ; the literal GUID braces after the preprocessor expands MyAppId.
 #define MyAppId "{D3D1BC7D-5E24-4B33-9383-7934271A3B05}"
-#define MyAppName "OpenGlass"
+#define MyAppName "Open Liquid Glass"
 #ifndef MyAppVersion
 #error MyAppVersion must be supplied by the packaging target
 #endif
-#define MyAppPublisher "ALTaleX"
-#define MyAppURL "https://github.com/ALTaleX531/OpenGlass"
+#define MyAppPublisher "Open Liquid Glass (based on OpenGlass by ALTaleX)"
 #define MyAppExeName "OpenGlassGUI.exe"
 #ifndef SetupName
-#define SetupName "OpenGlassSetup"
+#define SetupName "OpenLiquidGlassSetup"
 #endif
 #define MyAppSetupName SetupName
 #define MyProjPath ".."
@@ -40,9 +39,6 @@ VersionInfoVersion={#MyAppVersion}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} v{#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}
-AppUpdatesURL={#MyAppURL}
 AppendDefaultDirName=yes
 DefaultDirName={commonpf}\{#MyAppName}
 DisableDirPage=auto
@@ -70,7 +66,7 @@ CloseApplications=yes
 RestartApplications=no
 CloseApplicationsFilter=OpenGlassGUI.exe,OpenGlassHost.exe,pillhost.exe
 UninstallDisplayIcon={app}\{#MyAppExeName}
-UninstallDisplayName=OpenGlass v{#MyAppVersion}
+UninstallDisplayName=Open Liquid Glass v{#MyAppVersion}
 Uninstallable=yes
 UpdateUninstallLogAppName=yes
 UsePreviousLanguage=yes
@@ -125,6 +121,7 @@ RestartExplorer=Restart Windows Explorer now to apply the glass effects (the scr
 StartTaskbar=Start the Liquid Glass taskbar now
 InstallingTaskbar=Registering the Liquid Glass taskbar...
 RemovingTaskbar=Removing the Liquid Glass taskbar...
+TaskbarTaskFailed=The Liquid Glass taskbar could not be set to start at sign-in. Everything else is installed. You can still start the taskbar from the Taskbar tab in OpenGlass. The setup log has the details.
 
 #if FileExists(CompilerPath + "Languages\\ChineseSimplified.isl")
 chinesesimplified.LaunchOpenGlassGUI=启动 OpenGlass GUI
@@ -158,6 +155,7 @@ Source: "{#MyAppBuildPath}\OpenGlassGUI.exe"; DestDir: "{app}"; Flags: ignorever
 Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete
 Source: "{#TaskbarPath}\pilltap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete
 Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
+Source: "{#MyProjPath}\Scripts\Restart-Explorer.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ExplorerBlurMica (LGPL-3.0), unmodified. Registered below; its settings file sits beside the DLL.
 Source: "{#EbmPath}\ExplorerBlurMica.dll"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion restartreplace uninsrestartdelete
@@ -170,7 +168,7 @@ Source: "{#EbmPath}\NOTICE.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignor
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; ValueType: string; ValueName: ""; ValueData: "ExplorerBlurMica DLL"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\ExplorerBlurMica\ExplorerBlurMica.dll"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"
-Root: HKLM; Subkey: "SOFTWARE\Classes\Drive\shellex\FolderExtensions\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; ValueType: dword; ValueName: "DriveMask"; ValueData: "255"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Classes\Drive\shellex\FolderExtensions\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; ValueType: dword; ValueName: "DriveMask"; ValueData: "255"; Flags: uninsdeletekey; Check: ShouldEnableExplorerBlurMica
 
 [Dirs]
 ; Mutable application data and immutable preset deployments live outside the installation directory.
@@ -192,8 +190,8 @@ Type: filesandordirs; Name: "{app}\dumps"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkablealone
 
 [Icons]
-Name: "{group}\Configure OpenGlass"; Filename: "{app}\OpenGlassGUI.exe"
-Name: "{commondesktop}\Configure OpenGlass"; Filename: "{app}\OpenGlassGUI.exe"; Tasks: desktopicon
+Name: "{group}\Open Liquid Glass"; Filename: "{app}\OpenGlassGUI.exe"
+Name: "{commondesktop}\Open Liquid Glass"; Filename: "{app}\OpenGlassGUI.exe"; Tasks: desktopicon
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
 [Run]
@@ -210,6 +208,9 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX *S-1-5-90-0:(OI)(CI)RX"; Flags: runhidden waituntilterminated
 ; Harden OpenGlassHost.exe (service binary): SYSTEM only for execution, but allow Administrators to delete (for uninstallation)
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\OpenGlassHost.exe"" /inheritance:r /grant:r *S-1-5-18:F *S-1-5-32-544:D"; Flags: runhidden waituntilterminated
+; ExplorerBlurMica's settings file only: Users = Modify, so the OpenGlass GUI can change it without elevation.
+; It holds visual settings alone; the DLL and its folder stay read-only for users.
+Filename: "{sys}\icacls.exe"; Parameters: """{app}\ExplorerBlurMica\config.ini"" /grant *S-1-5-32-545:M"; Flags: runhidden waituntilterminated
 ; Harden the shared data root before applying narrower permissions to each child.
 Filename: "{sys}\icacls.exe"; Parameters: """{commonappdata}\OpenGlass"" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX *S-1-5-90-0:(OI)(CI)RX"; Flags: runhidden waituntilterminated
 ; Symbols: SYSTEM/Admins = Full, Users = Read, Window Manager = Read/Write/Delete.
@@ -228,9 +229,9 @@ Filename: "{sys}\sc.exe"; Parameters: "description OpenGlassHost ""{cm:ServiceDe
 ; Start the service (Automatic start, no checkbox)
 Filename: "{sys}\sc.exe"; Parameters: "start OpenGlassHost"; Flags: runhidden nowait
 ; Logon task for the taskbar host (Users group, normal priority). The script runs from the hardened install folder.
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -HostPath ""{app}\taskbar\pillhost.exe"""; StatusMsg: "{cm:InstallingTaskbar}"; Flags: runhidden waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -HostPath ""{app}\taskbar\pillhost.exe"""; StatusMsg: "{cm:InstallingTaskbar}"; Flags: runhidden waituntilterminated; AfterInstall: CheckTaskbarTask
 ; Both of these start as the signed-in user, never elevated: explorer could not post to an elevated host.
-Filename: "{sys}\cmd.exe"; Parameters: "/c taskkill /F /IM explorer.exe & start """" explorer.exe"; Description: "{cm:RestartExplorer}"; Flags: postinstall nowait runasoriginaluser runhidden skipifsilent
+Filename: "{app}\Restart-Explorer.cmd"; Description: "{cm:RestartExplorer}"; Flags: postinstall nowait runasoriginaluser runhidden skipifsilent
 Filename: "{app}\taskbar\pillhost.exe"; Description: "{cm:StartTaskbar}"; Flags: postinstall nowait runasoriginaluser skipifsilent
 ; Start as the original user; the GUI performs its own authenticated elevation.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchOpenGlassGUI}"; Flags: postinstall nowait runasoriginaluser; Check: not WizardSilent
@@ -246,12 +247,37 @@ Filename: "{sys}\sc.exe"; Parameters: "delete OpenGlassHost"; Flags: runhidden; 
 
 var
   InstallMILCompDll: Boolean;
+  ExplorerBlurMicaTurnedOff: Boolean;
+
+// The GUI turns ExplorerBlurMica off by removing only its folder extension key and keeping the class.
+// Read before anything is written, so an update keeps it off, and a fresh install (no class yet) turns it on.
+function ShouldEnableExplorerBlurMica(): Boolean;
+begin
+  Result := not ExplorerBlurMicaTurnedOff;
+end;
+
+// The logon task is what starts the taskbar at sign-in, and a [Run] entry cannot tell whether registering it worked.
+procedure CheckTaskbarTask();
+var
+  ResultCode: Integer;
+begin
+  if Exec(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN LiquidGlassTaskbar', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+    Log('The Liquid Glass taskbar logon task is registered.')
+  else
+  begin
+    Log(Format('The Liquid Glass taskbar logon task is missing after registration (schtasks exit code %d).', [ResultCode]));
+    SuppressibleMsgBox(CustomMessage('TaskbarTaskFailed'), mbError, MB_OK, IDOK);
+  end;
+end;
 
 function InitializeSetup(): Boolean;
 var
   Version: TWindowsVersion;
 begin
   GetWindowsVersionEx(Version);
+  ExplorerBlurMicaTurnedOff :=
+    RegKeyExists(HKLM64, 'SOFTWARE\Classes\CLSID\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}') and
+    not RegKeyExists(HKLM64, 'SOFTWARE\Classes\Drive\shellex\FolderExtensions\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}');
   InstallMILCompDll := Version.Build >= 28000;
   if InstallMILCompDll then
     Log(Format('Detected Windows build %d; selected the MILComp DWM architecture.', [Version.Build]))
@@ -580,6 +606,8 @@ procedure CurUninstallStepChanged(
 begin
   if CurUninstallStep = usPostUninstall then
   begin
+    // Not always in the uninstall log: the GUI can turn ExplorerBlurMica on after an install that left it off.
+    RegDeleteKeyIncludingSubkeys(HKLM64, 'SOFTWARE\Classes\Drive\shellex\FolderExtensions\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}');
     if DeleteCurrentAndMachineConfigOnUninstall then
       DeleteConfig;
 

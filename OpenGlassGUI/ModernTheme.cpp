@@ -670,7 +670,7 @@ namespace OpenGlass::ModernTheme
 		{
 			// Tabs
 			{ L"System", 0xE713 }, { L"Theme", 0xE771 }, { L"Appearance", 0xE7F4 }, { L"Glass colors", 0xE790 },
-			{ L"Liquid Glass", 0xEB42 }, { L"Taskbar", 0xE7C4 }, { L"File Explorer", 0xE838 }, { L"Preset library", 0xE8F1 }, { L"Diagnostics", 0xE9D9 },
+			{ L"Liquid Glass", 0xEB42 }, { L"Taskbar", 0xE7C4 }, { L"ExplorerBlurMica", 0xE838 }, { L"Preset library", 0xE8F1 }, { L"Diagnostics", 0xE9D9 },
 			// Cards
 			{ L"Global", 0xE774 }, { L"Transparency status", 0xE7B3 }, { L"Symbols", 0xE943 },
 			{ L"Symbol download status", 0xE896 }, { L"WER crash dumps", 0xE7BA }, { L"Reflection", 0xE706 },
