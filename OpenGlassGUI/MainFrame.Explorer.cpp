@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MainFrame.hpp"
 #include "UiControls.hpp"
+#include "ShellLaunch.hpp"
 
 // File Explorer tab: the settings of ExplorerBlurMica, the library that clears the background of the File Explorer
 // content area (navigation pane and file list) so the glass behind the window shows through.
@@ -152,33 +153,49 @@ namespace OpenGlass
 			wxStaticText* value;
 		};
 
-		// Ends every explorer of this user's session; Windows starts the shell again by itself, as that user.
-		// Returns whether a shell window came back within the wait.
-		bool RestartExplorerShell()
+		enum class RestartResult { Restarted, NotBack, NoScript, NotStarted };
+
+		bool ShellIsUp()
 		{
-			wchar_t system[MAX_PATH];
-			GetSystemDirectoryW(system, MAX_PATH);
-			DWORD session{};
-			ProcessIdToSessionId(GetCurrentProcessId(), &session);
-			std::wstring command = std::format(L"\"{}\\taskkill.exe\" /F /IM explorer.exe /FI \"SESSION eq {}\"", system, session);
-			STARTUPINFOW startup{ sizeof(startup) };
-			PROCESS_INFORMATION process{};
-			if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process))
+			return FindWindowW(L"Shell_TrayWnd", nullptr) != nullptr;
+		}
+
+		// Runs Restart-Explorer.cmd, which the installer puts beside this program. Explorer itself starts it, as the
+		// signed-in user, so the explorer it starts again is not elevated. Windows did not restart the shell by itself
+		// after it was ended, so the script starts it when it has not come back within a few seconds.
+		RestartResult RestartExplorerShell()
+		{
+			wchar_t self[MAX_PATH];
+			GetModuleFileNameW(nullptr, self, MAX_PATH);
+			const std::wstring script = (std::filesystem::path(self).parent_path() / L"Restart-Explorer.cmd").wstring();
+			if (!std::filesystem::exists(script))
 			{
-				return false;
+				return RestartResult::NoScript;
 			}
-			WaitForSingleObject(process.hProcess, 10000);
-			CloseHandle(process.hThread);
-			CloseHandle(process.hProcess);
-			for (int attempt = 0; attempt < 40; ++attempt)
+			const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+			const HRESULT started = StartAsShellUser(script, SW_HIDE);
+			if (SUCCEEDED(initialized))
+			{
+				CoUninitialize();
+			}
+			if (FAILED(started))
+			{
+				return RestartResult::NotStarted;
+			}
+			// First the shell goes away, then the script brings it back, at the latest about 6 seconds later.
+			for (int attempt = 0; attempt < 20 && ShellIsUp(); ++attempt)
 			{
 				Sleep(250);
-				if (FindWindowW(L"Shell_TrayWnd", nullptr))
+			}
+			for (int attempt = 0; attempt < 60; ++attempt)
+			{
+				Sleep(250);
+				if (ShellIsUp())
 				{
-					return true;
+					return RestartResult::Restarted;
 				}
 			}
-			return false;
+			return RestartResult::NotBack;
 		}
 
 		wxString FormatAlpha(int alpha)
@@ -414,13 +431,16 @@ namespace OpenGlass
 			// Off the UI thread: it waits for the shell to come back.
 			std::thread([]
 			{
-				const bool back = RestartExplorerShell();
-				wxTheApp->CallAfter([back]
+				const RestartResult result = RestartExplorerShell();
+				wxTheApp->CallAfter([result]
 				{
 					if (auto* frame = wxDynamicCast(wxTheApp->GetTopWindow(), wxFrame))
 					{
-						frame->SetStatusText(back ? L"File Explorer: Explorer restarted"
-							: L"File Explorer: Explorer did not come back by itself (Task Manager, Run new task, explorer.exe)");
+						frame->SetStatusText(
+							result == RestartResult::Restarted ? L"File Explorer: Explorer restarted"
+							: result == RestartResult::NoScript ? L"File Explorer: Restart-Explorer.cmd is missing beside Open Liquid Glass, nothing was restarted"
+							: result == RestartResult::NotStarted ? L"File Explorer: could not ask Explorer to restart, nothing was restarted"
+							: L"File Explorer: Explorer did not come back (Ctrl+Shift+Esc, Run new task, explorer.exe)");
 					}
 				});
 			}).detach();
