@@ -17,12 +17,13 @@ namespace
 {
 	constexpr DWORD AccentFlagPill = 0x80000000;	// OpenGlass: cut the glass to a fully rounded outline
 	constexpr UINT_PTR FollowTimer = 1;
+	constexpr UINT_PTR GlideTimer = 2;	// a faster tick while a pill glides
 
 	// In taskbar units (pixels at 100% scale); see pillshare.h.
 	struct Settings
 	{
 		int height, padding, gap;
-		bool join;
+		bool join, animate;
 	};
 
 	HWND g_host{};
@@ -46,6 +47,7 @@ namespace
 		g_settings.padding = static_cast<int>(ReadPillSetting(PillPadding));
 		g_settings.gap = static_cast<int>(ReadPillSetting(PillGap));
 		g_settings.join = ReadPillSetting(PillJoin) != 0;
+		g_settings.animate = ReadPillSetting(PillAnimate) != 0;
 	}
 
 	// Rare events (attach attempts, nudges) to %TEMP%\pillhost.txt, timestamped like the TAP's log.
@@ -358,6 +360,91 @@ namespace
 		return found;
 	}
 
+	// Each pill moves to where the layout puts it on springs instead of jumping there. When an app opens or closes,
+	// Windows slides the icons over about a quarter of a second, but the layout the TAP reads changes in steps
+	// (closing one app gave four steps in 900 ms), and a pill that jumped to each step shrank, overshot and grew back.
+	// Every edge is a damped spring: it settles in about a third of a second and runs about a tenth past the target
+	// first, the springy feel of Apple's motion. While a pill stretches or shrinks fast it also gets a little thinner,
+	// as a liquid keeping its volume would. The first time the pills show after the host starts (at sign-in) each one
+	// grows from a drop at its middle, the apps first and the tray a moment later.
+	constexpr double SpringFrequency = 18.0;	// rad/s
+	// The entrance is slower: at the everyday speed a pill grew in 170 ms, too fast to see.
+	constexpr double EntranceFrequency = 8.0;	// rad/s, about half a second
+	constexpr double SpringDamping = 0.6;	// of critical; below 1 it overshoots
+	constexpr double EntranceDamping = 0.8;	// the long entrance stretch would overshoot too far at 0.6
+	constexpr double SquashSpeed = 600.0;	// px/s of length change that gives the full squash
+	constexpr double SquashAmount = 0.12;	// of the thickness at most
+	constexpr double EntranceStagger = 0.15;	// s between the pills' entrances
+
+	struct Edge
+	{
+		double position, velocity;
+	};
+	struct Motion
+	{
+		Edge edges[4];	// left, top, right, bottom
+		double frequency, damping;
+		double delay;	// s before an entrance starts; the pill stays hidden until then
+		bool valid;
+	};
+	Motion g_motion[PillCount]{};
+	RECT g_lastBar{};
+	double g_lastStep{};	// s, from Seconds; 0 before the first placement
+	bool g_entranceDone{};
+
+	double Seconds()
+	{
+		LARGE_INTEGER counter{}, frequency{};
+		QueryPerformanceCounter(&counter);
+		QueryPerformanceFrequency(&frequency);
+		return static_cast<double>(counter.QuadPart) / frequency.QuadPart;
+	}
+
+	// Advances one edge toward its goal, in 4 ms steps so a long frame cannot make the spring blow up.
+	// Returns whether it is still moving.
+	bool StepSpring(Edge& edge, double goal, double frequency, double damping, double elapsed)
+	{
+		const double stiffness = frequency * frequency;
+		const double friction = 2.0 * damping * frequency;
+		for (double left = elapsed; left > 0.0; left -= 0.004)
+		{
+			const double h = (std::min)(left, 0.004);
+			edge.velocity += (-stiffness * (edge.position - goal) - friction * edge.velocity) * h;
+			edge.position += edge.velocity * h;
+		}
+		if (std::abs(edge.position - goal) < 0.25 && std::abs(edge.velocity) < 5.0)
+		{
+			edge = { goal, 0.0 };
+			return false;
+		}
+		return true;
+	}
+
+	void SetMotion(Motion& motion, const RECT& r, double frequency, double damping, double delay)
+	{
+		motion = { { { double(r.left), 0 }, { double(r.top), 0 }, { double(r.right), 0 }, { double(r.bottom), 0 } }, frequency, damping, delay, true };
+	}
+
+	// Moves the pill's edges toward the target; returns where to put the pill now and whether it is still moving.
+	RECT StepMotion(Motion& motion, const RECT& target, bool vertical, double elapsed, bool& moving)
+	{
+		const double goals[4]{ double(target.left), double(target.top), double(target.right), double(target.bottom) };
+		bool any = false;
+		for (int i = 0; i < 4; ++i) any = StepSpring(motion.edges[i], goals[i], motion.frequency, motion.damping, elapsed) || any;
+		moving = any;
+		const Edge* e = motion.edges;
+		double place[4]{ e[0].position, e[1].position, e[2].position, e[3].position };
+		// Along the band the pill keeps its springs; across it, it thins while its length changes fast.
+		const int startAlong = vertical ? 1 : 0, startAcross = vertical ? 0 : 1;
+		const double lengthSpeed = std::abs(e[startAlong + 2].velocity - e[startAlong].velocity);
+		const double squash = SquashAmount * (std::min)(lengthSpeed / SquashSpeed, 1.0);
+		const double middle = (place[startAcross] + place[startAcross + 2]) / 2.0;
+		const double half = (place[startAcross + 2] - place[startAcross]) / 2.0 * (1.0 - squash);
+		place[startAcross] = middle - half;
+		place[startAcross + 2] = middle + half;
+		return { std::lround(place[0]), std::lround(place[1]), std::lround(place[2]), std::lround(place[3]) };
+	}
+
 	// Places the pills right under the taskbar, in its band (topmost or not), following it as it moves.
 	void Follow()
 	{
@@ -384,25 +471,78 @@ namespace
 		const bool shown = tray && IsWindowVisible(tray) && GetWindowRect(tray, &bar) && ReadGroups(groups);
 		if (shown) Layout(groups, bar.right - bar.left, bar.bottom - bar.top, GetDpiForWindow(tray) / 96.0, pills);
 		const bool topmost = tray && (GetWindowLongW(tray, GWL_EXSTYLE) & WS_EX_TOPMOST);
+		// A pill that shows again, or a taskbar moved to another side or screen, jumps straight to its place.
+		const bool barMoved = !EqualRect(&bar, &g_lastBar);
+		g_lastBar = bar;
+		const bool vertical = bar.bottom - bar.top > bar.right - bar.left;
+		const double now = Seconds();
+		const double elapsed = g_lastStep > 0.0 ? std::clamp(now - g_lastStep, 0.0, 0.1) : 0.0;
+		g_lastStep = now;
+		bool animating = false, entering = false, placed = false;
 		HWND above = tray;
 		for (UINT index = 0; index < PillCount; ++index)
 		{
 			const HWND pill = g_pills[index];
 			const RECT& r = pills[index];
+			Motion& motion = g_motion[index];
 			if (r.right <= r.left)
 			{
+				motion.valid = false;
 				if (IsWindowVisible(pill)) ShowWindow(pill, SW_HIDE);
 				continue;
 			}
 			if (((GetWindowLongW(pill, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0) != topmost)
 				SetWindowPos(pill, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-			const RECT want{ bar.left + r.left, bar.top + r.top, bar.left + r.right, bar.top + r.bottom };
-			RECT now{};
-			GetWindowRect(pill, &now);
-			if (!IsWindowVisible(pill) || !EqualRect(&now, &want) || GetWindow(pill, GW_HWNDPREV) != above)
+			const RECT target{ bar.left + r.left, bar.top + r.top, bar.left + r.right, bar.top + r.bottom };
+			if (!g_settings.animate)
+			{
+				SetMotion(motion, target, SpringFrequency, SpringDamping, 0.0);
+			}
+			else if (!g_entranceDone && !motion.valid)
+			{
+				// The entrance: a drop as long as the pill is thick, at its middle, waiting its turn.
+				RECT drop = target;
+				const LONG thickness = vertical ? target.right - target.left : target.bottom - target.top;
+				if (vertical) { const LONG middle = (target.top + target.bottom) / 2; drop.top = middle - thickness / 2; drop.bottom = drop.top + thickness; }
+				else { const LONG middle = (target.left + target.right) / 2; drop.left = middle - thickness / 2; drop.right = drop.left + thickness; }
+				SetMotion(motion, drop, EntranceFrequency, EntranceDamping, EntranceStagger * index);
+			}
+			else if (!motion.valid || barMoved || !IsWindowVisible(pill) && motion.delay <= 0.0)
+			{
+				SetMotion(motion, target, SpringFrequency, SpringDamping, 0.0);
+			}
+			if (motion.delay > 0.0)
+			{
+				motion.delay -= elapsed;
+				// Still waiting: stay hidden. Once the wait is over the pill shows in this same frame, as the drop;
+				// hidden one frame more, the next one would take it for a pill showing again and jump it into place.
+				if (motion.delay > 0.0)
+				{
+					entering = true;
+					animating = true;
+					continue;
+				}
+			}
+			bool moving = false;
+			const RECT want = StepMotion(motion, target, vertical, elapsed, moving);
+			if (moving) animating = true;
+			else
+			{
+				motion.frequency = SpringFrequency;
+				motion.damping = SpringDamping;
+			}
+			RECT current{};
+			GetWindowRect(pill, &current);
+			if (!IsWindowVisible(pill) || !EqualRect(&current, &want) || GetWindow(pill, GW_HWNDPREV) != above)
 				SetWindowPos(pill, above, want.left, want.top, want.right - want.left, want.bottom - want.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 			above = pill;
+			placed = true;
 		}
+		// The entrance plays once, when the pills first show after the host starts; an Explorer restart does not replay it.
+		// It counts as played only once a pill is up: until the TAP has reported, the taskbar shows with no pills at all.
+		if (placed && !entering) g_entranceDone = true;
+		if (animating) SetTimer(g_host, GlideTimer, 16, nullptr);
+		else KillTimer(g_host, GlideTimer);
 	}
 
 	LRESULT CALLBACK HostProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)

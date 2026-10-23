@@ -193,6 +193,10 @@ namespace OpenGlass
 		auto* join = new wxCheckBox(panel, wxID_ANY, L"Put the tray icons and the clock in one pill");
 		join->SetToolTip(L"One pill around both instead of two side by side.");
 		pillsGroup->Add(join, 0, wxALL, 4);
+
+		auto* animate = new wxCheckBox(panel, wxID_ANY, L"Animate the pills");
+		animate->SetToolTip(L"Pills spring into place when apps open and close, and grow in at sign-in. Off, they jump straight there.");
+		pillsGroup->Add(animate, 0, wxALL, 4);
 		sizer->Add(pillsGroup, 0, wxEXPAND | wxALL, 2);
 
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
@@ -241,7 +245,7 @@ namespace OpenGlass
 			}
 		};
 
-		auto load = [rows, enabled, join, corners, cornersValue, showValue, findGapRow, showStatus]()
+		auto load = [rows, enabled, join, animate, corners, cornersValue, showValue, findGapRow, showStatus]()
 		{
 			for (auto& row : *rows)
 			{
@@ -252,6 +256,7 @@ namespace OpenGlass
 			cornersValue->SetLabel(FormatCornerPosition(corners->GetValue()));
 			enabled->SetValue(ReadPillSetting(PillEnabled) != 0);
 			join->SetValue(ReadPillSetting(PillJoin) != 0);
+			animate->SetValue(ReadPillSetting(PillAnimate) != 0);
 			if (auto* gap = findGapRow())
 			{
 				gap->control->Enable(!join->GetValue());
@@ -290,6 +295,12 @@ namespace OpenGlass
 				gap->control->Enable(!join->GetValue());
 			}
 			SetStatusText(join->GetValue() ? L"Taskbar: tray and clock joined" : L"Taskbar: tray and clock apart");
+		});
+
+		animate->Bind(wxEVT_CHECKBOX, [this, animate](wxCommandEvent&)
+		{
+			WriteTaskbarSetting(PillAnimate, animate->GetValue() ? 1 : 0);
+			SetStatusText(animate->GetValue() ? L"Taskbar: animations on" : L"Taskbar: animations off");
 		});
 
 		enabled->Bind(wxEVT_CHECKBOX, [this, enabled, showStatus](wxCommandEvent&)
@@ -346,6 +357,7 @@ namespace OpenGlass
 				WriteTaskbarSetting(*row.slider->setting, row.slider->setting->fallback);
 			}
 			WriteTaskbarSetting(PillJoin, PillJoin.fallback);
+			WriteTaskbarSetting(PillAnimate, PillAnimate.fallback);
 			WriteCornerPosition(c_roundCorners);
 			load();
 			SetStatusText(L"Taskbar: defaults applied");

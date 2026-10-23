@@ -32,6 +32,7 @@ constexpr PillSetting PillHeight{ L"Height", 24, 48, 40 };	// the taskbar is 48
 constexpr PillSetting PillPadding{ L"Padding", 0, 24, 6 };	// room left and right of the icons
 constexpr PillSetting PillGap{ L"Gap", 0, 32, 6 };	// space between the tray and the clock
 constexpr PillSetting PillJoin{ L"Join", 0, 1, 0 };	// tray and clock in one pill
+constexpr PillSetting PillAnimate{ L"Animate", 0, 1, 1 };	// springy pills and the sign-in entrance; 0 jumps straight there
 constexpr PillSetting PillIconSize{ L"IconSize", 16, 40, 24 };	// app icons, in DIPs; the taskbar's own size is 24
 
 inline DWORD ReadPillSetting(const PillSetting& setting)
