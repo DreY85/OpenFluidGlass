@@ -272,9 +272,20 @@ namespace
 		return false;
 	}
 
-	// Turns the groups the TAP reports into pill rectangles, relative to the taskbar.
-	void Layout(const RECT (&groups)[PillCount], int barWidth, double scale, RECT (&pills)[PillCount])
+	RECT Transposed(const RECT& r)
 	{
+		return { r.top, r.left, r.bottom, r.right };
+	}
+
+	// Turns the groups the TAP reports into pill rectangles, relative to the taskbar. On a side of the screen
+	// the taskbar is a tall band: there the layout runs on the groups turned on their side, then turns the pills back,
+	// so "height" is the pill's thickness across the band and padding and gap run along it.
+	void Layout(const RECT (&reported)[PillCount], int barWidth, int barHeight, double scale, RECT (&pills)[PillCount])
+	{
+		const bool vertical = barHeight > barWidth;
+		RECT groups[PillCount];
+		for (UINT i = 0; i < PillCount; ++i) groups[i] = vertical ? Transposed(reported[i]) : reported[i];
+		if (vertical) barWidth = barHeight;
 		const auto px = [scale](int value) { return static_cast<LONG>(std::lround(value * scale)); };
 		const LONG padding = px(g_settings.padding), halfGap = px(g_settings.gap) / 2;
 		const auto make = [&](const RECT& group, LONG left, LONG right) -> RECT
@@ -300,6 +311,10 @@ namespace
 			// The tray and the clock touch, so each gives up half the gap.
 			pills[1] = make(tray, tray.left - padding, tray.right - halfGap);
 			pills[2] = make(clock, clock.left + halfGap, clock.right + padding / 2);
+		}
+		if (vertical)
+		{
+			for (auto& pill : pills) pill = Transposed(pill);
 		}
 	}
 
@@ -367,7 +382,7 @@ namespace
 		RECT groups[PillCount]{}, pills[PillCount]{};
 		RECT bar{};
 		const bool shown = tray && IsWindowVisible(tray) && GetWindowRect(tray, &bar) && ReadGroups(groups);
-		if (shown) Layout(groups, bar.right - bar.left, GetDpiForWindow(tray) / 96.0, pills);
+		if (shown) Layout(groups, bar.right - bar.left, bar.bottom - bar.top, GetDpiForWindow(tray) / 96.0, pills);
 		const bool topmost = tray && (GetWindowLongW(tray, GWL_EXSTYLE) & WS_EX_TOPMOST);
 		HWND above = tray;
 		for (UINT index = 0; index < PillCount; ++index)

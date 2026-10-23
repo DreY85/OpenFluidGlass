@@ -13,7 +13,7 @@ constexpr ULONGLONG TapListenLimit = 60000;	// how long the TAP waits, in ms, fo
 struct PillShare
 {
 	volatile LONG sequence;	// odd while the TAP is writing
-	RECT groups[PillCount];	// physical pixels, relative to the taskbar window, full taskbar height; empty when absent
+	RECT groups[PillCount];	// physical pixels, relative to the taskbar window, the full taskbar across it; empty when absent
 };
 
 // Events the host creates before it hooks explorer and the TAP sets when its attach attempt ends.

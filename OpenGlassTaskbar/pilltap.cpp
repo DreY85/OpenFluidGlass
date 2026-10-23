@@ -224,11 +224,17 @@ namespace
 			return true;
 		}
 
+		// Where a group starts and ends along the taskbar: left to right, or top to bottom when it sits on a side.
 		struct Span
 		{
-			double left = 1e9, right = -1e9;
-			void Add(const winrt::Windows::Foundation::Rect& r) { left = (std::min)(left, double(r.X)); right = (std::max)(right, double(r.X + r.Width)); }
-			bool Empty() const { return right <= left; }
+			bool vertical = false;
+			double start = 1e9, end = -1e9;
+			void Add(const winrt::Windows::Foundation::Rect& r)
+			{
+				start = (std::min)(start, double(vertical ? r.Y : r.X));
+				end = (std::max)(end, double(vertical ? r.Y + r.Height : r.X + r.Width));
+			}
+			bool Empty() const { return end <= start; }
 		};
 
 		void Update()
@@ -248,10 +254,12 @@ namespace
 				winrt::Windows::Foundation::Rect frame{};
 				if (!Bounds(m_frame, frame)) return;
 				const double scale = m_frame.XamlRoot() ? m_frame.XamlRoot().RasterizationScale() : 1.0;
+				// On the left or right of the screen the taskbar is a tall band and its groups follow each other downwards.
+				const bool vertical = frame.Height > frame.Width;
 
 				// Apps: Start and every task button laid out on the taskbar. The repeater keeps
 				// recycled buttons around off to the side, so only the ones inside the frame count.
-				Span apps;
+				Span apps{ vertical };
 				const int count = wux::Media::VisualTreeHelper::GetChildrenCount(m_repeater);
 				for (int index = 0; index < count; ++index)
 				{
@@ -262,7 +270,7 @@ namespace
 				}
 
 				// Tray: icons, language, wifi and volume. Clock: the date, time and bell button.
-				Span tray, clock;
+				Span tray{ vertical }, clock{ vertical };
 				const int trayCount = wux::Media::VisualTreeHelper::GetChildrenCount(m_trayGrid);
 				for (int index = 0; index < trayCount; ++index)
 				{
@@ -278,7 +286,8 @@ namespace
 				auto toPixels = [&](const Span& span) -> RECT
 				{
 					if (span.Empty()) return {};
-					return { lround(span.left * scale), lround(frame.Y * scale), lround(span.right * scale), lround((frame.Y + frame.Height) * scale) };
+					if (vertical) return { lround(frame.X * scale), lround(span.start * scale), lround((frame.X + frame.Width) * scale), lround(span.end * scale) };
+					return { lround(span.start * scale), lround(frame.Y * scale), lround(span.end * scale), lround((frame.Y + frame.Height) * scale) };
 				};
 				const RECT next[PillCount]{ toPixels(apps), toPixels(tray), toPixels(clock) };
 
