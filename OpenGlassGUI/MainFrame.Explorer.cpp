@@ -17,16 +17,22 @@ namespace OpenGlass
 		// the DLL's path for turning it on again.
 		constexpr PCWSTR c_folderExtensionKey = L"SOFTWARE\\Classes\\Drive\\shellex\\FolderExtensions\\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}";
 
-		// The effect numbers are the library's own: 0 Blur, 1 Acrylic, 2 Mica, 3 Blur (clear), 4 Mica Alt.
-		constexpr PCWSTR c_effectNames[] = { L"Blur", L"Acrylic", L"Mica", L"Blur (clear)", L"Mica Alt" };
-		constexpr int c_defaultEffect = 0;
-
-		struct Tint
+		// How the glass looks is set in one place, the Liquid Glass tab. So the library always asks File Explorer for the
+		// Mica backdrop (its effect 2) and lays no tint of its own: Open Liquid Glass then draws File Explorer on the same
+		// path as every other modern window. Its Blur effect took another path, which came out darker and blurrier than
+		// other windows, and its tint added a milky layer only File Explorer had.
+		struct IniValue
 		{
-			int r, g, b, a;
+			PCWSTR section;
+			PCWSTR key;
+			PCWSTR value;
 		};
-		constexpr Tint c_defaultLight{ 255, 255, 255, 200 };
-		constexpr Tint c_defaultDark{ 0, 0, 0, 120 };
+		constexpr IniValue c_managedLook[]
+		{
+			{ L"config", L"effect", L"2" },
+			{ L"light", L"a", L"0" },
+			{ L"dark", L"a", L"0" },
+		};
 
 		struct ExplorerToggle
 		{
@@ -112,11 +118,6 @@ namespace OpenGlass
 		}
 
 		// The library reads its file with GetPrivateProfileString, so the same API keeps the file just as it expects it.
-		int ReadIni(const std::wstring& file, PCWSTR section, PCWSTR key, int fallback)
-		{
-			return static_cast<int>(GetPrivateProfileIntW(section, key, fallback, file.c_str()));
-		}
-
 		bool ReadIniBool(const std::wstring& file, PCWSTR section, PCWSTR key, bool fallback)
 		{
 			wchar_t text[16]{};
@@ -129,29 +130,24 @@ namespace OpenGlass
 			return WritePrivateProfileStringW(section, key, value.c_str(), file.c_str()) != FALSE;
 		}
 
-		Tint ReadTint(const std::wstring& file, PCWSTR section, const Tint& fallback)
+		// Writes the managed look where config.ini holds something else (an older install, or a hand edit).
+		// changed tells whether anything was written; the result is false when a write failed.
+		bool ApplyManagedLook(const std::wstring& file, bool& changed)
 		{
-			return {
-				std::clamp(ReadIni(file, section, L"r", fallback.r), 0, 255), std::clamp(ReadIni(file, section, L"g", fallback.g), 0, 255),
-				std::clamp(ReadIni(file, section, L"b", fallback.b), 0, 255), std::clamp(ReadIni(file, section, L"a", fallback.a), 0, 255) };
+			changed = false;
+			bool ok = true;
+			for (const auto& entry : c_managedLook)
+			{
+				wchar_t current[16]{};
+				GetPrivateProfileStringW(entry.section, entry.key, L"", current, ARRAYSIZE(current), file.c_str());
+				if (wcscmp(current, entry.value) != 0)
+				{
+					ok = WriteIni(file, entry.section, entry.key, entry.value) && ok;
+					changed = true;
+				}
+			}
+			return ok;
 		}
-
-		bool WriteTint(const std::wstring& file, PCWSTR section, const Tint& tint)
-		{
-			bool ok = WriteIni(file, section, L"r", std::to_wstring(tint.r));
-			ok = WriteIni(file, section, L"g", std::to_wstring(tint.g)) && ok;
-			ok = WriteIni(file, section, L"b", std::to_wstring(tint.b)) && ok;
-			return WriteIni(file, section, L"a", std::to_wstring(tint.a)) && ok;
-		}
-
-		struct TintRow
-		{
-			PCWSTR section;
-			const Tint* fallback;
-			wxColourPickerCtrl* picker;
-			wxSlider* alpha;
-			wxStaticText* value;
-		};
 
 		enum class RestartResult { Restarted, NotBack, NoScript, NotStarted };
 
@@ -197,11 +193,6 @@ namespace OpenGlass
 			}
 			return RestartResult::NotBack;
 		}
-
-		wxString FormatAlpha(int alpha)
-		{
-			return wxString::Format(L"%d (%d%%)", alpha, (alpha * 100 + 127) / 255);
-		}
 	}
 
 	void MainFrame::CreateExplorerTab()
@@ -226,9 +217,9 @@ namespace OpenGlass
 
 		auto* generalGroup = ModernTheme::MakeCard(panel, L"File Explorer glass");
 		auto* note = new wxStaticText(panel, wxID_ANY,
-			L"Makes the content of File Explorer windows (navigation pane and file list) see-through, so Open Liquid Glass can turn "
-			L"what is behind them into Liquid Glass. The window and toolbar glass itself comes from Open Liquid Glass. "
-			L"Changes go to config.ini at once, so Save and Revert do not affect them. "
+			L"Makes the content of File Explorer windows (navigation pane and file list) see-through, so Open Liquid Glass draws "
+			L"its glass there too, the same as in every other window. How the glass looks, its blur and colour, is set in the "
+			L"Liquid Glass tab. The options below go to config.ini at once, so Save and Revert do not affect them. "
 			L"They are used by File Explorer windows opened afterwards, and Restart Explorer applies them to all.");
 		note->SetForegroundColour(hintColour);
 		note->Wrap(FromDIP(560));
@@ -247,25 +238,6 @@ namespace OpenGlass
 			generalGroup->Add(row, 0, wxEXPAND | wxALL, 4);
 		}
 
-		wxChoice* effect{};
-		{
-			wxArrayString names;
-			for (PCWSTR name : c_effectNames)
-			{
-				names.Add(name);
-			}
-			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
-			auto* label = new wxStaticText(panel, wxID_ANY, L"Effect:", wxDefaultPosition, FromDIP(wxSize(160, -1)));
-			row->Add(label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-			effect = new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, names);
-			row->Add(effect, 0, wxALIGN_CENTER_VERTICAL);
-			constexpr PCWSTR hintText = L"What sits behind the content. Blur is the one Open Liquid Glass turns into Liquid Glass.";
-			label->SetToolTip(hintText);
-			effect->SetToolTip(hintText);
-			generalGroup->Add(row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
-			addHint(generalGroup, hintText);
-		}
-
 		auto toggles = std::make_shared<std::vector<std::pair<const ExplorerToggle*, wxCheckBox*>>>();
 		for (const auto& toggle : c_explorerToggles)
 		{
@@ -277,29 +249,6 @@ namespace OpenGlass
 		}
 		sizer->Add(generalGroup, 0, wxEXPAND | wxALL, 2);
 
-		auto* tintGroup = ModernTheme::MakeCard(panel, L"Tint");
-		auto tints = std::make_shared<std::vector<TintRow>>();
-		const struct { PCWSTR section; PCWSTR label; const Tint* fallback; } tintSpecs[] =
-		{
-			{ L"light", L"Light mode:", &c_defaultLight },
-			{ L"dark", L"Dark mode:", &c_defaultDark },
-		};
-		for (const auto& spec : tintSpecs)
-		{
-			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
-			row->Add(new wxStaticText(panel, wxID_ANY, spec.label, wxDefaultPosition, FromDIP(wxSize(160, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-			auto* picker = new wxColourPickerCtrl(panel, wxID_ANY, *wxWHITE);
-			row->Add(picker, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
-			auto* alpha = new NativeSlider(panel, wxID_ANY, spec.fallback->a, 0, 255);
-			row->Add(alpha, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-			auto* value = new wxStaticText(panel, wxID_ANY, wxEmptyString, wxDefaultPosition, FromDIP(wxSize(84, -1)), wxALIGN_RIGHT | wxST_NO_AUTORESIZE);
-			row->Add(value, 0, wxALIGN_CENTER_VERTICAL);
-			tintGroup->Add(row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
-			tints->push_back({ spec.section, spec.fallback, picker, alpha, value });
-		}
-		addHint(tintGroup, L"The colour laid over the glass and how strongly (alpha), for Windows in light and in dark mode.");
-		sizer->Add(tintGroup, 0, wxEXPAND | wxALL, 2);
-
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
 		auto* resetButton = new wxButton(panel, wxID_ANY, L"Reset to defaults");
 		resetButton->SetToolTip(L"Write the settings Open Liquid Glass ships with to config.ini.");
@@ -309,8 +258,6 @@ namespace OpenGlass
 		buttons->Add(resetButton, 0, wxRIGHT, 6);
 		buttons->Add(restartButton, 0);
 		sizer->Add(buttons, 0, wxEXPAND | wxALL, 6);
-
-		auto showAlpha = [](const TintRow& row) { row.value->SetLabel(FormatAlpha(row.alpha->GetValue())); };
 
 		auto showStatus = [status]()
 		{
@@ -334,21 +281,13 @@ namespace OpenGlass
 			}
 		};
 
-		auto load = [enabled, effect, toggles, tints, showAlpha, showStatus]()
+		auto load = [enabled, toggles, showStatus]()
 		{
 			const std::wstring file = ExplorerConfigPath();
 			enabled->SetValue(IsLibraryEnabled());
-			effect->SetSelection(std::clamp(ReadIni(file, L"config", L"effect", c_defaultEffect), 0, static_cast<int>(ARRAYSIZE(c_effectNames)) - 1));
 			for (const auto& [toggle, box] : *toggles)
 			{
 				box->SetValue(ReadIniBool(file, L"config", toggle->key, true));
-			}
-			for (auto& row : *tints)
-			{
-				const Tint tint = ReadTint(file, row.section, *row.fallback);
-				row.picker->SetColour(wxColour(tint.r, tint.g, tint.b));
-				row.alpha->SetValue(tint.a);
-				showAlpha(row);
 			}
 			showStatus();
 		};
@@ -359,6 +298,18 @@ namespace OpenGlass
 		{
 			SetStatusText(ok ? done : wxString(L"File Explorer: could not write config.ini (start Open Liquid Glass as administrator)"));
 		};
+
+		// An install from before the look moved to the Liquid Glass tab still has its own effect and tint in config.ini.
+		// The status bar is not there yet while the tabs are built, so the result is shown once the window is up.
+		if (!RegisteredLibrary().empty())
+		{
+			bool changed{};
+			const bool ok = ApplyManagedLook(ExplorerConfigPath(), changed);
+			if (changed)
+			{
+				CallAfter([report, ok] { report(ok, L"ExplorerBlurMica: the look now follows the Liquid Glass tab, restart Explorer to apply"); });
+			}
+		}
 
 		enabled->Bind(wxEVT_CHECKBOX, [this, enabled, showStatus](wxCommandEvent&)
 		{
@@ -377,11 +328,6 @@ namespace OpenGlass
 			showStatus();
 		});
 
-		effect->Bind(wxEVT_CHOICE, [effect, report](wxCommandEvent&)
-		{
-			report(WriteIni(ExplorerConfigPath(), L"config", L"effect", std::to_wstring(effect->GetSelection())), L"File Explorer: effect saved");
-		});
-
 		for (const auto& entry : *toggles)
 		{
 			PCWSTR key = entry.first->key;
@@ -392,30 +338,15 @@ namespace OpenGlass
 			});
 		}
 
-		auto saveTint = [report](const TintRow& row)
-		{
-			const wxColour colour = row.picker->GetColour();
-			const Tint tint{ colour.Red(), colour.Green(), colour.Blue(), row.alpha->GetValue() };
-			report(WriteTint(ExplorerConfigPath(), row.section, tint), L"File Explorer: tint saved");
-		};
-		for (auto& row : *tints)
-		{
-			row.picker->Bind(wxEVT_COLOURPICKER_CHANGED, [row, saveTint](wxColourPickerEvent&) { saveTint(row); });
-			row.alpha->Bind(wxEVT_SLIDER, [row, showAlpha](wxCommandEvent&) { showAlpha(row); });
-			// The file is written when the slider is let go, not on every step of the drag.
-			row.alpha->Bind(wxEVT_SCROLL_CHANGED, [row, saveTint](wxScrollEvent&) { saveTint(row); });
-		}
-
 		resetButton->Bind(wxEVT_BUTTON, [load, report](wxCommandEvent&)
 		{
 			const std::wstring file = ExplorerConfigPath();
-			bool ok = WriteIni(file, L"config", L"effect", std::to_wstring(c_defaultEffect));
+			bool changed{};
+			bool ok = ApplyManagedLook(file, changed);
 			for (const auto& toggle : c_explorerToggles)
 			{
 				ok = WriteIni(file, L"config", toggle.key, L"true") && ok;
 			}
-			ok = WriteTint(file, L"light", c_defaultLight) && ok;
-			ok = WriteTint(file, L"dark", c_defaultDark) && ok;
 			load();
 			report(ok, L"File Explorer: defaults written");
 		});

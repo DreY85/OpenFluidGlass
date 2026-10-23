@@ -677,7 +677,7 @@ namespace OpenGlass::ModernTheme
 			{ L"Material", 0xE8B9 }, { L"General", 0xE713 }, { L"Window", 0xE922 }, { L"Caption", 0xE8D2 },
 			{ L"Accent", 0xE790 }, { L"Glass", 0xE706 }, { L"Installed presets", 0xE8F1 }, { L"Color presets", 0xE790 }, { L"Glass tint", 0xEB42 },
 			{ L"Refraction", 0xEB42 }, { L"Blur", 0xE706 }, { L"Color", 0xE790 }, { L"Rim light", 0xE706 },
-			{ L"Floating taskbar", 0xE7C4 }, { L"Pills", 0xEB42 }, { L"File Explorer glass", 0xE838 }, { L"Tint", 0xE790 }
+			{ L"Floating taskbar", 0xE7C4 }, { L"Pills", 0xEB42 }, { L"File Explorer glass", 0xE838 }
 		};
 		const auto found = icons.find(title.ToStdWstring());
 		return found == icons.end() ? wxString() : wxString(found->second);

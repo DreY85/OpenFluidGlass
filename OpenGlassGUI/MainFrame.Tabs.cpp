@@ -599,8 +599,13 @@ namespace OpenGlass
 			row->Add(m_chkUseD3D, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 			AddOptionStatus(panel, row, Settings::Id::UseDirect3DRendering);
 			generalGroup->Add(row, 0, wxEXPAND | wxALL, 2);
+			// A disabled control shows no tooltip, so the note is spelled out where the blur controls go grey.
+			auto* note = new wxStaticText(panel, wxID_ANY, L"With the Direct3D renderer, Blur amount and Blur optimization have no effect: set the blur in the Liquid Glass tab.");
+			note->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+			note->Wrap(FromDIP(560));
+			generalGroup->Add(note, 0, wxLEFT | wxBOTTOM, FromDIP(8));
 		}
-		m_chkUseD3D->SetToolTip(L"Use the Direct3D 11 backend. It ignores BlurDeviation and BlurOptimization and uses a separate fixed Gaussian standard deviation of 3 px.");
+		m_chkUseD3D->SetToolTip(L"Use the Direct3D 11 backend, which draws Liquid Glass. It ignores Blur amount and Blur optimization: with it, the blur is set in the Liquid Glass tab.");
 
 		sizer->Add(generalGroup, 0, wxEXPAND | wxALL, 2);
 		// Window Group
