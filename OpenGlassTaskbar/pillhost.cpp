@@ -360,6 +360,35 @@ namespace
 		return found;
 	}
 
+	// At sign-in the host starts while Windows' welcome screen (LogonUI) still covers the desktop, and the entrance
+	// played under it: the log showed it run in full at two sign-ins nobody saw it at. It now waits for that screen to go,
+	// but never longer than SignInWaitLimit, so a LogonUI left running (a locked session) cannot hold the pills back.
+	constexpr ULONGLONG SignInWaitLimit = 30000;	// ms from the first check
+	bool SignInShowing()
+	{
+		static ULONGLONG first{}, checked{};
+		static bool showing = true;
+		const ULONGLONG now = GetTickCount64();
+		if (!first) first = now;
+		if (!showing || now - first > SignInWaitLimit) return showing = false;
+		if (now - checked < 250) return showing;
+		checked = now;
+		DWORD session{};
+		ProcessIdToSessionId(GetCurrentProcessId(), &session);
+		const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (snapshot == INVALID_HANDLE_VALUE) return showing = false;
+		bool found = false;
+		PROCESSENTRY32W entry{ sizeof(entry) };
+		for (BOOL more = Process32FirstW(snapshot, &entry); more && !found; more = Process32NextW(snapshot, &entry))
+		{
+			DWORD processSession{};
+			found = !_wcsicmp(entry.szExeFile, L"LogonUI.exe") && ProcessIdToSessionId(entry.th32ProcessID, &processSession) && processSession == session;
+		}
+		CloseHandle(snapshot);
+		if (!found) Log(L"sign-in screen gone");
+		return showing = found;
+	}
+
 	// Each pill moves to where the layout puts it on springs instead of jumping there. When an app opens or closes,
 	// Windows slides the icons over about a quarter of a second, but the layout the TAP reads changes in steps
 	// (closing one app gave four steps in 900 ms), and a pill that jumped to each step shrank, overshot and grew back.
@@ -502,6 +531,14 @@ namespace
 			if (!g_settings.animate)
 			{
 				SetMotion(motion, target, SpringFrequency, SpringDamping, 0.0);
+			}
+			else if (!g_entranceDone && !motion.valid && SignInShowing())
+			{
+				// The entrance waits for the welcome screen to go; the pills stay hidden under it meanwhile.
+				if (IsWindowVisible(pill)) ShowWindow(pill, SW_HIDE);
+				entering = true;
+				animating = true;
+				continue;
 			}
 			else if (!g_entranceDone && !motion.valid)
 			{
