@@ -282,6 +282,10 @@ namespace OpenGlass
 			m_layoutPending = false;
 			GetParent()->Layout();
 			if (auto* page = wxDynamicCast(GetParent(), wxScrolledWindow)) page->FitInside();
+			// The page paints the card backgrounds itself and repaints them only when its own size changes.
+			// A taller palette (Windows 7 has two rows, Vista one) moves the cards without that, so without a
+			// repaint the old card outlines stayed behind across the new rows.
+			GetParent()->Refresh();
 		});
 	}
 

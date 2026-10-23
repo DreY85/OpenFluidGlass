@@ -152,8 +152,9 @@ Source: "{#MyAppBuildPath}\OpenGlassHost.exe"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#MyAppBuildPath}\OpenGlassGUI.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 
 ; Liquid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll.
-Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete
-Source: "{#TaskbarPath}\pilltap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete
+; It works on the XAML taskbar of Windows 11 only, so Windows 10 gets neither the files nor the logon task.
+Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
+Source: "{#TaskbarPath}\pilltap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
 Source: "{#MyProjPath}\Scripts\Restart-Explorer.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -162,6 +163,13 @@ Source: "{#EbmPath}\ExplorerBlurMica.dll"; DestDir: "{app}\ExplorerBlurMica"; Fl
 Source: "{#EbmPath}\config.ini"; DestDir: "{app}\ExplorerBlurMica"; Flags: onlyifdoesntexist
 Source: "{#EbmPath}\ReadMe.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
 Source: "{#EbmPath}\NOTICE.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
+
+[INI]
+; The look is set in the Liquid Glass tab, so ExplorerBlurMica only clears File Explorer's background (the GUI keeps
+; this in line too). Its Mica effect (2) makes File Explorer glass match other windows, but Mica exists only on
+; Windows 11; Windows 10 keeps its Blur effect (0).
+Filename: "{app}\ExplorerBlurMica\config.ini"; Section: "config"; Key: "effect"; String: "2"; Check: IsWindows11
+Filename: "{app}\ExplorerBlurMica\config.ini"; Section: "config"; Key: "effect"; String: "0"; Check: not IsWindows11
 
 [Registry]
 ; What "regsvr32 ExplorerBlurMica.dll" registers: a folder extension that explorer loads into every File Explorer window.
@@ -229,10 +237,10 @@ Filename: "{sys}\sc.exe"; Parameters: "description OpenGlassHost ""{cm:ServiceDe
 ; Start the service (Automatic start, no checkbox)
 Filename: "{sys}\sc.exe"; Parameters: "start OpenGlassHost"; Flags: runhidden nowait
 ; Logon task for the taskbar host (Users group, normal priority). The script runs from the hardened install folder.
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -HostPath ""{app}\taskbar\pillhost.exe"""; StatusMsg: "{cm:InstallingTaskbar}"; Flags: runhidden waituntilterminated; AfterInstall: CheckTaskbarTask
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -HostPath ""{app}\taskbar\pillhost.exe"""; StatusMsg: "{cm:InstallingTaskbar}"; Flags: runhidden waituntilterminated; AfterInstall: CheckTaskbarTask; Check: IsWindows11
 ; Both of these start as the signed-in user, never elevated: explorer could not post to an elevated host.
 Filename: "{app}\Restart-Explorer.cmd"; Description: "{cm:RestartExplorer}"; Flags: postinstall nowait runasoriginaluser runhidden skipifsilent
-Filename: "{app}\taskbar\pillhost.exe"; Description: "{cm:StartTaskbar}"; Flags: postinstall nowait runasoriginaluser skipifsilent
+Filename: "{app}\taskbar\pillhost.exe"; Description: "{cm:StartTaskbar}"; Flags: postinstall nowait runasoriginaluser skipifsilent; Check: IsWindows11
 ; Start as the original user; the GUI performs its own authenticated elevation.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchOpenGlassGUI}"; Flags: postinstall nowait runasoriginaluser; Check: not WizardSilent
 
@@ -248,6 +256,13 @@ Filename: "{sys}\sc.exe"; Parameters: "delete OpenGlassHost"; Flags: runhidden; 
 var
   InstallMILCompDll: Boolean;
   ExplorerBlurMicaTurnedOff: Boolean;
+  WindowsBuild: Cardinal;
+
+// Windows 11 starts at build 22000: the XAML taskbar the floating taskbar needs, and the Mica backdrop.
+function IsWindows11(): Boolean;
+begin
+  Result := WindowsBuild >= 22000;
+end;
 
 // The GUI turns ExplorerBlurMica off by removing only its folder extension key and keeping the class.
 // Read before anything is written, so an update keeps it off, and a fresh install (no class yet) turns it on.
@@ -278,6 +293,7 @@ begin
   ExplorerBlurMicaTurnedOff :=
     RegKeyExists(HKLM64, 'SOFTWARE\Classes\CLSID\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}') and
     not RegKeyExists(HKLM64, 'SOFTWARE\Classes\Drive\shellex\FolderExtensions\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}');
+  WindowsBuild := Version.Build;
   InstallMILCompDll := Version.Build >= 28000;
   if InstallMILCompDll then
     Log(Format('Detected Windows build %d; selected the MILComp DWM architecture.', [Version.Build]))

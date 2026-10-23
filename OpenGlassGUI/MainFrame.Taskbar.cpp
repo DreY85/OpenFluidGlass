@@ -3,6 +3,7 @@
 #include "UiControls.hpp"
 #include "DwmSettings.hpp"
 #include "ShellLaunch.hpp"
+#include "WindowsBuild.hpp"
 #include "..\OpenGlassTaskbar\pillshare.h"
 
 // Taskbar tab: the floating Liquid Glass taskbar run by pillhost.exe (OpenGlassTaskbar).
@@ -104,6 +105,23 @@ namespace OpenGlass
 		const wxColour hintColour = wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT);
 		wxFont hintFont = panel->GetFont();
 		hintFont.SetFractionalPointSize(hintFont.GetFractionalPointSize() * 0.9);
+
+		// The TAP works on the XAML taskbar of Windows 11. Windows 10 has the older one, so the installer leaves the
+		// floating taskbar out there and the tab only says why.
+		if (!IsWindows11())
+		{
+			auto* group = ModernTheme::MakeCard(panel, L"Floating taskbar");
+			auto* note = new wxStaticText(panel, wxID_ANY,
+				L"The floating taskbar needs Windows 11. It works on the Windows 11 taskbar, which Windows 10 does not have, "
+				L"so it is not installed here and the normal taskbar stays as it is.");
+			note->SetForegroundColour(hintColour);
+			note->Wrap(FromDIP(560));
+			group->Add(note, 0, wxEXPAND | wxALL, 4);
+			sizer->Add(group, 0, wxEXPAND | wxALL, 2);
+			panel->SetSizer(sizer);
+			m_notebook->AddPage(panel, L"Taskbar");
+			return;
+		}
 
 		auto* generalGroup = ModernTheme::MakeCard(panel, L"Floating taskbar");
 		auto* note = new wxStaticText(panel, wxID_ANY,

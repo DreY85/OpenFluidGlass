@@ -2,6 +2,7 @@
 #include "MainFrame.hpp"
 #include "UiControls.hpp"
 #include "ShellLaunch.hpp"
+#include "WindowsBuild.hpp"
 
 // File Explorer tab: the settings of ExplorerBlurMica, the library that clears the background of the File Explorer
 // content area (navigation pane and file list) so the glass behind the window shows through.
@@ -21,15 +22,21 @@ namespace OpenGlass
 		// Mica backdrop (its effect 2) and lays no tint of its own: Open Liquid Glass then draws File Explorer on the same
 		// path as every other modern window. Its Blur effect took another path, which came out darker and blurrier than
 		// other windows, and its tint added a milky layer only File Explorer had.
+		// Mica exists only on Windows 11, so Windows 10 keeps the Blur effect (0), the one that works there.
+		PCWSTR ManagedEffect() noexcept
+		{
+			return IsWindows11() ? L"2" : L"0";
+		}
+
 		struct IniValue
 		{
 			PCWSTR section;
 			PCWSTR key;
-			PCWSTR value;
+			PCWSTR value;	// null: the effect for this Windows
 		};
 		constexpr IniValue c_managedLook[]
 		{
-			{ L"config", L"effect", L"2" },
+			{ L"config", L"effect", nullptr },
 			{ L"light", L"a", L"0" },
 			{ L"dark", L"a", L"0" },
 		};
@@ -138,11 +145,12 @@ namespace OpenGlass
 			bool ok = true;
 			for (const auto& entry : c_managedLook)
 			{
+				const PCWSTR value = entry.value ? entry.value : ManagedEffect();
 				wchar_t current[16]{};
 				GetPrivateProfileStringW(entry.section, entry.key, L"", current, ARRAYSIZE(current), file.c_str());
-				if (wcscmp(current, entry.value) != 0)
+				if (wcscmp(current, value) != 0)
 				{
-					ok = WriteIni(file, entry.section, entry.key, entry.value) && ok;
+					ok = WriteIni(file, entry.section, entry.key, value) && ok;
 					changed = true;
 				}
 			}
