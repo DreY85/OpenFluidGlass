@@ -391,6 +391,11 @@ namespace
 	RECT g_lastBar{};
 	double g_lastStep{};	// s, from Seconds; 0 before the first placement
 	bool g_entranceDone{};
+	// For the log: when the entrance began and how many frames it took, to tell an entrance that played at sign-in,
+	// while the session was still busy, from one that never started.
+	double g_entranceStart{};
+	int g_entranceFrames{};
+	bool g_entranceLogged{};
 
 	double Seconds()
 	{
@@ -506,6 +511,11 @@ namespace
 				if (vertical) { const LONG middle = (target.top + target.bottom) / 2; drop.top = middle - thickness / 2; drop.bottom = drop.top + thickness; }
 				else { const LONG middle = (target.left + target.right) / 2; drop.left = middle - thickness / 2; drop.right = drop.left + thickness; }
 				SetMotion(motion, drop, EntranceFrequency, EntranceDamping, EntranceStagger * index);
+				if (g_entranceStart == 0.0)
+				{
+					g_entranceStart = now;
+					Log(L"entrance started");
+				}
 			}
 			else if (!motion.valid || barMoved || !IsWindowVisible(pill) && motion.delay <= 0.0)
 			{
@@ -541,6 +551,17 @@ namespace
 		// The entrance plays once, when the pills first show after the host starts; an Explorer restart does not replay it.
 		// It counts as played only once a pill is up: until the TAP has reported, the taskbar shows with no pills at all.
 		if (placed && !entering) g_entranceDone = true;
+		if (g_entranceStart > 0.0 && !g_entranceLogged)
+		{
+			++g_entranceFrames;
+			if (g_entranceDone && !animating)
+			{
+				wchar_t line[96];
+				swprintf_s(line, L"entrance done: %.0f ms, %d frames", (now - g_entranceStart) * 1000.0, g_entranceFrames);
+				Log(line);
+				g_entranceLogged = true;
+			}
+		}
 		if (animating) SetTimer(g_host, GlideTimer, 16, nullptr);
 		else KillTimer(g_host, GlideTimer);
 	}
