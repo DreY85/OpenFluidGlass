@@ -558,6 +558,11 @@ HRESULT CD3DGlassRealizer::Render(
 	CalculateDwmHwSamples(BlurSettings::Direct3DStandardDeviation);
 	// DWM inflates bounds by filterRadius = ceil(sigma * 2.3) (sigma=3.0 => 7)
 	const float expansion = static_cast<float>(m_dwmHwSamples.radius);
+	// The compose pass reads the quarter-width buffer up to the refraction reach away, so pass 1 must refresh that
+	// much around the glass as well. It used to refresh only the blur radius: the texels further out kept whatever
+	// glass was last blurred there, an Explorer window dragged past for one, and a caption kept that window's tint
+	// until moving it refreshed them; turning Liquid Glass off and on brought the same tint back.
+	const float pass1Reach = expansion + GetLiquidGlassReach();
 	const UINT quarterWidth = std::max<UINT>(1u, backBufferDesc.Width >> 2);
 
 	std::vector<BlurVertex> verticesBlur{};
@@ -582,14 +587,14 @@ HRESULT CD3DGlassRealizer::Render(
 	// Pass 1 (accumulation stage):
 	D2D1_RECT_F samplingWorldBounds =
 	{
-		drawingWorldBounds.left - expansion,
-		drawingWorldBounds.top - expansion,
-		drawingWorldBounds.right + expansion,
-		drawingWorldBounds.bottom + expansion
+		drawingWorldBounds.left - pass1Reach,
+		drawingWorldBounds.top - pass1Reach,
+		drawingWorldBounds.right + pass1Reach,
+		drawingWorldBounds.bottom + pass1Reach
 	};
 	D2D1_RECT_F geometryBounds{};
 	RETURN_IF_FAILED(geometry->GetBounds(nullptr, &geometryBounds));
-	SubmitBlurRectBatch(rectangles, drawingWorldBounds, geometryBounds, expansion, backBufferDesc.Width, backBufferDesc.Height, verticesBlur);
+	SubmitBlurRectBatch(rectangles, drawingWorldBounds, geometryBounds, pass1Reach, backBufferDesc.Width, backBufferDesc.Height, verticesBlur);
 
 	if (verticesCompose.empty() || indicesCompose.empty() || verticesBlur.empty())
 	{
@@ -729,13 +734,13 @@ HRESULT CD3DGlassRealizer::Render(
 		context->OMSetRenderTargets(0, nullptr, nullptr);
 
 		// Pass 1 samples this copy directly, so the copy must contain every tap of every fragment
-		// the pass renders. The vertices are already expanded by `expansion`, and the kernel reaches
+		// the pass renders. The vertices are already expanded by `pass1Reach`, and the kernel reaches
 		// a further `radius` on the right and `radius + 1` on the left: CalculateDwmHwSamples pairs
 		// the input samples (hwOffset = (i0 - radius) + w1 / (w0 + w1)) and the shader applies a
 		// -0.5 bias, so the leftmost tap lands one texel further out than the rightmost. Pass 1 is
 		// horizontal only (`offsets` are added to u alone), so y keeps the vertex-only expansion.
-		const float copyLeftMargin = expansion + static_cast<float>(m_dwmHwSamples.radius + 1);
-		const float copyRightMargin = expansion + static_cast<float>(m_dwmHwSamples.radius);
+		const float copyLeftMargin = pass1Reach + static_cast<float>(m_dwmHwSamples.radius + 1);
+		const float copyRightMargin = pass1Reach + static_cast<float>(m_dwmHwSamples.radius);
 
 		if (liquidGlassSharp)
 		{
@@ -771,9 +776,9 @@ HRESULT CD3DGlassRealizer::Render(
 					subRectangle =
 					{
 						std::max(subRectangle.left - copyLeftMargin, 0.f),
-						std::max(subRectangle.top - expansion, 0.f),
+						std::max(subRectangle.top - pass1Reach, 0.f),
 						std::min(subRectangle.right + copyRightMargin, static_cast<float>(backBufferDesc.Width)),
-						std::min(subRectangle.bottom + expansion, static_cast<float>(backBufferDesc.Height))
+						std::min(subRectangle.bottom + pass1Reach, static_cast<float>(backBufferDesc.Height))
 					};
 
 					const auto copyRegionRect = RectF::ToRectU(subRectangle);
