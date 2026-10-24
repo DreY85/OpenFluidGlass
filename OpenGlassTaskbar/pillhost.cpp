@@ -427,6 +427,7 @@ namespace
 	double g_entranceStart{};
 	int g_entranceFrames{};
 	bool g_entranceLogged{};
+	RECT g_entranceTarget{};
 
 	double Seconds()
 	{
@@ -530,6 +531,15 @@ namespace
 			if (((GetWindowLongW(pill, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0) != topmost)
 				SetWindowPos(pill, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			const RECT target{ bar.left + r.left, bar.top + r.top, bar.left + r.right, bar.top + r.bottom };
+			// For the log: where the apps pill is headed while the entrance plays, to tell a taskbar that slides in
+			// at sign-in from a layout that is still settling.
+			if (index == 0 && g_entranceStart > 0.0 && !g_entranceLogged && !EqualRect(&target, &g_entranceTarget))
+			{
+				g_entranceTarget = target;
+				wchar_t line[128];
+				swprintf_s(line, L"apps pill heads to %ld,%ld,%ld,%ld, taskbar %ld,%ld,%ld,%ld", target.left, target.top, target.right, target.bottom, bar.left, bar.top, bar.right, bar.bottom);
+				Log(line);
+			}
 			if (!g_settings.animate)
 			{
 				SetMotion(motion, target, SpringFrequency, SpringDamping, 0.0);
@@ -553,7 +563,9 @@ namespace
 				if (g_entranceStart == 0.0)
 				{
 					g_entranceStart = now;
-					Log(L"entrance started");
+					wchar_t line[128];
+					swprintf_s(line, L"entrance started: taskbar %ld,%ld,%ld,%ld", bar.left, bar.top, bar.right, bar.bottom);
+					Log(line);
 				}
 			}
 			else if (!motion.valid || barMoved || !IsWindowVisible(pill) && motion.delay <= 0.0)
