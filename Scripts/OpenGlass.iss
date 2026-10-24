@@ -194,6 +194,12 @@ Type: filesandordirs; Name: "{commonappdata}\OpenGlass\dumps"
 Type: filesandordirs; Name: "{app}\symbols"
 Type: filesandordirs; Name: "{app}\dumps"
 
+[InstallDelete]
+; Shortcuts left by an OpenGlass setup from before the rename; they point at the same GUI.
+Type: files; Name: "{commondesktop}\Configure OpenGlass.lnk"
+Type: files; Name: "{group}\Configure OpenGlass.lnk"
+Type: files; Name: "{group}\Uninstall OpenGlass.lnk"
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkablealone
 
