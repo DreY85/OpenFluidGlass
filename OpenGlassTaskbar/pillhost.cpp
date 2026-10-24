@@ -365,13 +365,17 @@ namespace
 	// At sign-in the host starts while Windows' welcome screen (LogonUI) still covers the desktop, and the entrance
 	// played under it: the log showed it run in full at two sign-ins nobody saw it at. It now waits for that screen to go,
 	// but never longer than SignInWaitLimit, so a LogonUI left running (a locked session) cannot hold the pills back.
+	// Once it has gone, the session is still busy for a moment and the taskbar icons play their own entrance:
+	// an entrance started right then looked like a lag, with the pills rising along with the icons.
 	constexpr ULONGLONG SignInWaitLimit = 30000;	// ms from the first check
+	constexpr ULONGLONG SignInSettle = 1000;	// ms after the welcome screen goes
 	bool SignInShowing()
 	{
-		static ULONGLONG first{}, checked{};
-		static bool showing = true;
+		static ULONGLONG first{}, checked{}, gone{};
+		static bool showing = true, seen = false;
 		const ULONGLONG now = GetTickCount64();
 		if (!first) first = now;
+		if (gone) return now - gone < SignInSettle && now - first <= SignInWaitLimit;
 		if (!showing || now - first > SignInWaitLimit) return showing = false;
 		if (now - checked < 250) return showing;
 		checked = now;
@@ -387,7 +391,13 @@ namespace
 			found = !_wcsicmp(entry.szExeFile, L"LogonUI.exe") && ProcessIdToSessionId(entry.th32ProcessID, &processSession) && processSession == session;
 		}
 		CloseHandle(snapshot);
-		if (!found) Log(L"sign-in screen gone");
+		if (found) seen = true;
+		else
+		{
+			Log(L"sign-in screen gone");
+			// Only a real sign-in waits for the session to settle; a restarted host starts at once.
+			if (seen) { gone = now; return true; }
+		}
 		return showing = found;
 	}
 
@@ -400,12 +410,13 @@ namespace
 	// grows from a drop at its middle, the apps first and the tray a moment later.
 	constexpr double SpringFrequency = 18.0;	// rad/s
 	// The entrance is slower: at the everyday speed a pill grew in 170 ms, too fast to see.
-	constexpr double EntranceFrequency = 8.0;	// rad/s, about half a second
+	// At 8 rad/s it went by too fast to see where it started, at 4.5 (two seconds in all) it dragged.
+	constexpr double EntranceFrequency = 7.5;	// rad/s; with the stagger, about 1.25 s in all
 	constexpr double SpringDamping = 0.6;	// of critical; below 1 it overshoots
 	constexpr double EntranceDamping = 0.8;	// the long entrance stretch would overshoot too far at 0.6
 	constexpr double SquashSpeed = 600.0;	// px/s of length change that gives the full squash
 	constexpr double SquashAmount = 0.12;	// of the thickness at most
-	constexpr double EntranceStagger = 0.15;	// s between the pills' entrances
+	constexpr double EntranceStagger = 0.2;	// s between the pills' entrances
 
 	struct Edge
 	{
