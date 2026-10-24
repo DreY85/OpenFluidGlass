@@ -65,6 +65,12 @@ namespace OpenGlass
 			{
 				wParam = MAKEWPARAM(UIS_SET, UISF_HIDEFOCUS);
 			}
+			// The trackbar invalidates and paints only its own narrow thumb rect as the thumb moves, before it tells us,
+			// so the edges of the round thumb sticking out of it stayed behind for a frame. Every paint covers it all.
+			if (message == WM_PAINT)
+			{
+				InvalidateRect(static_cast<HWND>(GetHWND()), nullptr, FALSE);
+			}
 			return wxSlider::MSWWindowProc(message, wParam, lParam);
 		}
 
