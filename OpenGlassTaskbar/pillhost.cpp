@@ -191,8 +191,10 @@ namespace
 	HWND g_nudge{};
 	ULONGLONG g_nudgeTime{};
 	int g_nudges{};	// since the TAP attached; a TAP that never answers would otherwise get nudged forever
-	constexpr ULONGLONG NudgeLimit = 2000, NudgeRetryDelay = 5000;
-	constexpr int NudgeTries = 3;
+	// At sign-in the first nudge comes before the taskbar is fully built and goes unseen. Five seconds before the next
+	// kept the pills away for eight seconds after the TAP attached, so the nudges now follow each other closely.
+	constexpr ULONGLONG NudgeLimit = 2000, NudgeRetryDelay = 1000;
+	constexpr int NudgeTries = 8;
 
 	void EndNudge()
 	{
