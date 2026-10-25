@@ -618,7 +618,7 @@ namespace OpenGlass
 			row->Add(label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 
 			wxArrayString profiles;
-			profiles.Add(L"Windows 8 style (vanilla)");
+			profiles.Add(L"Windows default");
 			profiles.Add(L"Windows 7 style");
 			profiles.Add(L"Custom");
 			m_chRoundRectProfile = new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, profiles);
@@ -633,7 +633,7 @@ namespace OpenGlass
 
 		// Caption Buttons
 		wxArrayString captionStyles;
-		captionStyles.Add(L"Vanilla style");
+		captionStyles.Add(L"Windows default");
 		captionStyles.Add(L"Windows Vista style");
 		captionStyles.Add(L"Windows 7 style");
 		captionStyles.Add(L"Windows 8 style");
@@ -649,6 +649,12 @@ namespace OpenGlass
 			geometryGroup->Add(row, 0, wxEXPAND | wxALL, 2);
 		}
 
+		// The caption button style is a list, not a switch, so unticking the rest left small Windows 7 buttons behind.
+		// One button puts the whole card back the way Windows draws it.
+		m_btnWindowDefaults = new wxButton(panel, wxID_ANY, L"Restore Windows defaults");
+		m_btnWindowDefaults->SetToolTip(L"Windows' own corner radius, caption buttons and borders. Save to keep them.");
+		geometryGroup->Add(m_btnWindowDefaults, 0, wxALL, 2);
+
 		sizer->Add(geometryGroup, 0, wxEXPAND | wxALL, 2);
 
 		// Caption Group
@@ -661,7 +667,7 @@ namespace OpenGlass
 			row->Add(label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 
 			wxArrayString modes;
-			modes.Add(L"Disabled (vanilla)");
+			modes.Add(L"Windows default (off)");
 			modes.Add(L"Regular");
 			modes.Add(L"Windows 8 style");
 			m_chCenterCaption = new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, modes);

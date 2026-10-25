@@ -218,6 +218,7 @@ namespace OpenGlass
 		wxChoice* m_chCaptionButtons{ nullptr };
 		wxChoice* m_chCenterCaption{ nullptr };
 		wxCheckBox* m_chkDisableModernBorders{ nullptr };
+		wxButton* m_btnWindowDefaults{ nullptr };
 		wxCheckBox* m_chkCaptionTextBold{ nullptr };
 		wxButton* m_btnExportAtlas{ nullptr };
 

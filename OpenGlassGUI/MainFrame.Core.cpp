@@ -1653,6 +1653,16 @@ namespace OpenGlass
 				updateDword(Settings::Id::DisableModernBorders, 1);
 			}
 		});
+		m_btnWindowDefaults->Bind(wxEVT_BUTTON, [this, deleteValue](wxCommandEvent&) {
+			m_chRoundRectProfile->SetSelection(0);
+			m_scRoundRectRadius->SetValue(0);
+			m_scRoundRectRadius->Disable();
+			deleteValue(Settings::Id::RoundRectRadius);
+			m_chCaptionButtons->SetSelection(0);
+			deleteValue(Settings::Id::CaptionButtons);
+			m_chkDisableModernBorders->SetValue(false);
+			deleteValue(Settings::Id::DisableModernBorders);
+		});
 		m_chkCaptionTextBold->Bind(wxEVT_CHECKBOX, [this, updateDword, deleteValue]([[maybe_unused]] wxCommandEvent& e) {
 			if (!e.IsChecked())
 			{
