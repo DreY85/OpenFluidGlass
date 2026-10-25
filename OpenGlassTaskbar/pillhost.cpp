@@ -5,6 +5,7 @@
 // pillhost.exe --stop closes a running copy.
 #include <windows.h>
 #include <tlhelp32.h>
+#include <dwmapi.h>
 #include <algorithm>
 #include <cmath>
 #include "pillshare.h"
@@ -366,9 +367,11 @@ namespace
 	// played under it: the log showed it run in full at two sign-ins nobody saw it at. It now waits for that screen to go,
 	// but never longer than SignInWaitLimit, so a LogonUI left running (a locked session) cannot hold the pills back.
 	// Once it has gone, the session is still busy for a moment and the taskbar icons play their own entrance:
-	// an entrance started right then looked like a lag, with the pills rising along with the icons.
+	// an entrance started right then looked like a lag, with the pills rising along with the icons. One second was not
+	// enough once the pills were ready early, on a saved layout: they came up 0.7 s after the welcome screen went, while
+	// Windows was still fading from it to the desktop, and the screen froze mid-fade for 3 to 4 s.
 	constexpr ULONGLONG SignInWaitLimit = 30000;	// ms from the first check
-	constexpr ULONGLONG SignInSettle = 1000;	// ms after the welcome screen goes
+	constexpr ULONGLONG SignInSettle = 2000;	// ms after the welcome screen goes
 	bool SignInShowing()
 	{
 		static ULONGLONG first{}, checked{}, gone{};
@@ -467,6 +470,37 @@ namespace
 	// For the log: when the entrance began and how many frames it took, to tell an entrance that played at sign-in,
 	// while the session was still busy, from one that never started.
 	double g_entranceStart{};
+	// Also for the log: whether DWM stopped composing around the entrance, the way the screen froze for seconds once.
+	// While the entrance plays the pills move every frame, so DWM must compose; while it waits nothing of ours moves,
+	// and a still screen there may just be a screen with nothing to update.
+	struct DwmWatch
+	{
+		bool active;
+		UINT64 frame;	// DWM's count of composed frames
+		ULONGLONG frameAt, hostAt;	// ms, when it last changed and when the host last looked
+		ULONGLONG waitingLongest, enteringLongest, hostLongest;
+	} g_dwmWatch{};
+	void WatchDwm(bool entering)
+	{
+		DWM_TIMING_INFO info{ sizeof(info) };
+		if (FAILED(DwmGetCompositionTimingInfo(nullptr, &info))) return;
+		const ULONGLONG now = GetTickCount64();
+		auto& w = g_dwmWatch;
+		if (!w.active)
+		{
+			w.active = true;
+			w.frame = info.cFrame;
+			w.frameAt = w.hostAt = now;
+			return;
+		}
+		w.hostLongest = (std::max)(w.hostLongest, now - w.hostAt);
+		w.hostAt = now;
+		if (info.cFrame == w.frame) return;
+		auto& longest = entering ? w.enteringLongest : w.waitingLongest;
+		longest = (std::max)(longest, now - w.frameAt);
+		w.frame = info.cFrame;
+		w.frameAt = now;
+	}
 	int g_entranceFrames{};
 	bool g_entranceLogged{};
 	RECT g_entranceTarget{};
@@ -716,13 +750,17 @@ namespace
 		// The entrance plays once, when the pills first show after the host starts; an Explorer restart does not replay it.
 		// It counts as played only once a pill is up: until the TAP has reported, the taskbar shows with no pills at all.
 		if (placed && !entering) g_entranceDone = true;
-		if (g_entranceStart > 0.0 && !g_entranceLogged)
+		const bool entranceRunning = g_entranceStart > 0.0 && !g_entranceLogged;
+		if (holdState == 1 || entranceRunning) WatchDwm(entranceRunning);
+		if (entranceRunning)
 		{
 			++g_entranceFrames;
 			if (g_entranceDone && !animating)
 			{
-				wchar_t line[96];
-				swprintf_s(line, L"entrance done: %.0f ms, %d frames", (now - g_entranceStart) * 1000.0, g_entranceFrames);
+				wchar_t line[192];
+				const auto& w = g_dwmWatch;
+				swprintf_s(line, L"entrance done: %.0f ms, %d frames; longest pause, host %llu ms, DWM %llu ms while waiting and %llu ms during the entrance",
+					(now - g_entranceStart) * 1000.0, g_entranceFrames, w.hostLongest, w.waitingLongest, w.enteringLongest);
 				Log(line);
 				g_entranceLogged = true;
 			}
