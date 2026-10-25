@@ -401,6 +401,59 @@ namespace
 		return showing = found;
 	}
 
+	// The welcome screen is often long gone by the time the pills are ready (22 s after sign-in once), yet the session
+	// is still starting its apps: the host then went 600 ms without a frame right as the entrance began, and it stuttered.
+	// The entrance waits until the host's own frames come on time and the processors are not flat out, for a moment,
+	// but never more than SettleLimit after the pills are ready.
+	constexpr ULONGLONG SettleLimit = 5000, SettleSpan = 300, SettleGap = 50;	// ms
+	constexpr double SettleBusy = 0.7;	// share of processor time in use
+	bool SessionSettled()
+	{
+		static ULONGLONG first{}, lastFrame{}, smoothSince{};
+		static ULONGLONG idleAt{}, totalAt{};
+		static bool settled = false;
+		if (settled) return true;
+		const ULONGLONG now = GetTickCount64();
+		if (!first) first = now;
+		const auto sample = [](ULONGLONG& idle, ULONGLONG& total)
+		{
+			FILETIME i{}, k{}, u{};
+			GetSystemTimes(&i, &k, &u);
+			const auto value = [](const FILETIME& f) { return (static_cast<ULONGLONG>(f.dwHighDateTime) << 32) | f.dwLowDateTime; };
+			idle = value(i);
+			total = value(k) + value(u);	// kernel time includes idle time
+		};
+		const ULONGLONG gap = lastFrame ? now - lastFrame : SettleGap + 1;
+		lastFrame = now;
+		wchar_t line[96];
+		if (now - first > SettleLimit)
+		{
+			swprintf_s(line, L"session still busy after %llu ms, entering anyway", now - first);
+			Log(line);
+			return settled = true;
+		}
+		if (gap > SettleGap)
+		{
+			smoothSince = now;
+			sample(idleAt, totalAt);
+			return false;
+		}
+		if (now - smoothSince < SettleSpan) return false;
+		ULONGLONG idle{}, total{};
+		sample(idle, total);
+		const double busy = total > totalAt ? 1.0 - double(idle - idleAt) / double(total - totalAt) : 0.0;
+		if (busy > SettleBusy)
+		{
+			smoothSince = now;
+			idleAt = idle;
+			totalAt = total;
+			return false;
+		}
+		swprintf_s(line, L"session calm after %llu ms (%.0f%% busy)", now - first, busy * 100.0);
+		Log(line);
+		return settled = true;
+	}
+
 	// Each pill moves to where the layout puts it on springs instead of jumping there. When an app opens or closes,
 	// Windows slides the icons over about a quarter of a second, but the layout the TAP reads changes in steps
 	// (closing one app gave four steps in 900 ms), and a pill that jumped to each step shrank, overshot and grew back.
@@ -527,6 +580,9 @@ namespace
 		const double elapsed = g_lastStep > 0.0 ? std::clamp(now - g_lastStep, 0.0, 0.1) : 0.0;
 		g_lastStep = now;
 		bool animating = false, entering = false, placed = false;
+		// Asked once a frame, and only once a pill is ready to enter.
+		int holdState = -1;
+		const auto holdEntrance = [&holdState] { if (holdState < 0) holdState = SignInShowing() || !SessionSettled(); return holdState == 1; };
 		HWND above = tray;
 		for (UINT index = 0; index < PillCount; ++index)
 		{
@@ -555,9 +611,9 @@ namespace
 			{
 				SetMotion(motion, target, SpringFrequency, SpringDamping, 0.0);
 			}
-			else if (!g_entranceDone && !motion.valid && SignInShowing())
+			else if (!g_entranceDone && !motion.valid && holdEntrance())
 			{
-				// The entrance waits for the welcome screen to go; the pills stay hidden under it meanwhile.
+				// The entrance waits for the welcome screen to go and the session to calm down; the pills stay hidden meanwhile.
 				if (IsWindowVisible(pill)) ShowWindow(pill, SW_HIDE);
 				entering = true;
 				animating = true;
