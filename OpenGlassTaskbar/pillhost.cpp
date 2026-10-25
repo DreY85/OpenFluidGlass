@@ -526,6 +526,62 @@ namespace
 
 	bool g_trayShownLogged{};
 
+	// Where the groups were when the pills last showed, kept for the next sign-in. There the TAP is in a few seconds
+	// before the taskbar notices a nudge and lets it report (2.8 s at one sign-in, with the icons already up), so the
+	// pills show on the saved layout as soon as the TAP is in, and their springs carry them over once it reports.
+	// Only a taskbar of the same size and scale uses it; the saved app group may be off by the apps that started since.
+	constexpr wchar_t PillLastLayoutValue[] = L"LastLayout";
+	struct PillLayout
+	{
+		RECT groups[PillCount];
+		LONG barWidth, barHeight;
+		UINT dpi;
+	};
+	PillLayout g_savedLayout{};
+	ULONGLONG g_savedAt{};
+	constexpr ULONGLONG SaveLayoutDelay = 2000;	// ms between writes, while apps open and close
+
+	PillLayout MakeLayout(const RECT (&groups)[PillCount], const RECT& bar, UINT dpi)
+	{
+		PillLayout layout{};
+		memcpy(layout.groups, groups, sizeof(layout.groups));
+		layout.barWidth = bar.right - bar.left;
+		layout.barHeight = bar.bottom - bar.top;
+		layout.dpi = dpi;
+		return layout;
+	}
+
+	void SaveLayout(const RECT (&groups)[PillCount], const RECT& bar, UINT dpi)
+	{
+		const PillLayout layout = MakeLayout(groups, bar, dpi);
+		const ULONGLONG now = GetTickCount64();
+		// A change skipped for being too soon is written on a later frame: the next call sees it differ still.
+		if (!memcmp(&layout, &g_savedLayout, sizeof(layout)) || now - g_savedAt < SaveLayoutDelay) return;
+		if (RegSetKeyValueW(HKEY_CURRENT_USER, PillSettingsKey, PillLastLayoutValue, REG_BINARY, &layout, sizeof(layout)) == ERROR_SUCCESS)
+		{
+			g_savedLayout = layout;
+			g_savedAt = now;
+		}
+	}
+
+	bool SavedLayout(RECT (&groups)[PillCount], const RECT& bar, UINT dpi)
+	{
+		static bool read = false, logged = false;
+		static PillLayout saved{};
+		if (!read)
+		{
+			read = true;
+			DWORD size = sizeof(saved);
+			if (RegGetValueW(HKEY_CURRENT_USER, PillSettingsKey, PillLastLayoutValue, RRF_RT_REG_BINARY, nullptr, &saved, &size) != ERROR_SUCCESS || size != sizeof(saved)) saved = {};
+			g_savedLayout = saved;	// what is on disk already needs no writing
+		}
+		const PillLayout current = MakeLayout(groups, bar, dpi);
+		if (!saved.dpi || saved.dpi != current.dpi || saved.barWidth != current.barWidth || saved.barHeight != current.barHeight) return false;
+		memcpy(groups, saved.groups, sizeof(groups));
+		if (!logged) { Log(L"showing the saved layout until the TAP reports"); logged = true; }
+		return true;
+	}
+
 	// Places the pills right under the taskbar, in its band (topmost or not), following it as it moves.
 	void Follow()
 	{
@@ -556,8 +612,12 @@ namespace
 
 		RECT groups[PillCount]{}, pills[PillCount]{};
 		RECT bar{};
-		const bool shown = tray && IsWindowVisible(tray) && GetWindowRect(tray, &bar) && ReadGroups(groups);
-		if (shown) Layout(groups, bar.right - bar.left, bar.bottom - bar.top, GetDpiForWindow(tray) / 96.0, pills);
+		const bool visible = tray && IsWindowVisible(tray) && GetWindowRect(tray, &bar);
+		const UINT dpi = visible ? GetDpiForWindow(tray) : 0;
+		bool shown = visible && ReadGroups(groups);
+		if (shown) SaveLayout(groups, bar, dpi);
+		else if (visible && g_tap == TapState::Attached) shown = SavedLayout(groups, bar, dpi);
+		if (shown) Layout(groups, bar.right - bar.left, bar.bottom - bar.top, dpi / 96.0, pills);
 		const bool topmost = tray && (GetWindowLongW(tray, GWL_EXSTYLE) & WS_EX_TOPMOST);
 		// A pill that shows again, or a taskbar moved to another side or screen, jumps straight to its place.
 		const bool barMoved = !EqualRect(&bar, &g_lastBar);
