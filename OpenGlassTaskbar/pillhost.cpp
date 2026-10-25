@@ -403,58 +403,31 @@ namespace
 
 	// The welcome screen is often long gone by the time the pills are ready (22 s after sign-in once), yet the session
 	// is still starting its apps: the host then went 600 ms without a frame right as the entrance began, and it stuttered.
-	// The entrance waits until the host's own frames come on time and the processors are not flat out, for a moment,
-	// but never more than SettleLimit after the pills are ready. Five seconds and 70% kept them away the whole five at a
-	// sign-in, while the icons were already up, and the entrance then played smoothly anyway.
+	// The entrance waits until the host's own frames have come on time for a moment, but never more than SettleLimit
+	// after the pills are ready. It used to wait for the processors too: they sat at 100% for the whole wait at a sign-in
+	// while the frames came every 31 ms at worst, so the pills only showed late, and the entrance then played smoothly.
 	constexpr ULONGLONG SettleLimit = 1500, SettleSpan = 300, SettleGap = 50;	// ms
-	constexpr double SettleBusy = 0.85;	// share of processor time in use
 	bool SessionSettled()
 	{
 		static ULONGLONG first{}, lastFrame{}, smoothSince{};
-		static ULONGLONG idleAt{}, totalAt{};
 		static ULONGLONG longestGap{};	// for the log: what kept the session from counting as calm
-		static double busiest{};
 		static bool settled = false;
 		if (settled) return true;
 		const ULONGLONG now = GetTickCount64();
 		if (!first) first = now;
-		const auto sample = [](ULONGLONG& idle, ULONGLONG& total)
-		{
-			FILETIME i{}, k{}, u{};
-			GetSystemTimes(&i, &k, &u);
-			const auto value = [](const FILETIME& f) { return (static_cast<ULONGLONG>(f.dwHighDateTime) << 32) | f.dwLowDateTime; };
-			idle = value(i);
-			total = value(k) + value(u);	// kernel time includes idle time
-		};
 		const ULONGLONG gap = lastFrame ? now - lastFrame : SettleGap + 1;
 		if (lastFrame) longestGap = (std::max)(longestGap, gap);
 		lastFrame = now;
 		wchar_t line[128];
 		if (now - first > SettleLimit)
 		{
-			swprintf_s(line, L"session still busy after %llu ms, entering anyway (longest frame gap %llu ms, up to %.0f%% busy)", now - first, longestGap, busiest * 100.0);
+			swprintf_s(line, L"frames still late after %llu ms, entering anyway (longest gap %llu ms)", now - first, longestGap);
 			Log(line);
 			return settled = true;
 		}
-		if (gap > SettleGap)
-		{
-			smoothSince = now;
-			sample(idleAt, totalAt);
-			return false;
-		}
+		if (gap > SettleGap) smoothSince = now;
 		if (now - smoothSince < SettleSpan) return false;
-		ULONGLONG idle{}, total{};
-		sample(idle, total);
-		const double busy = total > totalAt ? 1.0 - double(idle - idleAt) / double(total - totalAt) : 0.0;
-		busiest = (std::max)(busiest, busy);
-		if (busy > SettleBusy)
-		{
-			smoothSince = now;
-			idleAt = idle;
-			totalAt = total;
-			return false;
-		}
-		swprintf_s(line, L"session calm after %llu ms (%.0f%% busy)", now - first, busy * 100.0);
+		swprintf_s(line, L"frames on time after %llu ms", now - first);
 		Log(line);
 		return settled = true;
 	}
@@ -551,6 +524,8 @@ namespace
 		return { std::lround(place[0]), std::lround(place[1]), std::lround(place[2]), std::lround(place[3]) };
 	}
 
+	bool g_trayShownLogged{};
+
 	// Places the pills right under the taskbar, in its band (topmost or not), following it as it moves.
 	void Follow()
 	{
@@ -569,6 +544,13 @@ namespace
 			g_explorer = pid;
 			g_tap = TapState::Idle;
 			g_tapTime = GetTickCount64();
+			g_trayShownLogged = false;
+		}
+		// For the log: how long the taskbar shows without pills while the TAP is still on its way.
+		if (!g_trayShownLogged && tray && IsWindowVisible(tray))
+		{
+			Log(L"taskbar window shown");
+			g_trayShownLogged = true;
 		}
 		Attach(pid);
 
