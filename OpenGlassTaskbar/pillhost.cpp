@@ -404,13 +404,16 @@ namespace
 	// The welcome screen is often long gone by the time the pills are ready (22 s after sign-in once), yet the session
 	// is still starting its apps: the host then went 600 ms without a frame right as the entrance began, and it stuttered.
 	// The entrance waits until the host's own frames come on time and the processors are not flat out, for a moment,
-	// but never more than SettleLimit after the pills are ready.
-	constexpr ULONGLONG SettleLimit = 5000, SettleSpan = 300, SettleGap = 50;	// ms
-	constexpr double SettleBusy = 0.7;	// share of processor time in use
+	// but never more than SettleLimit after the pills are ready. Five seconds and 70% kept them away the whole five at a
+	// sign-in, while the icons were already up, and the entrance then played smoothly anyway.
+	constexpr ULONGLONG SettleLimit = 1500, SettleSpan = 300, SettleGap = 50;	// ms
+	constexpr double SettleBusy = 0.85;	// share of processor time in use
 	bool SessionSettled()
 	{
 		static ULONGLONG first{}, lastFrame{}, smoothSince{};
 		static ULONGLONG idleAt{}, totalAt{};
+		static ULONGLONG longestGap{};	// for the log: what kept the session from counting as calm
+		static double busiest{};
 		static bool settled = false;
 		if (settled) return true;
 		const ULONGLONG now = GetTickCount64();
@@ -424,11 +427,12 @@ namespace
 			total = value(k) + value(u);	// kernel time includes idle time
 		};
 		const ULONGLONG gap = lastFrame ? now - lastFrame : SettleGap + 1;
+		if (lastFrame) longestGap = (std::max)(longestGap, gap);
 		lastFrame = now;
-		wchar_t line[96];
+		wchar_t line[128];
 		if (now - first > SettleLimit)
 		{
-			swprintf_s(line, L"session still busy after %llu ms, entering anyway", now - first);
+			swprintf_s(line, L"session still busy after %llu ms, entering anyway (longest frame gap %llu ms, up to %.0f%% busy)", now - first, longestGap, busiest * 100.0);
 			Log(line);
 			return settled = true;
 		}
@@ -442,6 +446,7 @@ namespace
 		ULONGLONG idle{}, total{};
 		sample(idle, total);
 		const double busy = total > totalAt ? 1.0 - double(idle - idleAt) / double(total - totalAt) : 0.0;
+		busiest = (std::max)(busiest, busy);
 		if (busy > SettleBusy)
 		{
 			smoothSince = now;
