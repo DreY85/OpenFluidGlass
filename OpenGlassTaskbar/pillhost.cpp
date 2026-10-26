@@ -654,7 +654,9 @@ namespace
 		const UINT dpi = visible ? GetDpiForWindow(tray) : 0;
 		bool shown = visible && ReadGroups(groups);
 		if (shown) SaveLayout(groups, bar, dpi);
-		else if (visible && g_tap == TapState::Attached) shown = SavedLayout(groups, bar, dpi);
+		// The saved layout shows as soon as the taskbar does: waiting for the TAP to attach kept the pills away 6.4 s after
+		// the taskbar showed at one sign-in, and how long that takes depends on the machine.
+		else if (visible) shown = SavedLayout(groups, bar, dpi);
 		if (shown) Layout(groups, bar.right - bar.left, bar.bottom - bar.top, dpi / 96.0, pills);
 		const bool topmost = tray && (GetWindowLongW(tray, GWL_EXSTYLE) & WS_EX_TOPMOST);
 		// A pill that shows again, or a taskbar moved to another side or screen, jumps straight to its place.
