@@ -17,6 +17,7 @@ namespace StartGlass
 		const wchar_t* movedName;
 		bool container;	// the exe runs in an app container, which holds the share
 		DWORD pid{};
+		HANDLE process{};	// tells when pid exits
 		const StartShare* view{};
 		HANDLE mapping{}, moved{};
 		ULONGLONG retry{};
@@ -174,10 +175,15 @@ namespace StartGlass
 		const ULONGLONG now = GetTickCount64();
 		if (now < surface.retry) return;
 		surface.retry = now + 1000;
-		const DWORD pid = FindProcess(surface.exe);
+		// A process snapshot each second cost a few percent of a core while nothing happened,
+		// so the list is searched only once the process we follow has exited.
+		const bool alive = surface.process && WaitForSingleObject(surface.process, 0) == WAIT_TIMEOUT;
+		const DWORD pid = alive ? surface.pid : FindProcess(surface.exe);
 		if (pid != surface.pid)
 		{
 			Forget(surface);
+			if (surface.process) CloseHandle(surface.process);
+			surface.process = pid ? OpenProcess(SYNCHRONIZE, FALSE, pid) : nullptr;
 			surface.pid = pid;
 			if (pid && !HasTap(pid)) LoadTap(surface);
 		}
