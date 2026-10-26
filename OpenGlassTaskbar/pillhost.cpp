@@ -370,7 +370,9 @@ namespace
 	// an entrance started right then looked like a lag, with the pills rising along with the icons. One second was not
 	// enough once the pills were ready early, on a saved layout: they came up 0.7 s after the welcome screen went, while
 	// Windows was still fading from it to the desktop, and the screen froze mid-fade for 3 to 4 s.
-	constexpr ULONGLONG SignInWaitLimit = 30000;	// ms from the first check
+	// The host watches for the welcome screen from its start: checked only once the pills were ready, it was sometimes
+	// already gone at the first look, the sign-in passed for a restarted host, and the entrance played under the fade.
+	constexpr ULONGLONG SignInWaitLimit = 60000;	// ms from the first check, the host's start
 	constexpr ULONGLONG SignInSettle = 2000;	// ms after the welcome screen goes
 	bool SignInShowing()
 	{
@@ -394,6 +396,7 @@ namespace
 			found = !_wcsicmp(entry.szExeFile, L"LogonUI.exe") && ProcessIdToSessionId(entry.th32ProcessID, &processSession) && processSession == session;
 		}
 		CloseHandle(snapshot);
+		if (found && !seen) Log(L"sign-in screen up");
 		if (found) seen = true;
 		else
 		{
@@ -620,6 +623,7 @@ namespace
 	void Follow()
 	{
 		if (++g_ticks % 15 == 1) LoadSettings();
+		if (!g_entranceDone) SignInShowing();
 		const HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
 		DWORD pid{};
 		if (tray) GetWindowThreadProcessId(tray, &pid);
