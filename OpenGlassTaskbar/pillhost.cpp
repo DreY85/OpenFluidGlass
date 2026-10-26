@@ -817,6 +817,10 @@ namespace
 		ACCENT_POLICY accent{ 3, AccentFlagPill, 0, 0 };
 		WINDOWCOMPOSITIONATTRIBDATA data{ 19, &accent, sizeof(accent) };
 		if (setAttribute) setAttribute(window, &data);
+		// Peek (hovering a taskbar thumbnail, or the corner) fades every window but the one shown and the taskbar;
+		// the pills went with the rest and left the bare taskbar behind. They stay, like the taskbar.
+		const BOOL excluded = TRUE;
+		DwmSetWindowAttribute(window, DWMWA_EXCLUDED_FROM_PEEK, &excluded, sizeof(excluded));
 		return window;
 	}
 }
