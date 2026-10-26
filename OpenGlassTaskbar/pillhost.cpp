@@ -676,6 +676,12 @@ namespace
 			Motion& motion = g_motion[index];
 			if (r.right <= r.left)
 			{
+				if (motion.valid && g_entranceStart > 0.0 && !g_entranceLogged)
+				{
+					wchar_t line[96];
+					swprintf_s(line, L"pill %u lost its place: %s", index, shown ? L"empty in the layout" : L"no taskbar or groups");
+					Log(line);
+				}
 				motion.valid = false;
 				if (IsWindowVisible(pill)) ShowWindow(pill, SW_HIDE);
 				continue;
@@ -722,6 +728,14 @@ namespace
 			}
 			else if (!motion.valid || barMoved || !IsWindowVisible(pill) && motion.delay <= 0.0)
 			{
+				// For the log: a pill that jumps while the entrance plays (it once lasted 0.44 s, the right side instant).
+				if (g_entranceStart > 0.0 && !g_entranceLogged)
+				{
+					wchar_t line[128];
+					swprintf_s(line, L"pill %u jumps into place: %s, taskbar %ld,%ld,%ld,%ld", index,
+						!motion.valid ? L"no motion" : barMoved ? L"taskbar moved" : L"was hidden", bar.left, bar.top, bar.right, bar.bottom);
+					Log(line);
+				}
 				SetMotion(motion, target, SpringFrequency, SpringDamping, 0.0);
 			}
 			if (motion.delay > 0.0)
