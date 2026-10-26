@@ -2,13 +2,21 @@
 // (accent blur marked as a pill, which our OpenGlass rounds) under each group the TAP reports.
 // While this runs the TAP hides the taskbar's own background; when it exits the background returns.
 // Settings come from HKCU\Software\OpenGlass\Taskbar (the Taskbar tab of OpenGlassGUI) and apply while running.
+// It also keeps glass under the Start menu and Search (startglass.h).
 // pillhost.exe --stop closes a running copy.
 #include <windows.h>
+#include <aclapi.h>
+#include <sddl.h>
 #include <tlhelp32.h>
+#include <winternl.h>
 #include <dwmapi.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <iterator>
+#include <thread>
 #include "pillshare.h"
+#include "startshare.h"
 
 struct ACCENT_POLICY { DWORD AccentState, AccentFlags, GradientColor, AnimationId; };
 struct WINDOWCOMPOSITIONATTRIBDATA { DWORD Attrib; PVOID pvData; SIZE_T cbData; };
@@ -823,6 +831,8 @@ namespace
 		DwmSetWindowAttribute(window, DWMWA_EXCLUDED_FROM_PEEK, &excluded, sizeof(excluded));
 		return window;
 	}
+
+#include "startglass.h"
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
@@ -870,6 +880,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 	// The taskbar can move (auto-hide), so it is followed often; the TAP's message covers layout changes.
 	SetTimer(g_host, FollowTimer, 33, nullptr);
 	Follow();
+	// Glass under the Start menu and Search; it ends with the process.
+	std::thread(StartGlass::Run, instance).detach();
 
 	MSG message;
 	while (GetMessageW(&message, nullptr, 0, 0) > 0) DispatchMessageW(&message);

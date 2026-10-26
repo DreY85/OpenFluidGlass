@@ -199,6 +199,12 @@ namespace OpenGlass
 		pillsGroup->Add(animate, 0, wxALL, 4);
 		sizer->Add(pillsGroup, 0, wxEXPAND | wxALL, 2);
 
+		auto* startGroup = ModernTheme::MakeCard(panel, L"Start menu and Search");
+		auto* startGlass = new wxCheckBox(panel, wxID_ANY, L"Liquid Glass under the Start menu and Search");
+		startGlass->SetToolTip(L"Our glass replaces their own acrylic while the floating taskbar runs. Off, or with the taskbar stopped, they look as Windows draws them.");
+		startGroup->Add(startGlass, 0, wxALL, 4);
+		sizer->Add(startGroup, 0, wxEXPAND | wxALL, 2);
+
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
 		auto* resetButton = new wxButton(panel, wxID_ANY, L"Reset to defaults");
 		resetButton->SetToolTip(L"Write the default pill sizes and round corners to HKCU and apply them.");
@@ -245,7 +251,7 @@ namespace OpenGlass
 			}
 		};
 
-		auto load = [rows, enabled, join, animate, corners, cornersValue, showValue, findGapRow, showStatus]()
+		auto load = [rows, enabled, join, animate, startGlass, corners, cornersValue, showValue, findGapRow, showStatus]()
 		{
 			for (auto& row : *rows)
 			{
@@ -257,6 +263,7 @@ namespace OpenGlass
 			enabled->SetValue(ReadPillSetting(PillEnabled) != 0);
 			join->SetValue(ReadPillSetting(PillJoin) != 0);
 			animate->SetValue(ReadPillSetting(PillAnimate) != 0);
+			startGlass->SetValue(ReadPillSetting(PillStartGlass) != 0);
 			if (auto* gap = findGapRow())
 			{
 				gap->control->Enable(!join->GetValue());
@@ -301,6 +308,12 @@ namespace OpenGlass
 		{
 			WriteTaskbarSetting(PillAnimate, animate->GetValue() ? 1 : 0);
 			SetStatusText(animate->GetValue() ? L"Taskbar: animations on" : L"Taskbar: animations off");
+		});
+
+		startGlass->Bind(wxEVT_CHECKBOX, [this, startGlass](wxCommandEvent&)
+		{
+			WriteTaskbarSetting(PillStartGlass, startGlass->GetValue() ? 1 : 0);
+			SetStatusText(startGlass->GetValue() ? L"Taskbar: glass under Start and Search" : L"Taskbar: Start and Search as Windows draws them");
 		});
 
 		enabled->Bind(wxEVT_CHECKBOX, [this, enabled, showStatus](wxCommandEvent&)
@@ -358,6 +371,7 @@ namespace OpenGlass
 			}
 			WriteTaskbarSetting(PillJoin, PillJoin.fallback);
 			WriteTaskbarSetting(PillAnimate, PillAnimate.fallback);
+			WriteTaskbarSetting(PillStartGlass, PillStartGlass.fallback);
 			WriteCornerPosition(c_roundCorners);
 			load();
 			SetStatusText(L"Taskbar: defaults applied");

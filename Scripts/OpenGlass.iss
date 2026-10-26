@@ -25,7 +25,7 @@
 ; ThirdParty\ExplorerBlurMica holds the second (unmodified, with its notice).
 #define TaskbarPath MyProjPath + "\Build\taskbar"
 #define EbmPath MyProjPath + "\ThirdParty\ExplorerBlurMica"
-#if !FileExists(SourcePath + "\" + TaskbarPath + "\pillhost.exe") || !FileExists(SourcePath + "\" + TaskbarPath + "\pilltap.dll")
+#if !FileExists(SourcePath + "\" + TaskbarPath + "\pillhost.exe") || !FileExists(SourcePath + "\" + TaskbarPath + "\pilltap.dll") || !FileExists(SourcePath + "\" + TaskbarPath + "\starttap.dll")
 #error The taskbar is not built. Run OpenGlassTaskbar\build.cmd first.
 #endif
 #if !FileExists(SourcePath + "\" + EbmPath + "\ExplorerBlurMica.dll")
@@ -151,10 +151,12 @@ Source: "{#MyAppBuildPath}\milcomp\OpenGlass.dll"; DestDir: "{app}"; DestName: "
 Source: "{#MyAppBuildPath}\OpenGlassHost.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "{#MyAppBuildPath}\OpenGlassGUI.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 
-; Liquid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll.
+; Liquid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll,
+; and Start and Search a copy of starttap.dll.
 ; It works on the XAML taskbar of Windows 11 only, so Windows 10 gets neither the files nor the logon task.
 Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#TaskbarPath}\pilltap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
+Source: "{#TaskbarPath}\starttap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
 Source: "{#MyProjPath}\Scripts\Restart-Explorer.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
