@@ -4,6 +4,8 @@
 
 constexpr wchar_t StartShareName[] = L"Local\\LiquidGlassStartMenu";
 constexpr wchar_t SearchShareName[] = L"Local\\LiquidGlassSearch";	// the same layout, for the Search flyout
+constexpr wchar_t StartMovedName[] = L"Local\\LiquidGlassStartMenuMoved";	// set by the TAP each time it publishes a new outline
+constexpr wchar_t SearchMovedName[] = L"Local\\LiquidGlassSearchMoved";
 
 struct StartShare
 {

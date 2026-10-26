@@ -1,5 +1,5 @@
 # Probe only: restarts the Start and Search processes (Windows starts them again), loads starttap.dll into both,
-# then runs startglass.exe for five minutes. Killing those processes again undoes the TAP.
+# then runs startglass.exe for fifteen minutes. Killing those processes again undoes the TAP.
 $build = Join-Path $PSScriptRoot '..\Build\start'
 Stop-Process -Name startglass -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\starttap.txt" -ErrorAction SilentlyContinue
@@ -12,4 +12,4 @@ foreach ($exe in 'StartMenuExperienceHost', 'SearchHost') {
 	& (Join-Path $build 'startinject.exe') "$exe.exe"
 }
 Start-Process (Join-Path $build 'startglass.exe')
-'startglass runs for five minutes. Open and close Start and Search a few times.'
+'startglass runs for fifteen minutes. Open and close Start and Search a few times.'

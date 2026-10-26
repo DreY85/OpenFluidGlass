@@ -1,15 +1,17 @@
 // Probe only: one glass window kept under the Start menu or Search, where starttap.dll says they are.
 // Both sit in the same place and Search shows along with Start (it holds Start's search box), so one glass serves both:
-// it follows Start while Start is on screen, else Search. It hides when neither is on screen, or as soon as another
+// it follows Start while DWM shows Start, else Search. It hides when neither is on screen, or as soon as another
 // window takes the foreground from them: XAML only moves a closing Start menu at the end of its slide.
-// Exits after five minutes.
+// Exits after fifteen minutes.
 #include <windows.h>
 #include <winternl.h>
 #include <dwmapi.h>
 #include <sddl.h>
 #include <tlhelp32.h>
+#include <atomic>
 #include <cstdarg>
 #include <share.h>
+#include <thread>
 #include <cstdio>
 #include "startshare.h"
 
@@ -20,6 +22,7 @@ namespace
 	using SetWindowCompositionAttribute_t = BOOL(WINAPI*)(HWND, WINDOWCOMPOSITIONATTRIBDATA*);
 
 	FILE* g_log{};
+	bool g_trustedXaml{};	// logged once per time Start shows on XAML's word alone
 	void Log(const wchar_t* format, ...)
 	{
 		SYSTEMTIME now{};
@@ -37,13 +40,17 @@ namespace
 	{
 		const wchar_t* name;
 		const wchar_t* share;
+		const wchar_t* movedName;
 		const wchar_t* container;	// the exe whose app container holds the share, if it is in one
 		const StartShare* view{};
+		HANDLE moved{};
+		std::atomic<HWND> watched{};	// for WatchCloaks
+		std::atomic<DWORD> cloakState{ 1 };
 		ULONGLONG retry{};
 		DWORD cloaked = 99;
 		HWND window{};
 		RECT rect{};
-		bool visible{};
+		bool onScreen{}, visible{};
 	};
 
 	HWND MakeGlass(HINSTANCE instance)
@@ -60,9 +67,9 @@ namespace
 		return glass;
 	}
 
-	// SearchHost runs in an app container, so the share its TAP makes as Local\ lands in that container's own
+	// SearchHost runs in an app container, so what its TAP makes as Local\ lands in that container's own
 	// namespace: \Sessions\<session>\AppContainerNamedObjects\<container SID>\. Opened there through ntdll.
-	HANDLE OpenContainerShare(const wchar_t* exe, const wchar_t* share)
+	HANDLE OpenContainerObject(const wchar_t* exe, const wchar_t* object, bool event)
 	{
 		const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 		PROCESSENTRY32W entry{ sizeof(entry) };
@@ -87,16 +94,16 @@ namespace
 		DWORD session{};
 		ProcessIdToSessionId(pid, &session);
 		wchar_t path[256];
-		swprintf_s(path, L"\\Sessions\\%lu\\AppContainerNamedObjects\\%s\\%s", session, sid, wcschr(share, L'\\') + 1);
+		swprintf_s(path, L"\\Sessions\\%lu\\AppContainerNamedObjects\\%s\\%s", session, sid, wcschr(object, L'\\') + 1);
 		LocalFree(sid);
-		using NtOpenSection_t = LONG(NTAPI*)(HANDLE*, ACCESS_MASK, OBJECT_ATTRIBUTES*);
-		const auto open = reinterpret_cast<NtOpenSection_t>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtOpenSection"));
+		using NtOpen_t = LONG(NTAPI*)(HANDLE*, ACCESS_MASK, OBJECT_ATTRIBUTES*);
+		const auto open = reinterpret_cast<NtOpen_t>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), event ? "NtOpenEvent" : "NtOpenSection"));
 		UNICODE_STRING name{ static_cast<USHORT>(wcslen(path) * sizeof(wchar_t)), static_cast<USHORT>(sizeof(path)), path };
 		OBJECT_ATTRIBUTES attributes{ sizeof(attributes), nullptr, &name, OBJ_CASE_INSENSITIVE };
-		HANDLE section{};
-		const LONG status = open ? open(&section, SECTION_MAP_READ, &attributes) : -1;
-		if (status < 0) { Log(L"%s: no share at %s (0x%08lx)", exe, path, status); return nullptr; }
-		return section;
+		HANDLE handle{};
+		const LONG status = open ? open(&handle, event ? SYNCHRONIZE : SECTION_MAP_READ, &attributes) : -1;
+		if (status < 0) { Log(L"%s: nothing at %s (0x%08lx)", exe, path, status); return nullptr; }
+		return handle;
 	}
 
 	// Reads where the surface is and whether it is on screen: shown by DWM, and above the bottom of the work area,
@@ -110,22 +117,42 @@ namespace
 			if (GetTickCount64() < surface.retry) return;
 			surface.retry = GetTickCount64() + 1000;
 			HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, surface.share);
-			if (!mapping && surface.container) mapping = OpenContainerShare(surface.container, surface.share);
+			if (!mapping && surface.container) mapping = OpenContainerObject(surface.container, surface.share, false);
 			surface.view = mapping ? static_cast<const StartShare*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sizeof(StartShare))) : nullptr;
 			if (!surface.view) return;
-			Log(L"%s: share open", surface.name);
+			surface.moved = OpenEventW(SYNCHRONIZE, FALSE, surface.movedName);
+			if (!surface.moved && surface.container) surface.moved = OpenContainerObject(surface.container, surface.movedName, true);
+			Log(L"%s: share open%s", surface.name, surface.moved ? L", with its moved event" : L"");
 		}
 		StartShare copy;
 		LONG sequence;
 		do { sequence = surface.view->sequence; copy = *surface.view; } while ((sequence & 1) || sequence != surface.view->sequence);
 		surface.window = reinterpret_cast<HWND>(copy.window);
+		surface.watched = surface.window;
 		surface.rect = copy.menu;
-		DWORD cloaked = 1;
-		if (surface.window) DwmGetWindowAttribute(surface.window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+		const DWORD cloaked = surface.window ? surface.cloakState.load() : 1;
 		if (cloaked != surface.cloaked) { Log(L"%s: cloaked %lu", surface.name, cloaked); surface.cloaked = cloaked; }
 		MONITORINFO monitor{ sizeof(monitor) };
 		GetMonitorInfoW(MonitorFromRect(&copy.menu, MONITOR_DEFAULTTONEAREST), &monitor);
-		surface.visible = !cloaked && !IsRectEmpty(&copy.menu) && copy.menu.top < monitor.rcWork.bottom;
+		surface.onScreen = !IsRectEmpty(&copy.menu) && copy.menu.top < monitor.rcWork.bottom;
+		surface.visible = !cloaked && surface.onScreen;
+	}
+
+	// Asking DWM whether Start is cloaked sometimes blocks for two seconds while Start opens, and the glass waited with it.
+	// So a thread of its own asks, and the glass goes by the last answer, and by XAML, meanwhile.
+	void WatchCloaks(Surface* surfaces, size_t count)
+	{
+		for (;;)
+		{
+			for (size_t index = 0; index < count; ++index)
+			{
+				const HWND window = surfaces[index].watched;
+				DWORD cloaked = 1;
+				if (window) DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+				surfaces[index].cloakState = cloaked;
+			}
+			Sleep(8);
+		}
 	}
 }
 
@@ -143,16 +170,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	type.hInstance = instance;
 	type.lpszClassName = L"LiquidGlassStartGlass";
 	RegisterClassW(&type);
-	Surface start{ L"start", StartShareName, nullptr }, search{ L"search", SearchShareName, L"SearchHost.exe" };
+	Surface surfaces[] = { { L"start", StartShareName, StartMovedName, nullptr }, { L"search", SearchShareName, SearchMovedName, L"SearchHost.exe" } };
+	Surface& start = surfaces[0];
+	Surface& search = surfaces[1];
+	std::thread(WatchCloaks, surfaces, std::size(surfaces)).detach();
 	const HWND glass = MakeGlass(instance);
 	Log(L"glass window ready");
 
 	HWND foreground{};
 	bool shown{}, focused{}, closing{};
 	RECT last{};
-	const ULONGLONG end = GetTickCount64() + 300000;
+	ULONGLONG lastTick{};
+	const ULONGLONG end = GetTickCount64() + 900000;
 	while (GetTickCount64() < end)
 	{
+		// The two silent seconds above could also have been this loop stalling; this tells the two apart.
+		const ULONGLONG tick = GetTickCount64();
+		if (lastTick && tick - lastTick > 100) Log(L"loop stalled %llu ms", tick - lastTick);
+		lastTick = tick;
 		MSG message;
 		while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
 		const HWND now = GetForegroundWindow();
@@ -166,17 +201,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		}
 		Read(start);
 		Read(search);
-		const bool open = start.visible || search.visible;
+		// While Start is shown by DWM, the glass belongs to it alone, even before its slide brings it on screen:
+		// Search already sits at the top then, and following it put the glass there before the menu arrived.
+		// Once, DWM still reported Start cloaked for two seconds while it slid up and stayed open, and the glass never came.
+		// So a Start that XAML has brought on screen counts as shown while Start or Search holds the foreground,
+		// or nothing does, as happens for a moment while Start opens.
+		const bool flyoutFocused = !now || now == start.window || now == search.window;
+		const bool startShown = start.window && (start.cloaked == 0 || (start.onScreen && flyoutFocused));
+		if (startShown && start.cloaked && !g_trustedXaml) { Log(L"start on screen while DWM says cloaked %lu", start.cloaked); g_trustedXaml = true; }
+		if (!start.cloaked) g_trustedXaml = false;
+		const bool open = startShown ? start.onScreen : search.visible;
 		// Focus moves between Start and Search, and through no window at all on the way; only another window means leaving.
 		if (!open) focused = closing = false;
-		else if (now && (now == start.window || now == search.window)) focused = true;
+		else if (flyoutFocused) focused = true;
 		else if (now && focused && !closing) { closing = true; Log(L"left for another window"); }
-		const RECT& rect = start.visible ? start.rect : search.rect;
+		const RECT& rect = startShown ? start.rect : search.rect;
 		const bool show = open && !closing;
 		if (show && (!shown || !EqualRect(&rect, &last)))
 		{
 			SetWindowPos(glass, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-			Log(L"%s under %s %ld,%ld %ldx%ld", shown ? L"move" : L"show", start.visible ? L"start" : L"search", rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+			Log(L"%s under %s %ld,%ld %ldx%ld", shown ? L"move" : L"show", startShown ? L"start" : L"search", rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
 			last = rect;
 			shown = true;
 		}
@@ -186,7 +230,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 			Log(L"hide");
 			shown = false;
 		}
-		DwmFlush();
+		// Start and Search tell us the moment they move; cloaking and the foreground are checked at least every 8 ms.
+		HANDLE moved[2];
+		DWORD count{};
+		for (const auto& surface : surfaces) if (surface.moved) moved[count++] = surface.moved;
+		MsgWaitForMultipleObjects(count, moved, FALSE, 8, QS_ALLINPUT);
 	}
 	Log(L"done");
 	return 0;

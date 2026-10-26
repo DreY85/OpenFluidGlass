@@ -1,4 +1,4 @@
-// Liquid Glass Start menu, inside StartMenuExperienceHost. Attaches as a XAML diagnostics TAP, clears the
+// Liquid Glass Start menu, inside StartMenuExperienceHost or SearchHost. Attaches as a XAML diagnostics TAP, clears the
 // menu's own acrylic and publishes where the menu is on screen, so startglass.exe can draw our glass under it.
 // The approach follows TranslucentTB's ExplorerTAP (GPL-3.0, https://github.com/TranslucentTB/TranslucentTB).
 #include <windows.h>
@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -128,14 +129,20 @@ namespace
 		// Runs on the UI thread. Keeps the named parts as they arrive; Search adds them again each time it opens.
 		// Start: AcrylicBorder paints the acrylic inside MainMenu. Search: AppBorder is both the acrylic and the outline,
 		// and AccentAppBorder takes over in some accent color modes.
+		// Start's AcrylicOverlay lightens the middle by 3.5% white, which on the acrylic set the search box band above it
+		// and the account band below it apart. On our brighter glass that vanished, so the glass under the whole menu
+		// is darkened a little and the middle lifted by more, which brings the two bands back.
 		HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation, VisualElement element, VisualMutationType mutation) override
 		{
 			if (mutation == Add && element.Name && m_diagnostics)
 			{
 				const std::wstring_view name(element.Name);
-				const bool clear = g_search ? name == L"AppBorder" || name == L"AccentAppBorder" : name == L"AcrylicBorder";
+				std::optional<winrt::Windows::UI::Color> fill;
+				if (g_search ? name == L"AppBorder" || name == L"AccentAppBorder" : false) fill = winrt::Windows::UI::Colors::Transparent();
+				else if (!g_search && name == L"AcrylicBorder") fill = winrt::Windows::UI::ColorHelper::FromArgb(0x33, 0, 0, 0);
+				else if (!g_search && name == L"AcrylicOverlay") fill = winrt::Windows::UI::ColorHelper::FromArgb(0x14, 0xFF, 0xFF, 0xFF);
 				const bool outline = name == (g_search ? L"AppBorder" : L"MainMenu");
-				if (clear || outline) Take(element.Handle, name, clear, outline);
+				if (fill || outline) Take(element.Handle, name, fill, outline);
 			}
 			SysFreeString(element.Type);
 			SysFreeString(element.Name);
@@ -169,17 +176,18 @@ namespace
 			catch (...) { return L" (threw)"; }
 		}
 
-		void Take(InstanceHandle handle, std::wstring_view name, bool clear, bool outline)
+		void Take(InstanceHandle handle, std::wstring_view name, std::optional<winrt::Windows::UI::Color> fill, bool outline)
 		{
 			try
 			{
 				winrt::Windows::Foundation::IInspectable object;
 				if (FAILED(m_diagnostics->GetIInspectableFromHandle(handle, reinterpret_cast<::IInspectable**>(winrt::put_abi(object)))) || !object) return;
-				if (clear)
+				if (fill)
 				{
 					const auto border = object.as<wux::Controls::Border>();
-					Log(std::wstring(name) + L" found, was " + BrushName(border.Background()) + L", now clear");
-					border.Background(wux::Media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent()));
+					const wux::Media::SolidColorBrush brush(*fill);
+					Log(std::wstring(name) + L" found, was " + BrushName(border.Background()) + L", now " + BrushName(brush));
+					border.Background(brush);
 				}
 				if (outline)
 				{
@@ -197,6 +205,8 @@ namespace
 			if (m_publishing) return;
 			m_publishing = true;
 			m_mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(StartShare), g_search ? SearchShareName : StartShareName);
+			// The host waits on this rather than polling once a frame, which left the glass a frame behind the slide.
+			m_moved = CreateEventW(nullptr, FALSE, FALSE, g_search ? SearchMovedName : StartMovedName);
 			m_share = m_mapping ? static_cast<StartShare*>(MapViewOfFile(m_mapping, FILE_MAP_WRITE, 0, 0, sizeof(StartShare))) : nullptr;
 			if (const auto core = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread())
 			{
@@ -245,6 +255,7 @@ namespace
 			m_share->window = reinterpret_cast<UINT64>(m_window);
 			m_share->menu = menu;
 			InterlockedIncrement(&m_share->sequence);
+			if (m_moved) SetEvent(m_moved);
 		}
 
 		std::atomic<ULONG> m_refs{ 1 };
@@ -253,7 +264,7 @@ namespace
 		wux::FrameworkElement m_menu{ nullptr };
 		bool m_publishing{};
 		HWND m_window{};
-		HANDLE m_mapping{};
+		HANDLE m_mapping{}, m_moved{};
 		StartShare* m_share{};
 		RECT m_last{};
 	};
