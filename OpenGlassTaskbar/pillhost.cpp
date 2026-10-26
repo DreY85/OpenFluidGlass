@@ -15,6 +15,7 @@
 #include <cmath>
 #include <iterator>
 #include <thread>
+#include "pilllog.h"
 #include "pillshare.h"
 #include "startshare.h"
 
@@ -62,11 +63,8 @@ namespace
 	// Rare events (attach attempts, nudges) to %TEMP%\pillhost.txt, timestamped like the TAP's log.
 	void Log(const wchar_t* line)
 	{
-		wchar_t path[MAX_PATH];
-		GetTempPathW(MAX_PATH, path);
-		wcscat_s(path, L"pillhost.txt");
-		FILE* file{};
-		if (_wfopen_s(&file, path, L"a, ccs=UTF-8") || !file) return;
+		FILE* file = OpenLog(L"pillhost.txt");
+		if (!file) return;
 		SYSTEMTIME now{};
 		GetLocalTime(&now);
 		fwprintf(file, L"%02u:%02u:%02u.%03u %s\n", now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, line);

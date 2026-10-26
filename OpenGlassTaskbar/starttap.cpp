@@ -23,6 +23,7 @@
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.h>
+#include "pilllog.h"
 #include "startshare.h"
 
 namespace wux = winrt::Windows::UI::Xaml;
@@ -41,11 +42,8 @@ namespace
 	void Log(const std::wstring& line)
 	{
 		std::lock_guard guard{ g_logLock };
-		wchar_t path[MAX_PATH];
-		GetTempPathW(MAX_PATH, path);
-		wcscat_s(path, g_search ? L"searchtap.txt" : L"starttap.txt");
-		FILE* file{};
-		if (_wfopen_s(&file, path, L"a, ccs=UTF-8") || !file) return;
+		FILE* file = OpenLog(g_search ? L"searchtap.txt" : L"starttap.txt");
+		if (!file) return;
 		SYSTEMTIME now{};
 		GetLocalTime(&now);
 		fwprintf(file, L"%02u:%02u:%02u.%03u %s\n", now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, line.c_str());
@@ -116,6 +114,8 @@ namespace
 				const bool outline = name == (g_search ? L"AppBorder" : L"MainMenu");
 				if (fill || outline) Take(element.Handle, name, fill, outline);
 			}
+			// The tree changes as a flyout opens, which may come before the host notices.
+			if (m_publishing) Wake(L"tree");
 			SysFreeString(element.Type);
 			SysFreeString(element.Name);
 			SysFreeString(element.SrcInfo.FileName);
@@ -170,6 +170,9 @@ namespace
 		}
 
 		// Publishes where the flyout is on every frame, as XAML does not tell us when a parent moves it.
+		// Asking for every frame keeps XAML drawing them, about 7% of a core in each process, so it is asked only
+		// while the flyout is open or moving: the host wakes us when it opens (and so do the window and the tree),
+		// and we rest once it has stood still for a second with the glass hidden.
 		void Start()
 		{
 			if (m_publishing) return;
@@ -178,24 +181,52 @@ namespace
 			m_share = m_mapping ? static_cast<StartShare*>(MapViewOfFile(m_mapping, FILE_MAP_WRITE, 0, 0, sizeof(StartShare))) : nullptr;
 			// The host waits on this rather than polling once a frame, which left the glass a frame behind the slide.
 			m_moved = CreateEventW(nullptr, FALSE, FALSE, g_search ? SearchMovedName : StartMovedName);
+			const HANDLE wake = CreateEventW(nullptr, FALSE, FALSE, g_search ? SearchWakeName : StartWakeName);
 			if (const auto core = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread())
 			{
 				HWND window{};
 				if (const auto interop = core.try_as<ICoreWindowInterop>()) interop->get_WindowHandle(&window);
 				m_window = window;
+				core.VisibilityChanged([this](auto&&, auto&&) { Wake(L"visibility"); });
+				core.Activated([this](auto&&, auto&&) { Wake(L"activated"); });
+				const auto dispatcher = core.Dispatcher();
+				if (wake) std::thread([this, wake, dispatcher]
+				{
+					while (WaitForSingleObject(wake, INFINITE) == WAIT_OBJECT_0)
+					{
+						dispatcher.RunAsync(winrt::Windows::UI::Core::CoreDispatcherPriority::High, [this] { Wake(L"host"); });
+					}
+				}).detach();
 			}
-			Log(L"publishing, window 0x" + Hex(reinterpret_cast<UINT64>(m_window)) + (m_share ? L"" : L", but no share"));
-			wux::Media::CompositionTarget::Rendering([this](auto&&, auto&&) { Publish(); });
+			Log(L"publishing, window 0x" + Hex(reinterpret_cast<UINT64>(m_window)) + (m_share ? L"" : L", but no share") + (wake ? L"" : L", no wake event"));
+			Wake(L"start");
+		}
+
+		void Wake(const wchar_t* by)
+		{
+			m_movedAt = GetTickCount64();
+			if (m_rendering) return;
+			try { m_rendering = wux::Media::CompositionTarget::Rendering([this](auto&&, auto&&) { Publish(); }); }
+			catch (...) { return; }
+			m_wokeBy = by;
+		}
+
+		void Rest()
+		{
+			try { wux::Media::CompositionTarget::Rendering(m_rendering); }
+			catch (...) {}
+			m_rendering = {};
 		}
 
 		void Publish()
 		{
-			// Rendering only runs while the flyout is on screen or animating, so this check costs nothing while it is closed.
 			const ULONGLONG now = GetTickCount64();
 			if (now - m_glassChecked >= 250)
 			{
 				m_glassChecked = now;
-				Restyle(GlassShown());
+				const HWND glass = FindWindowW(StartGlassClass, nullptr);
+				Restyle(glass != nullptr);
+				m_glassVisible = glass && IsWindowVisible(glass);
 			}
 			RECT menu{};
 			try
@@ -213,7 +244,18 @@ namespace
 				}
 			}
 			catch (...) {}
-			if (EqualRect(&menu, &m_last) || !m_share) return;
+			if (m_wokeBy)
+			{
+				// Once per opening: a menu top still below the screen means we woke before the slide.
+				Log(std::wstring(L"awake by ") + m_wokeBy + L", menu top " + std::to_wstring(menu.top));
+				m_wokeBy = nullptr;
+			}
+			if (EqualRect(&menu, &m_last) || !m_share)
+			{
+				if (now - m_movedAt >= 1000 && !m_glassVisible) Rest();
+				return;
+			}
+			m_movedAt = now;
 			m_last = menu;
 			InterlockedIncrement(&m_share->sequence);
 			m_share->window = reinterpret_cast<UINT64>(m_window);
@@ -234,6 +276,10 @@ namespace
 		HANDLE m_mapping{}, m_moved{};
 		StartShare* m_share{};
 		RECT m_last{};
+		winrt::event_token m_rendering{};	// set while we ask for every frame
+		ULONGLONG m_movedAt{};	// last move or wake
+		bool m_glassVisible{};
+		const wchar_t* m_wokeBy{};
 	};
 
 	class Factory : public IClassFactory

@@ -15,11 +15,12 @@ namespace StartGlass
 		const wchar_t* exe;
 		const wchar_t* share;
 		const wchar_t* movedName;
+		const wchar_t* wakeName;
 		bool container;	// the exe runs in an app container, which holds the share
 		DWORD pid{};
 		HANDLE process{};	// tells when pid exits
 		const StartShare* view{};
-		HANDLE mapping{}, moved{};
+		HANDLE mapping{}, moved{}, wake{};
 		ULONGLONG retry{};
 		std::atomic<HWND> watched{};	// for WatchCloaks
 		std::atomic<DWORD> cloakState{ 1 };
@@ -153,7 +154,7 @@ namespace StartGlass
 		UNICODE_STRING name{ static_cast<USHORT>(wcslen(path) * sizeof(wchar_t)), static_cast<USHORT>(sizeof(path)), path };
 		OBJECT_ATTRIBUTES attributes{ sizeof(attributes), nullptr, &name, OBJ_CASE_INSENSITIVE };
 		HANDLE handle{};
-		return open && open(&handle, event ? SYNCHRONIZE : SECTION_MAP_READ, &attributes) >= 0 ? handle : nullptr;
+		return open && open(&handle, event ? SYNCHRONIZE | EVENT_MODIFY_STATE : SECTION_MAP_READ, &attributes) >= 0 ? handle : nullptr;
 	}
 
 	void Forget(Surface& surface)
@@ -161,8 +162,9 @@ namespace StartGlass
 		if (surface.view) UnmapViewOfFile(surface.view);
 		if (surface.mapping) CloseHandle(surface.mapping);
 		if (surface.moved) CloseHandle(surface.moved);
+		if (surface.wake) CloseHandle(surface.wake);
 		surface.view = nullptr;
-		surface.mapping = surface.moved = nullptr;
+		surface.mapping = surface.moved = surface.wake = nullptr;
 		surface.window = nullptr;
 		surface.watched = nullptr;
 		surface.rect = {};
@@ -192,8 +194,9 @@ namespace StartGlass
 		surface.view = surface.mapping ? static_cast<const StartShare*>(MapViewOfFile(surface.mapping, FILE_MAP_READ, 0, 0, sizeof(StartShare))) : nullptr;
 		if (!surface.view) return;
 		surface.moved = surface.container ? OpenContainerObject(pid, surface.movedName, true) : OpenEventW(SYNCHRONIZE, FALSE, surface.movedName);
+		surface.wake = surface.container ? OpenContainerObject(pid, surface.wakeName, true) : OpenEventW(EVENT_MODIFY_STATE, FALSE, surface.wakeName);
 		wchar_t line[96];
-		swprintf_s(line, L"start glass: following %s", surface.name);
+		swprintf_s(line, L"start glass: following %s%s", surface.name, surface.wake ? L"" : L", but cannot wake it");
 		Log(line);
 	}
 
@@ -258,8 +261,8 @@ namespace StartGlass
 		RegisterClassW(&type);
 		static Surface surfaces[] =
 		{
-			{ L"Start", L"StartMenuExperienceHost.exe", StartShareName, StartMovedName, false },
-			{ L"Search", L"SearchHost.exe", SearchShareName, SearchMovedName, true },
+			{ L"Start", L"StartMenuExperienceHost.exe", StartShareName, StartMovedName, StartWakeName, false },
+			{ L"Search", L"SearchHost.exe", SearchShareName, SearchMovedName, SearchWakeName, true },
 		};
 		Surface& start = surfaces[0];
 		Surface& search = surfaces[1];
@@ -269,7 +272,8 @@ namespace StartGlass
 		bool shown{}, focused{}, closing{}, met{}, startWasUp{};
 		DWORD startPid{}, searchPid{};
 		RECT last{};
-		ULONGLONG settingRead{};
+		ULONGLONG settingRead{}, wokeAt{};
+		int lastStirring{};
 		const ULONGLONG began = GetTickCount64();
 		for (;;)
 		{
@@ -281,8 +285,11 @@ namespace StartGlass
 			{
 				settingRead = tick;
 				const bool enabled = ReadPillSetting(PillStartGlass) != 0;
+				const bool switched = enabled != (glass != nullptr);
 				if (enabled && !glass) { glass = MakeGlass(instance); shown = false; Log(L"start glass: on"); }
 				else if (!enabled && glass) { DestroyWindow(glass); glass = nullptr; Log(L"start glass: off"); }
+				// Resting TAPs would only swap the acrylic the next time their flyout opens.
+				if (switched) for (const auto& surface : surfaces) if (surface.wake) SetEvent(surface.wake);
 			}
 			if (!glass)
 			{
@@ -304,6 +311,15 @@ namespace StartGlass
 			// foreground, so the glass showed there, empty. It waits until Start or Search has really had the foreground.
 			if (start.pid != startPid || search.pid != searchPid) { startPid = start.pid; searchPid = search.pid; met = false; }
 			if (now && (now == start.window || now == search.window)) met = true;
+			// The TAPs only follow their flyout frame by frame while woken. Start opening gives Search the foreground
+			// first and uncloaks both, so each of those wakes them, and every half second while it lasts.
+			const int stirring = (now && now == start.window) | (now && now == search.window) << 1 | (start.cloaked == 0) << 2 | (search.cloaked == 0) << 3;
+			if (stirring && (stirring != lastStirring || tick - wokeAt >= 500))
+			{
+				for (const auto& surface : surfaces) if (surface.wake) SetEvent(surface.wake);
+				wokeAt = tick;
+			}
+			lastStirring = stirring;
 			bool startShown = start.window && (start.cloaked == 0 || (start.onScreen && flyoutFocused));
 			// Going over to Search, Start parks its menu a few frames before DWM reports it cloaked, and in that gap
 			// the glass went away and came back. A Start that was up and has parked again has handed over to Search.

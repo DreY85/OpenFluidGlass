@@ -18,6 +18,7 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
+#include "pilllog.h"
 #include "pillshare.h"
 
 namespace wux = winrt::Windows::UI::Xaml;
@@ -35,11 +36,8 @@ namespace
 	void Log(const std::wstring& line)
 	{
 		std::lock_guard guard{ g_logLock };
-		wchar_t path[MAX_PATH];
-		GetTempPathW(MAX_PATH, path);
-		wcscat_s(path, L"pilltap.txt");
-		FILE* file{};
-		if (_wfopen_s(&file, path, L"a, ccs=UTF-8") || !file) return;
+		FILE* file = OpenLog(L"pilltap.txt");
+		if (!file) return;
 		SYSTEMTIME now{};
 		GetLocalTime(&now);
 		fwprintf(file, L"%02u:%02u:%02u.%03u explorer %lu: %s\n", now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, GetCurrentProcessId(), line.c_str());

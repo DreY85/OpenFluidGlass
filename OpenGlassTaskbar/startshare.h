@@ -8,6 +8,8 @@ constexpr wchar_t StartShareName[] = L"Local\\LiquidGlassStartMenu";
 constexpr wchar_t SearchShareName[] = L"Local\\LiquidGlassSearch";	// the same layout, for the Search flyout
 constexpr wchar_t StartMovedName[] = L"Local\\LiquidGlassStartMenuMoved";	// set by the TAP each time it publishes a new outline
 constexpr wchar_t SearchMovedName[] = L"Local\\LiquidGlassSearchMoved";
+constexpr wchar_t StartWakeName[] = L"Local\\LiquidGlassStartMenuWake";	// set by pillhost when the flyout may be opening
+constexpr wchar_t SearchWakeName[] = L"Local\\LiquidGlassSearchWake";
 // pillhost's glass window. The TAPs clear the flyouts' acrylic only while it exists.
 constexpr wchar_t StartGlassClass[] = L"LiquidGlassStartGlass";
 constexpr ULONGLONG StartListenLimit = 60000;	// how long the TAP waits, in ms, for the process's XAML to start listening
