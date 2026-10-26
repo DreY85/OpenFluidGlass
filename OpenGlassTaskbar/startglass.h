@@ -7,6 +7,8 @@
 
 namespace StartGlass
 {
+	constexpr ULONGLONG ShellWaitLimit = 30000;	// how long, in ms, Start and Search wait for our TAP in explorer before we load into them
+
 	struct Surface
 	{
 		const wchar_t* name;
@@ -258,9 +260,11 @@ namespace StartGlass
 		std::thread(WatchCloaks, surfaces, std::size(surfaces)).detach();
 
 		HWND glass{};
-		bool shown{}, focused{}, closing{};
+		bool shown{}, focused{}, closing{}, met{}, startWasUp{};
+		DWORD startPid{}, searchPid{};
 		RECT last{};
 		ULONGLONG settingRead{};
+		const ULONGLONG began = GetTickCount64();
 		for (;;)
 		{
 			MSG message;
@@ -279,7 +283,9 @@ namespace StartGlass
 				MsgWaitForMultipleObjects(0, nullptr, FALSE, 500, QS_ALLINPUT);
 				continue;
 			}
-			for (auto& surface : surfaces) Connect(surface);
+			// At sign-in, loading into Start and Search while explorer still builds the taskbar slowed explorer down.
+			// So that waits for our TAP in explorer, or for half a minute in case it never gets in.
+			if (g_shellReady || tick - began > ShellWaitLimit) for (auto& surface : surfaces) Connect(surface);
 			Read(start);
 			Read(search);
 			const HWND now = GetForegroundWindow();
@@ -288,7 +294,16 @@ namespace StartGlass
 			// DWM sometimes still reports Start cloaked for seconds after it opened, so a Start that XAML has brought
 			// on screen also counts while Start or Search holds the foreground, or nothing does, as happens while Start opens.
 			const bool flyoutFocused = !now || now == start.window || now == search.window;
-			const bool startShown = start.window && (start.cloaked == 0 || (start.onScreen && flyoutFocused));
+			// A fresh Start lays its menu out on screen before it parks it below, and at sign-in nothing holds the
+			// foreground, so the glass showed there, empty. It waits until Start or Search has really had the foreground.
+			if (start.pid != startPid || search.pid != searchPid) { startPid = start.pid; searchPid = search.pid; met = false; }
+			if (now && (now == start.window || now == search.window)) met = true;
+			bool startShown = start.window && (start.cloaked == 0 || (start.onScreen && flyoutFocused));
+			// Going over to Search, Start parks its menu a few frames before DWM reports it cloaked, and in that gap
+			// the glass went away and came back. A Start that was up and has parked again has handed over to Search.
+			if (!startShown) startWasUp = false;
+			else if (start.onScreen) startWasUp = true;
+			else if (startWasUp && search.visible) startShown = false;
 			const bool open = startShown ? start.onScreen : search.visible;
 			// XAML only moves a closing Start menu at the end of its slide, so the glass goes as soon as another window
 			// takes the foreground. Focus moves between Start and Search, and through no window at all, on the way.
@@ -296,7 +311,7 @@ namespace StartGlass
 			else if (flyoutFocused) focused = true;
 			else if (focused) closing = true;
 			const RECT& rect = startShown ? start.rect : search.rect;
-			const bool show = open && !closing;
+			const bool show = open && !closing && met;
 			if (show && (!shown || !EqualRect(&rect, &last)))
 			{
 				SetWindowPos(glass, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);

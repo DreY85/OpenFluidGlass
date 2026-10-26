@@ -79,6 +79,7 @@ namespace
 	// of pilltap.dll, from the user's own tap folder, as XAML may keep refusing a file it refused once.
 	enum class TapState { Idle, Waiting, Attached };
 	TapState g_tap{ TapState::Idle };
+	std::atomic<bool> g_shellReady{};	// the TAP got into explorer once; the Start glass waits for that (startglass.h)
 	ULONGLONG g_tapTime{};	// while idle: when to try next; while waiting: when the TAP was loaded
 	HANDLE g_tapDone{}, g_tapAttached{};
 	// The TAP waits for explorer's XAML itself, then makes up to four attempts of about a second each.
@@ -249,7 +250,7 @@ namespace
 			// Once attached, the next wait is for the nudge: just long enough for the TAP to subscribe.
 			g_tapTime = now + (attached ? NudgeDelay : TapRetryDelay);
 			// Refused copies are unloaded by now; the attached one is locked and stays.
-			if (attached) { CleanTapCopies(); g_nudges = 0; }
+			if (attached) { CleanTapCopies(); g_nudges = 0; g_shellReady = true; }
 		}
 		else if (g_tap == TapState::Attached)
 		{
