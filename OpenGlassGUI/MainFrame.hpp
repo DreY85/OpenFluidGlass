@@ -29,7 +29,7 @@ namespace OpenGlass
 		void CreateThemeTab();
 		void CreateAppearanceTab(); // Text and Caption settings
 		void CreateGlassColorsTab();
-		void CreateLiquidGlassTab();
+		void CreateFluidGlassTab();
 		void CreateTaskbarTab();
 		void CreateExplorerTab();
 		void CreateBottomControls(wxSizer* parentSizer);

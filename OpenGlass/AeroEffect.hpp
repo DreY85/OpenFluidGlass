@@ -10,7 +10,7 @@ namespace OpenGlass
 		D2D1_COLOR_F afterglow;
 		D2D1_COLOR_F fallback;
 		float blurBalance;
-		bool pill{ false };	// Liquid Glass: cut to a fully rounded outline (Direct3D only)
+		bool pill{ false };	// Fluid Glass: cut to a fully rounded outline (Direct3D only)
 	};
 
 	class CAeroEffect : public winrt::implements<CAeroEffect, IRenderingEffect, winrt::non_agile, winrt::no_weak_ref>

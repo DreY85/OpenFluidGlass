@@ -3,8 +3,8 @@
 #include <windows.h>
 #include <cstdio>
 
-constexpr wchar_t PillShareName[] = L"Local\\LiquidGlassTaskbarGroups";
-constexpr wchar_t PillHostClass[] = L"LiquidGlassTaskbarHost";
+constexpr wchar_t PillShareName[] = L"Local\\FluidGlassTaskbarGroups";
+constexpr wchar_t PillHostClass[] = L"FluidGlassTaskbarHost";
 constexpr UINT PillCount = 3;	// apps, tray, clock
 constexpr UINT PillChanged = WM_APP + 1;	// posted by the TAP to the host after it publishes
 constexpr ULONGLONG TapListenLimit = 60000;	// how long the TAP waits, in ms, for explorer's XAML to start listening
@@ -20,7 +20,7 @@ struct PillShare
 // Named per explorer process, so an old explorer's TAP never answers for a new one.
 inline void PillEventName(wchar_t (&name)[96], DWORD explorer, const wchar_t* what)
 {
-	swprintf_s(name, L"Local\\LiquidGlassTaskbarTap%lu%s", explorer, what);
+	swprintf_s(name, L"Local\\FluidGlassTaskbarTap%lu%s", explorer, what);
 }
 
 // Settings: written by the Taskbar tab of OpenGlassGUI, read live by the host. Sizes are pixels at 100% scale.

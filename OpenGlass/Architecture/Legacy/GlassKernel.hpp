@@ -67,7 +67,7 @@ namespace OpenGlass::GlassKernel
 		)
 		{
 			SetIsActive(active);
-			SetIsMaximized(maximized && !Shared::g_liquidGlass.enabled);
+			SetIsMaximized(maximized && !Shared::g_fluidGlass.enabled);
 		}
 	};
 

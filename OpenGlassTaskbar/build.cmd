@@ -1,5 +1,5 @@
 @echo off
-rem Builds the Liquid Glass taskbar into Build\taskbar: pilltap.dll (loaded into explorer), starttap.dll (loaded into Start and Search) and pillhost.exe.
+rem Builds the Fluid Glass taskbar into Build\taskbar: pilltap.dll (loaded into explorer), starttap.dll (loaded into Start and Search) and pillhost.exe.
 setlocal
 call D:\BuildTools\VC\Auxiliary\Build\vcvars64.bat >nul 2>nul || exit /b 1
 set out=%~dp0..\Build\taskbar

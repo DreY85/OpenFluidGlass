@@ -1,4 +1,4 @@
-// Liquid Glass under the Start menu and Search, our side. Included once by pillhost.cpp, inside its namespace,
+// Fluid Glass under the Start menu and Search, our side. Included once by pillhost.cpp, inside its namespace,
 // after its helpers (Log, HostFolder, TapFolder); pillhost.cpp also includes what it needs. Runs on a thread of its own,
 // so the pills never wait for it.
 // It loads starttap.dll into StartMenuExperienceHost and SearchHost, again whenever Windows restarts them, and keeps one

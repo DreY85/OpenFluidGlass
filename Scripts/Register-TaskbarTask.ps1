@@ -1,4 +1,4 @@
-# Registers, or removes, the logon task that starts the Liquid Glass taskbar host (pillhost.exe).
+# Registers, or removes, the logon task that starts the Fluid Glass taskbar host (pillhost.exe).
 # Run by the installer as an administrator. The task is for the Users group, so it starts the host for whoever
 # signs in, with normal rights (explorer could not post to an elevated window) and at normal priority.
 # Task Scheduler's default priority is below normal, which made the host start late and the old taskbar show first.
@@ -8,7 +8,9 @@ param(
 	[switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
-$name = 'LiquidGlassTaskbar'
+$name = 'FluidGlassTaskbar'
+# The task's name from before Open Fluid Glass was renamed. The new task replaces it.
+if (-not $DryRun) { Unregister-ScheduledTask -TaskName 'LiquidGlassTaskbar' -Confirm:$false -ErrorAction SilentlyContinue }
 
 if ($Remove) {
 	Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue

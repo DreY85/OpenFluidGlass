@@ -6,8 +6,8 @@
 #include "WindowsBuild.hpp"
 #include "..\OpenGlassTaskbar\pillshare.h"
 
-// Taskbar tab: the floating Liquid Glass taskbar run by pillhost.exe (OpenGlassTaskbar).
-// Like the Liquid Glass tab these values are live: they go straight to HKCU, where the host reads
+// Taskbar tab: the floating Fluid Glass taskbar run by pillhost.exe (OpenGlassTaskbar).
+// Like the Fluid Glass tab these values are live: they go straight to HKCU, where the host reads
 // them twice a second, so they stay outside Save and Revert.
 
 namespace OpenGlass
@@ -44,9 +44,9 @@ namespace OpenGlass
 			return {};
 		}
 
-		// The corners are drawn by OpenGlass, so they are a DWM value like the Liquid Glass tab's:
+		// The corners are drawn by OpenGlass, so they are a DWM value like the Fluid Glass tab's:
 		// pixels times 100. The slider's last step stands for fully round, any radius past half the height.
-		constexpr PCWSTR c_pillRadiusValue = L"LiquidGlassPillRadius";
+		constexpr PCWSTR c_pillRadiusValue = L"FluidGlassPillRadius";
 		constexpr int c_roundCorners = 25;
 		constexpr DWORD c_roundRadius = 1000;
 
@@ -125,7 +125,7 @@ namespace OpenGlass
 
 		auto* generalGroup = ModernTheme::MakeCard(panel, L"Floating taskbar");
 		auto* note = new wxStaticText(panel, wxID_ANY,
-			L"Splits the taskbar into floating Liquid Glass pills: one for the apps, one for the tray icons and one for the clock. "
+			L"Splits the taskbar into floating Fluid Glass pills: one for the apps, one for the tray icons and one for the clock. "
 			L"Changes apply instantly and are saved to HKCU, so Save and Revert do not affect them.");
 		note->SetForegroundColour(hintColour);
 		note->Wrap(FromDIP(560));
@@ -200,7 +200,7 @@ namespace OpenGlass
 		sizer->Add(pillsGroup, 0, wxEXPAND | wxALL, 2);
 
 		auto* startGroup = ModernTheme::MakeCard(panel, L"Start menu and Search");
-		auto* startGlass = new wxCheckBox(panel, wxID_ANY, L"Liquid Glass under the Start menu and Search");
+		auto* startGlass = new wxCheckBox(panel, wxID_ANY, L"Fluid Glass under the Start menu and Search");
 		startGlass->SetToolTip(L"Our glass replaces their own acrylic while the floating taskbar runs. Off, or with the taskbar stopped, they look as Windows draws them.");
 		startGroup->Add(startGlass, 0, wxALL, 4);
 		sizer->Add(startGroup, 0, wxEXPAND | wxALL, 2);

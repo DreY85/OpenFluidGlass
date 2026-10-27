@@ -1,14 +1,14 @@
 ; Keep the product identity in one place. The outer doubled braces preserve
 ; the literal GUID braces after the preprocessor expands MyAppId.
 #define MyAppId "{D3D1BC7D-5E24-4B33-9383-7934271A3B05}"
-#define MyAppName "Open Liquid Glass"
+#define MyAppName "Open Fluid Glass"
 #ifndef MyAppVersion
 #error MyAppVersion must be supplied by the packaging target
 #endif
-#define MyAppPublisher "Open Liquid Glass (based on OpenGlass by ALTaleX)"
+#define MyAppPublisher "Open Fluid Glass (based on OpenGlass by ALTaleX)"
 #define MyAppExeName "OpenGlassGUI.exe"
 #ifndef SetupName
-#define SetupName "OpenLiquidGlassSetup"
+#define SetupName "OpenFluidGlassSetup"
 #endif
 #define MyAppSetupName SetupName
 #define MyProjPath ".."
@@ -66,7 +66,7 @@ CloseApplications=yes
 RestartApplications=no
 CloseApplicationsFilter=OpenGlassGUI.exe,OpenGlassHost.exe,pillhost.exe
 UninstallDisplayIcon={app}\{#MyAppExeName}
-UninstallDisplayName=Open Liquid Glass v{#MyAppVersion}
+UninstallDisplayName=Open Fluid Glass v{#MyAppVersion}
 Uninstallable=yes
 UpdateUninstallLogAppName=yes
 UsePreviousLanguage=yes
@@ -118,10 +118,10 @@ UninstallDeletePresetPackages=Delete the preset library and retained legacy pack
 ContinueUninstall=Uninstall
 ServiceDescription=This service injects DLL into DWM for you and also maintains that user settings are correctly loaded.
 RestartExplorer=Restart Windows Explorer now to apply the glass effects (the screen flickers for a moment)
-StartTaskbar=Start the Liquid Glass taskbar now
-InstallingTaskbar=Registering the Liquid Glass taskbar...
-RemovingTaskbar=Removing the Liquid Glass taskbar...
-TaskbarTaskFailed=The Liquid Glass taskbar could not be set to start at sign-in. Everything else is installed. You can still start the taskbar from the Taskbar tab in OpenGlass. The setup log has the details.
+StartTaskbar=Start the Fluid Glass taskbar now
+InstallingTaskbar=Registering the Fluid Glass taskbar...
+RemovingTaskbar=Removing the Fluid Glass taskbar...
+TaskbarTaskFailed=The Fluid Glass taskbar could not be set to start at sign-in. Everything else is installed. You can still start the taskbar from the Taskbar tab in OpenGlass. The setup log has the details.
 
 #if FileExists(CompilerPath + "Languages\\ChineseSimplified.isl")
 chinesesimplified.LaunchOpenGlassGUI=启动 OpenGlass GUI
@@ -151,7 +151,7 @@ Source: "{#MyAppBuildPath}\milcomp\OpenGlass.dll"; DestDir: "{app}"; DestName: "
 Source: "{#MyAppBuildPath}\OpenGlassHost.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "{#MyAppBuildPath}\OpenGlassGUI.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 
-; Liquid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll,
+; Fluid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll,
 ; and Start and Search a copy of starttap.dll.
 ; It works on the XAML taskbar of Windows 11 only, so Windows 10 gets neither the files nor the logon task.
 Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
@@ -167,7 +167,7 @@ Source: "{#EbmPath}\ReadMe.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignor
 Source: "{#EbmPath}\NOTICE.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
 
 [INI]
-; The look is set in the Liquid Glass tab, so ExplorerBlurMica only clears File Explorer's background (the GUI keeps
+; The look is set in the Fluid Glass tab, so ExplorerBlurMica only clears File Explorer's background (the GUI keeps
 ; this in line too). Its Mica effect (2) makes File Explorer glass match other windows, but Mica exists only on
 ; Windows 11; Windows 10 keeps its Blur effect (0).
 Filename: "{app}\ExplorerBlurMica\config.ini"; Section: "config"; Key: "effect"; String: "2"; Check: IsWindows11
@@ -201,13 +201,17 @@ Type: filesandordirs; Name: "{app}\dumps"
 Type: files; Name: "{commondesktop}\Configure OpenGlass.lnk"
 Type: files; Name: "{group}\Configure OpenGlass.lnk"
 Type: files; Name: "{group}\Uninstall OpenGlass.lnk"
+; And from before it was renamed Open Fluid Glass.
+Type: files; Name: "{commondesktop}\Open Liquid Glass.lnk"
+Type: files; Name: "{group}\Open Liquid Glass.lnk"
+Type: files; Name: "{group}\Uninstall Open Liquid Glass.lnk"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkablealone
 
 [Icons]
-Name: "{group}\Open Liquid Glass"; Filename: "{app}\OpenGlassGUI.exe"
-Name: "{commondesktop}\Open Liquid Glass"; Filename: "{app}\OpenGlassGUI.exe"; Tasks: desktopicon
+Name: "{group}\Open Fluid Glass"; Filename: "{app}\OpenGlassGUI.exe"
+Name: "{commondesktop}\Open Fluid Glass"; Filename: "{app}\OpenGlassGUI.exe"; Tasks: desktopicon
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
 [Run]
@@ -284,11 +288,11 @@ procedure CheckTaskbarTask();
 var
   ResultCode: Integer;
 begin
-  if Exec(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN LiquidGlassTaskbar', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
-    Log('The Liquid Glass taskbar logon task is registered.')
+  if Exec(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN FluidGlassTaskbar', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+    Log('The Fluid Glass taskbar logon task is registered.')
   else
   begin
-    Log(Format('The Liquid Glass taskbar logon task is missing after registration (schtasks exit code %d).', [ResultCode]));
+    Log(Format('The Fluid Glass taskbar logon task is missing after registration (schtasks exit code %d).', [ResultCode]));
     SuppressibleMsgBox(CustomMessage('TaskbarTaskFailed'), mbError, MB_OK, IDOK);
   end;
 end;
@@ -318,6 +322,51 @@ end;
 function ShouldInstallMILCompDll(): Boolean;
 begin
   Result := InstallMILCompDll;
+end;
+
+// Open Fluid Glass was called Open Liquid Glass, and its settings were LiquidGlass* DWORDs.
+// Moves them to their FluidGlass* names; a value already under the new name wins.
+procedure MoveLegacyValues(const RootKey: Integer; const FromKey, ToKey: String);
+var
+  Names: TArrayOfString;
+  i: Integer;
+  Value: Cardinal;
+  NewName: String;
+begin
+  if not RegGetValueNames(RootKey, FromKey, Names) then Exit;
+  for i := 0 to GetArrayLength(Names) - 1 do
+    if (Pos('LiquidGlass', Names[i]) = 1) and RegQueryDWordValue(RootKey, FromKey, Names[i], Value) then
+    begin
+      NewName := 'FluidGlass' + Copy(Names[i], Length('LiquidGlass') + 1, Length(Names[i]));
+      if not RegValueExists(RootKey, ToKey, NewName) then
+        RegWriteDWordValue(RootKey, ToKey, NewName, Value);
+      if FromKey = ToKey then
+        RegDeleteValue(RootKey, FromKey, Names[i]);
+    end;
+end;
+
+// Like DeleteConfig, HKEY_CURRENT_USER is the account setup runs as.
+procedure MigrateLegacySettings;
+var
+  Presets: TArrayOfString;
+  i: Integer;
+begin
+  MoveLegacyValues(HKEY_CURRENT_USER, 'SOFTWARE\Microsoft\Windows\DWM', 'SOFTWARE\Microsoft\Windows\DWM');
+  MoveLegacyValues(HKLM64, 'SOFTWARE\Microsoft\Windows\DWM', 'SOFTWARE\Microsoft\Windows\DWM');
+  if RegGetSubkeyNames(HKEY_CURRENT_USER, 'Software\OpenGlass\LiquidGlassPresets', Presets) then
+  begin
+    for i := 0 to GetArrayLength(Presets) - 1 do
+      MoveLegacyValues(HKEY_CURRENT_USER, 'Software\OpenGlass\LiquidGlassPresets\' + Presets[i],
+        'Software\OpenGlass\FluidGlassPresets\' + Presets[i]);
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, 'Software\OpenGlass\LiquidGlassPresets');
+  end;
+end;
+
+// Before the service starts in [Run], so OpenGlass reads the settings under their new names.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    MigrateLegacySettings;
 end;
 
 type
@@ -485,7 +534,11 @@ begin
     'CustomThemeMaterial', 'MaterialOpacity', 'UseDirect3DRendering',
     'CaptionButtons', 'CenterCaption', 'TextGlowMode', 'CustomThemeAtlas', 'DisableModernBorders',
     'DisableGlassOnBattery', 'DisabledHooks', 'GlassSafetyZoneMode',
-    'MINMAXBUTTONGLOWid', 'CLOSEBUTTONGLOWid', 'TOOLCLOSEBUTTONGLOWid'
+    'MINMAXBUTTONGLOWid', 'CLOSEBUTTONGLOWid', 'TOOLCLOSEBUTTONGLOWid',
+    'FluidGlass', 'FluidGlassIor', 'FluidGlassBezel', 'FluidGlassThickness', 'FluidGlassGap', 'FluidGlassScale',
+    'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassRim', 'FluidGlassShine',
+    'FluidGlassLight', 'FluidGlassRadius', 'FluidGlassPillRadius', 'FluidGlassProfile', 'FluidGlassClarity',
+    'FluidGlassSoftness'
   ];
 
   DeleteConfigValues(HKEY_CURRENT_USER, 'SOFTWARE\Microsoft\Windows\DWM', OpenGlassKeys);

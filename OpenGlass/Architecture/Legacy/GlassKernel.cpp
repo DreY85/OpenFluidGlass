@@ -324,8 +324,8 @@ float GlassKernel::GetBlurExpansion()
 
 float GlassKernel::GetColorizationOpacity(bool active, bool maximized)
 {
-	// Liquid Glass stays clear while a window is maximized; the Vista transition turns glass opaque black.
-	if (Shared::g_liquidGlass.enabled)
+	// Fluid Glass stays clear while a window is maximized; the Vista transition turns glass opaque black.
+	if (Shared::g_fluidGlass.enabled)
 	{
 		maximized = false;
 	}
@@ -350,7 +350,7 @@ float GlassKernel::GetColorizationOpacity(bool active, bool maximized)
 }
 D2D1_COLOR_F GlassKernel::GetBaseColor(bool opaque, bool maximized)
 {
-	if (Shared::g_liquidGlass.enabled)
+	if (Shared::g_fluidGlass.enabled)
 	{
 		maximized = false;
 	}
@@ -529,7 +529,7 @@ GlassKernel::CRealizedGlassColorizationParameters GlassKernel::RealizeWindowColo
 
 float GlassKernel::GetAdjustedReflectionIntensity(bool active, bool maximized)
 {
-	if (Shared::g_liquidGlass.enabled)
+	if (Shared::g_fluidGlass.enabled)
 	{
 		maximized = false;
 	}
@@ -612,29 +612,29 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 
 		Shared::g_useD3DRendering = static_cast<bool>(GlassEngine::GetDwordFromRegistry(L"UseDirect3DRendering", 0));
 
-		// Liquid Glass values are DWORDs holding the value times 100; the light angle is offset by 360 degrees.
-		const auto lgValue = [](PCWSTR name, float defaultValue) noexcept
+		// Fluid Glass values are DWORDs holding the value times 100; the light angle is offset by 360 degrees.
+		const auto fgValue = [](PCWSTR name, float defaultValue) noexcept
 		{
 			return static_cast<float>(GlassEngine::GetDwordFromRegistry(name, static_cast<DWORD>(std::lround(defaultValue * 100.f)))) / 100.f;
 		};
-		auto& lg = Shared::g_liquidGlass;
-		lg.enabled = GlassEngine::GetDwordFromRegistry(L"LiquidGlass", 0) != 0;
-		lg.ior = std::clamp(lgValue(L"LiquidGlassIor", 1.5f), 1.f, 3.f);
-		lg.bezel = std::clamp(lgValue(L"LiquidGlassBezel", 26.f), 1.f, 400.f);
-		lg.thickness = std::clamp(lgValue(L"LiquidGlassThickness", 26.f), 0.f, 400.f);
-		lg.gap = std::clamp(lgValue(L"LiquidGlassGap", 0.f), 0.f, 400.f);
-		lg.scale = std::clamp(lgValue(L"LiquidGlassScale", 1.f), 0.f, 5.f);
-		lg.chroma = std::clamp(lgValue(L"LiquidGlassChroma", 0.03f), 0.f, 0.5f);
-		lg.saturation = std::clamp(lgValue(L"LiquidGlassSaturation", 1.4f), 0.f, 4.f);
-		lg.readability = std::clamp(lgValue(L"LiquidGlassReadability", 0.5f), 0.f, 1.f);
-		lg.rim = std::clamp(lgValue(L"LiquidGlassRim", 1.f), 0.f, 5.f);
-		lg.shine = std::clamp(lgValue(L"LiquidGlassShine", 2.f), 0.1f, 16.f);
-		lg.lightDegrees = lgValue(L"LiquidGlassLight", 360.f - 135.f) - 360.f;
-		lg.radius = std::clamp(lgValue(L"LiquidGlassRadius", 8.f), 0.f, 200.f);
-		lg.pillRadius = std::clamp(lgValue(L"LiquidGlassPillRadius", 1000.f), 0.f, 1000.f);
-		lg.profile = std::min(GlassEngine::GetDwordFromRegistry(L"LiquidGlassProfile", 0), 2ul);
-		lg.clarity = std::clamp(lgValue(L"LiquidGlassClarity", 0.75f), 0.f, 1.f);
-		lg.softness = std::clamp(lgValue(L"LiquidGlassSoftness", 1.5f), 0.f, 20.f);
+		auto& fg = Shared::g_fluidGlass;
+		fg.enabled = GlassEngine::GetDwordFromRegistry(L"FluidGlass", 0) != 0;
+		fg.ior = std::clamp(fgValue(L"FluidGlassIor", 1.5f), 1.f, 3.f);
+		fg.bezel = std::clamp(fgValue(L"FluidGlassBezel", 26.f), 1.f, 400.f);
+		fg.thickness = std::clamp(fgValue(L"FluidGlassThickness", 26.f), 0.f, 400.f);
+		fg.gap = std::clamp(fgValue(L"FluidGlassGap", 0.f), 0.f, 400.f);
+		fg.scale = std::clamp(fgValue(L"FluidGlassScale", 1.f), 0.f, 5.f);
+		fg.chroma = std::clamp(fgValue(L"FluidGlassChroma", 0.03f), 0.f, 0.5f);
+		fg.saturation = std::clamp(fgValue(L"FluidGlassSaturation", 1.4f), 0.f, 4.f);
+		fg.readability = std::clamp(fgValue(L"FluidGlassReadability", 0.5f), 0.f, 1.f);
+		fg.rim = std::clamp(fgValue(L"FluidGlassRim", 1.f), 0.f, 5.f);
+		fg.shine = std::clamp(fgValue(L"FluidGlassShine", 2.f), 0.1f, 16.f);
+		fg.lightDegrees = fgValue(L"FluidGlassLight", 360.f - 135.f) - 360.f;
+		fg.radius = std::clamp(fgValue(L"FluidGlassRadius", 8.f), 0.f, 200.f);
+		fg.pillRadius = std::clamp(fgValue(L"FluidGlassPillRadius", 1000.f), 0.f, 1000.f);
+		fg.profile = std::min(GlassEngine::GetDwordFromRegistry(L"FluidGlassProfile", 0), 2ul);
+		fg.clarity = std::clamp(fgValue(L"FluidGlassClarity", 0.75f), 0.f, 1.f);
+		fg.softness = std::clamp(fgValue(L"FluidGlassSoftness", 1.5f), 0.f, 20.f);
 	}
 }
 

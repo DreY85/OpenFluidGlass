@@ -55,7 +55,7 @@ namespace OpenGlass
 	}
 
 	MainFrame::MainFrame(std::wstring userSid, Settings::Scope scope, bool systemTransparency)
-		: wxFrame(nullptr, wxID_ANY, L"Open Liquid Glass", wxDefaultPosition, wxSize(900, 750))
+		: wxFrame(nullptr, wxID_ANY, L"Open Fluid Glass", wxDefaultPosition, wxSize(900, 750))
 	{
 		SetIcons(wxIconBundle(wxString::Format(L"#%d", IDI_OPENGLASS), reinterpret_cast<WXHINSTANCE>(GetModuleHandleW(nullptr))));
 		m_isAdmin = Elevation::IsProcessElevated();
@@ -101,7 +101,7 @@ namespace OpenGlass
 		CreateThemeTab();
 		CreateAppearanceTab();
 		CreateGlassColorsTab();
-		CreateLiquidGlassTab();
+		CreateFluidGlassTab();
 		CreateTaskbarTab();
 		CreateExplorerTab();
 		CreatePresetsTab();

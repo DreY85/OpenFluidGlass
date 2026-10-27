@@ -32,8 +32,8 @@ namespace OpenGlass::Shared
 	inline float g_glassOpacity{};
 	inline float g_glassOpacityInactive{};
 	inline bool g_useD3DRendering{};
-	// Liquid Glass parameters for the Direct3D renderer. Lengths are in back-buffer pixels.
-	inline struct LiquidGlassSettings
+	// Fluid Glass parameters for the Direct3D renderer. Lengths are in back-buffer pixels.
+	inline struct FluidGlassSettings
 	{
 		bool enabled{ false };
 		float ior{ 1.5f }, bezel{ 26.f }, thickness{ 26.f }, gap{ 0.f }, scale{ 1.f };
@@ -42,7 +42,7 @@ namespace OpenGlass::Shared
 		float pillRadius{ 1000.f };	// corners of pill-marked glass (the floating taskbar); beyond half its height it is fully round
 		float clarity{ 0.75f }, softness{ 1.5f };
 		UINT profile{ 0 };
-	} g_liquidGlass{};
+	} g_fluidGlass{};
 
 	inline D2D1_COLOR_F g_color{};
 	inline D2D1_COLOR_F g_colorInactive{};

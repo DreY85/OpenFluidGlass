@@ -71,9 +71,9 @@ BEGIN
         BLOCK "040004b0"
         BEGIN
             VALUE "CompanyName", "ALTaleX"
-            VALUE "FileDescription", "Open Liquid Glass Settings"
+            VALUE "FileDescription", "Open Fluid Glass Settings"
             VALUE "FileVersion", OPENGLASS_PRODUCT_VERSION_STRING
-            VALUE "InternalName", "Open Liquid Glass"
+            VALUE "InternalName", "Open Fluid Glass"
             VALUE "LegalCopyright", "Copyright (C) 2024-2026 ALTaleX531"
             VALUE "OriginalFilename", "OpenGlassGUI.exe"
             VALUE "ProductName", "OpenGlass"

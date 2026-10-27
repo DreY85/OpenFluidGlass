@@ -1,4 +1,4 @@
-// Liquid Glass taskbar, explorer side. Hides the taskbar's own background while pillhost.exe runs
+// Fluid Glass taskbar, explorer side. Hides the taskbar's own background while pillhost.exe runs
 // and publishes where the groups are (apps, tray, clock) so the host can draw a glass pill under each.
 // Loaded into explorer by a short WH_CALLWNDPROC hook, then attaches itself as a XAML diagnostics TAP.
 // It never touches an element while it is being added, only its parent, which is already in the tree.

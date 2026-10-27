@@ -1,4 +1,4 @@
-// Liquid Glass taskbar, our side. Loads pilltap.dll into explorer, then keeps one glass window
+// Fluid Glass taskbar, our side. Loads pilltap.dll into explorer, then keeps one glass window
 // (accent blur marked as a pill, which our OpenGlass rounds) under each group the TAP reports.
 // While this runs the TAP hides the taskbar's own background; when it exits the background returns.
 // Settings come from HKCU\Software\OpenGlass\Taskbar (the Taskbar tab of OpenGlassGUI) and apply while running.
@@ -818,7 +818,7 @@ namespace
 
 	HWND MakePill(HINSTANCE instance)
 	{
-		const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"LiquidGlassTaskbarPill", L"", WS_POPUP,
+		const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"FluidGlassTaskbarPill", L"", WS_POPUP,
 			0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
 		const auto setAttribute = reinterpret_cast<SetWindowCompositionAttribute_t>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
 		ACCENT_POLICY accent{ 3, AccentFlagPill, 0, 0 };
@@ -862,17 +862,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 	type.lpszClassName = PillHostClass;
 	RegisterClassW(&type);
 	// A hidden top-level window, so the TAP can find it by class.
-	g_host = CreateWindowExW(WS_EX_TOOLWINDOW, PillHostClass, L"Liquid Glass taskbar", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
+	g_host = CreateWindowExW(WS_EX_TOOLWINDOW, PillHostClass, L"Fluid Glass taskbar", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
 
 	WNDCLASSW pillType{};
 	pillType.lpfnWndProc = DefWindowProcW;
 	pillType.hInstance = instance;
-	pillType.lpszClassName = L"LiquidGlassTaskbarPill";
+	pillType.lpszClassName = L"FluidGlassTaskbarPill";
 	// Black is fully transparent under the accent, so only the glass shows.
 	pillType.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
 	RegisterClassW(&pillType);
 	for (auto& pill : g_pills) pill = MakePill(instance);
-	g_nudge = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED, L"LiquidGlassTaskbarPill", L"Liquid Glass taskbar", WS_POPUP,
+	g_nudge = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED, L"FluidGlassTaskbarPill", L"Fluid Glass taskbar", WS_POPUP,
 		-32000, -32000, 1, 1, nullptr, nullptr, instance, nullptr);
 	SetLayeredWindowAttributes(g_nudge, 0, 0, LWA_ALPHA);
 

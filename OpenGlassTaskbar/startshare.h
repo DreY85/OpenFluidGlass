@@ -4,14 +4,14 @@
 
 // SearchHost runs in an app container, so these names, made there as Local\, land in its own namespace;
 // pillhost opens them there (OpenContainerObject).
-constexpr wchar_t StartShareName[] = L"Local\\LiquidGlassStartMenu";
-constexpr wchar_t SearchShareName[] = L"Local\\LiquidGlassSearch";	// the same layout, for the Search flyout
-constexpr wchar_t StartMovedName[] = L"Local\\LiquidGlassStartMenuMoved";	// set by the TAP each time it publishes a new outline
-constexpr wchar_t SearchMovedName[] = L"Local\\LiquidGlassSearchMoved";
-constexpr wchar_t StartWakeName[] = L"Local\\LiquidGlassStartMenuWake";	// set by pillhost when the flyout may be opening
-constexpr wchar_t SearchWakeName[] = L"Local\\LiquidGlassSearchWake";
+constexpr wchar_t StartShareName[] = L"Local\\FluidGlassStartMenu";
+constexpr wchar_t SearchShareName[] = L"Local\\FluidGlassSearch";	// the same layout, for the Search flyout
+constexpr wchar_t StartMovedName[] = L"Local\\FluidGlassStartMenuMoved";	// set by the TAP each time it publishes a new outline
+constexpr wchar_t SearchMovedName[] = L"Local\\FluidGlassSearchMoved";
+constexpr wchar_t StartWakeName[] = L"Local\\FluidGlassStartMenuWake";	// set by pillhost when the flyout may be opening
+constexpr wchar_t SearchWakeName[] = L"Local\\FluidGlassSearchWake";
 // pillhost's glass window. The TAPs clear the flyouts' acrylic only while it exists.
-constexpr wchar_t StartGlassClass[] = L"LiquidGlassStartGlass";
+constexpr wchar_t StartGlassClass[] = L"FluidGlassStartGlass";
 constexpr ULONGLONG StartListenLimit = 60000;	// how long the TAP waits, in ms, for the process's XAML to start listening
 
 struct StartShare

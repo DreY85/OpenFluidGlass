@@ -4,7 +4,7 @@
 #include "DwmSettings.hpp"
 #include <wx/clipbrd.h>
 
-// Liquid Glass tab: refraction settings for the Direct3D renderer.
+// Fluid Glass tab: refraction settings for the Direct3D renderer.
 // Unlike the other tabs these values are live. Every change is written to HKCU and DWM reloads at once,
 // so they stay outside Save and Revert. OpenGlass stores them as DWORDs holding the value times 100;
 // the light angle is stored with 360 degrees added.
@@ -13,12 +13,12 @@ namespace OpenGlass
 {
 	namespace
 	{
-		struct LiquidGlassParameter
+		struct FluidGlassParameter
 		{
 			PCWSTR name;
 			PCWSTR label;
 			PCWSTR hint;
-			PCWSTR option;	// set-liquid-glass.ps1 parameter, used by Copy values
+			PCWSTR option;	// set-fluid-glass.ps1 parameter, used by Copy values
 			float minimum;
 			float maximum;
 			float step;
@@ -26,44 +26,44 @@ namespace OpenGlass
 			PCWSTR unit;
 		};
 
-		struct LiquidGlassGroup
+		struct FluidGlassGroup
 		{
 			PCWSTR title;
-			std::initializer_list<LiquidGlassParameter> parameters;
+			std::initializer_list<FluidGlassParameter> parameters;
 		};
 
-		const LiquidGlassGroup c_liquidGlassGroups[]
+		const FluidGlassGroup c_fluidGlassGroups[]
 		{
 			{ L"Refraction", {
-				{ L"LiquidGlassBezel", L"Bezel width:", L"Width of the curved edge where the backdrop bends.", L"Bezel", 1.f, 200.f, 1.f, 26.f, L"px" },
-				{ L"LiquidGlassThickness", L"Glass thickness:", L"How far the backdrop shifts under the bezel.", L"Thickness", 0.f, 200.f, 1.f, 26.f, L"px" },
-				{ L"LiquidGlassScale", L"Refraction strength:", L"Multiplies the shift. 0 turns bending off.", L"Scale", 0.f, 5.f, 0.05f, 1.f, L"×" },
-				{ L"LiquidGlassIor", L"Index of refraction:", L"How dense the glass is. Window glass is about 1.5.", L"Ior", 1.f, 3.f, 0.01f, 1.5f, L"" },
-				{ L"LiquidGlassGap", L"Backdrop distance:", L"Extra depth that also shifts the flat area.", L"Gap", 0.f, 100.f, 1.f, 0.f, L"px" },
-				{ L"LiquidGlassRadius", L"Corner radius:", L"Rounding of the glass corners.", L"Radius", 0.f, 60.f, 1.f, 8.f, L"px" },
+				{ L"FluidGlassBezel", L"Bezel width:", L"Width of the curved edge where the backdrop bends.", L"Bezel", 1.f, 200.f, 1.f, 26.f, L"px" },
+				{ L"FluidGlassThickness", L"Glass thickness:", L"How far the backdrop shifts under the bezel.", L"Thickness", 0.f, 200.f, 1.f, 26.f, L"px" },
+				{ L"FluidGlassScale", L"Refraction strength:", L"Multiplies the shift. 0 turns bending off.", L"Scale", 0.f, 5.f, 0.05f, 1.f, L"×" },
+				{ L"FluidGlassIor", L"Index of refraction:", L"How dense the glass is. Window glass is about 1.5.", L"Ior", 1.f, 3.f, 0.01f, 1.5f, L"" },
+				{ L"FluidGlassGap", L"Backdrop distance:", L"Extra depth that also shifts the flat area.", L"Gap", 0.f, 100.f, 1.f, 0.f, L"px" },
+				{ L"FluidGlassRadius", L"Corner radius:", L"Rounding of the glass corners.", L"Radius", 0.f, 60.f, 1.f, 8.f, L"px" },
 			} },
 			{ L"Blur", {
-				{ L"LiquidGlassSoftness", L"Blur radius:", L"Blur of the backdrop seen through the glass. 0 is perfectly clear.", L"Softness", 0.f, 20.f, 0.5f, 1.5f, L"px" },
-				{ L"LiquidGlassClarity", L"Blur mix:", L"1 uses the blur radius above. 0 falls back to the heavy OpenGlass blur.", L"Clarity", 0.f, 1.f, 0.01f, 0.75f, L"" },
+				{ L"FluidGlassSoftness", L"Blur radius:", L"Blur of the backdrop seen through the glass. 0 is perfectly clear.", L"Softness", 0.f, 20.f, 0.5f, 1.5f, L"px" },
+				{ L"FluidGlassClarity", L"Blur mix:", L"1 uses the blur radius above. 0 falls back to the heavy OpenGlass blur.", L"Clarity", 0.f, 1.f, 0.01f, 0.75f, L"" },
 			} },
 			{ L"Color", {
-				{ L"LiquidGlassChroma", L"Dispersion:", L"Red and blue split at the edges, like a prism.", L"Chroma", 0.f, 0.5f, 0.01f, 0.03f, L"" },
-				{ L"LiquidGlassSaturation", L"Saturation:", L"0 is grayscale, 1 leaves colors unchanged.", L"Saturation", 0.f, 4.f, 0.05f, 1.4f, L"×" },
-				{ L"LiquidGlassReadability", L"Text readability:", L"Darkens backdrops that are too bright for white text.", L"Readability", 0.f, 1.f, 0.01f, 0.5f, L"" },
+				{ L"FluidGlassChroma", L"Dispersion:", L"Red and blue split at the edges, like a prism.", L"Chroma", 0.f, 0.5f, 0.01f, 0.03f, L"" },
+				{ L"FluidGlassSaturation", L"Saturation:", L"0 is grayscale, 1 leaves colors unchanged.", L"Saturation", 0.f, 4.f, 0.05f, 1.4f, L"×" },
+				{ L"FluidGlassReadability", L"Text readability:", L"Darkens backdrops that are too bright for white text.", L"Readability", 0.f, 1.f, 0.01f, 0.5f, L"" },
 			} },
 			{ L"Rim light", {
-				{ L"LiquidGlassRim", L"Rim light:", L"How brightly the edge catches the light.", L"Rim", 0.f, 5.f, 0.05f, 1.f, L"" },
-				{ L"LiquidGlassShine", L"Highlight focus:", L"Higher values narrow the highlight toward the lit corner.", L"Shine", 0.1f, 16.f, 0.1f, 2.f, L"" },
-				{ L"LiquidGlassLight", L"Light direction:", L"Angle of the light. -135 is from the top left.", L"Light", -180.f, 180.f, 1.f, -135.f, L"°" },
+				{ L"FluidGlassRim", L"Rim light:", L"How brightly the edge catches the light.", L"Rim", 0.f, 5.f, 0.05f, 1.f, L"" },
+				{ L"FluidGlassShine", L"Highlight focus:", L"Higher values narrow the highlight toward the lit corner.", L"Shine", 0.1f, 16.f, 0.1f, 2.f, L"" },
+				{ L"FluidGlassLight", L"Light direction:", L"Angle of the light. -135 is from the top left.", L"Light", -180.f, 180.f, 1.f, -135.f, L"°" },
 			} },
 		};
 
-		bool IsLightAngle(const LiquidGlassParameter& parameter)
+		bool IsLightAngle(const FluidGlassParameter& parameter)
 		{
-			return wcscmp(parameter.name, L"LiquidGlassLight") == 0;
+			return wcscmp(parameter.name, L"FluidGlassLight") == 0;
 		}
 
-		DWORD EncodeLiquidGlassValue(const LiquidGlassParameter& parameter, float value)
+		DWORD EncodeFluidGlassValue(const FluidGlassParameter& parameter, float value)
 		{
 			if (IsLightAngle(parameter))
 			{
@@ -72,7 +72,7 @@ namespace OpenGlass
 			return static_cast<DWORD>(std::lround(value * 100.f));
 		}
 
-		float DecodeLiquidGlassValue(const LiquidGlassParameter& parameter, DWORD raw)
+		float DecodeFluidGlassValue(const FluidGlassParameter& parameter, DWORD raw)
 		{
 			float value = static_cast<float>(raw) / 100.f;
 			if (IsLightAngle(parameter))
@@ -87,7 +87,7 @@ namespace OpenGlass
 		}
 
 		// The effective value: HKCU first, then HKLM, as OpenGlass reads it.
-		DWORD ReadLiquidGlassDword(PCWSTR name, DWORD defaultValue)
+		DWORD ReadFluidGlassDword(PCWSTR name, DWORD defaultValue)
 		{
 			wil::unique_hkey userKey{};
 			wil::unique_hkey machineKey{};
@@ -96,17 +96,17 @@ namespace OpenGlass
 			return DwmSettings::GetDword(userKey.get(), machineKey.get(), name, defaultValue);
 		}
 
-		void WriteLiquidGlassDword(PCWSTR name, DWORD value)
+		void WriteFluidGlassDword(PCWSTR name, DWORD value)
 		{
 			RegSetKeyValueW(HKEY_CURRENT_USER, DwmSettings::g_keyPath, name, REG_DWORD, &value, sizeof(value));
 		}
 
-		void NotifyLiquidGlassChange()
+		void NotifyFluidGlassChange()
 		{
 			DwmSettings::NotifyChange(FindWindowW(L"Dwm", nullptr), DwmSettings::UpdateType::Backdrop);
 		}
 
-		wxString FormatLiquidGlassValue(const LiquidGlassParameter& parameter, float value)
+		wxString FormatFluidGlassValue(const FluidGlassParameter& parameter, float value)
 		{
 			const int decimals = parameter.step >= 1.f ? 0 : parameter.step >= 0.1f ? 1 : 2;
 			wxString text = wxString::FromDouble(value, decimals);
@@ -117,35 +117,35 @@ namespace OpenGlass
 			return text;
 		}
 
-		// Apple publishes no numbers for Liquid Glass. These are estimates from how its two variants look:
+		// Apple publishes no numbers for Fluid Glass. These are estimates from how its two variants look:
 		// Clear is nearly unblurred with a bright rim, Regular is frosted with richer color.
-		struct LiquidGlassPreset
+		struct FluidGlassPreset
 		{
 			PCWSTR label;
 			PCWSTR hint;
 			std::vector<std::pair<PCWSTR, float>> values;	// parameters left out take their default
 		};
-		const LiquidGlassPreset c_liquidGlassPresets[]
+		const FluidGlassPreset c_fluidGlassPresets[]
 		{
 			{
 				L"Apple Clear", L"Almost no blur, strong bending at the edge, bright rim.",
 				{
-					{ L"LiquidGlassBezel", 30.f }, { L"LiquidGlassThickness", 40.f }, { L"LiquidGlassSoftness", 0.5f },
-					{ L"LiquidGlassClarity", 1.f }, { L"LiquidGlassChroma", 0.02f }, { L"LiquidGlassSaturation", 1.2f },
-					{ L"LiquidGlassReadability", 0.35f }, { L"LiquidGlassRim", 1.4f }, { L"LiquidGlassShine", 3.f }
+					{ L"FluidGlassBezel", 30.f }, { L"FluidGlassThickness", 40.f }, { L"FluidGlassSoftness", 0.5f },
+					{ L"FluidGlassClarity", 1.f }, { L"FluidGlassChroma", 0.02f }, { L"FluidGlassSaturation", 1.2f },
+					{ L"FluidGlassReadability", 0.35f }, { L"FluidGlassRim", 1.4f }, { L"FluidGlassShine", 3.f }
 				}
 			},
 			{
 				L"Apple Regular", L"Frosted glass with richer color, softer bending.",
 				{
-					{ L"LiquidGlassThickness", 30.f }, { L"LiquidGlassSoftness", 4.f }, { L"LiquidGlassClarity", 0.55f },
-					{ L"LiquidGlassChroma", 0.01f }, { L"LiquidGlassSaturation", 1.8f }, { L"LiquidGlassReadability", 0.6f },
-					{ L"LiquidGlassShine", 2.5f }
+					{ L"FluidGlassThickness", 30.f }, { L"FluidGlassSoftness", 4.f }, { L"FluidGlassClarity", 0.55f },
+					{ L"FluidGlassChroma", 0.01f }, { L"FluidGlassSaturation", 1.8f }, { L"FluidGlassReadability", 0.6f },
+					{ L"FluidGlassShine", 2.5f }
 				}
 			}
 		};
 
-		float GetPresetValue(const LiquidGlassPreset& preset, const LiquidGlassParameter& parameter)
+		float GetPresetValue(const FluidGlassPreset& preset, const FluidGlassParameter& parameter)
 		{
 			for (const auto& [name, value] : preset.values)
 			{
@@ -158,7 +158,7 @@ namespace OpenGlass
 		}
 
 		// User presets live under HKCU, one subkey per name holding the same DWORDs as the DWM key.
-		constexpr PCWSTR c_userPresetsKey = L"Software\\OpenGlass\\LiquidGlassPresets";
+		constexpr PCWSTR c_userPresetsKey = L"Software\\OpenGlass\\FluidGlassPresets";
 
 		std::wstring UserPresetPath(const wxString& name)
 		{
@@ -187,33 +187,33 @@ namespace OpenGlass
 			return names;
 		}
 
-		struct LiquidGlassRow
+		struct FluidGlassRow
 		{
-			const LiquidGlassParameter* parameter;
+			const FluidGlassParameter* parameter;
 			wxSlider* slider;
 			wxStaticText* value;
 		};
 	}
 
-	void MainFrame::CreateLiquidGlassTab()
+	void MainFrame::CreateFluidGlassTab()
 	{
 		wxScrolledWindow* panel = new wxScrolledWindow(m_notebook);
 		panel->SetScrollRate(5, 5);
 		panel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 
-		auto rows = std::make_shared<std::vector<LiquidGlassRow>>();
+		auto rows = std::make_shared<std::vector<FluidGlassRow>>();
 		auto pending = std::make_shared<std::map<std::wstring, DWORD>>();
 		auto* applyTimer = PanelTimer(panel);
 
-		auto* generalGroup = ModernTheme::MakeCard(panel, L"Liquid Glass");
+		auto* generalGroup = ModernTheme::MakeCard(panel, L"Fluid Glass");
 		auto* note = new wxStaticText(panel, wxID_ANY,
 			L"Refraction for the Direct3D renderer. Changes apply instantly and are saved to HKCU, so Save and Revert do not affect them.");
 		note->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
 		note->Wrap(FromDIP(560));
 		generalGroup->Add(note, 0, wxEXPAND | wxALL, 4);
 
-		auto* enabled = new wxCheckBox(panel, wxID_ANY, L"Enable Liquid Glass");
+		auto* enabled = new wxCheckBox(panel, wxID_ANY, L"Enable Fluid Glass");
 		enabled->SetToolTip(L"Turns the refraction effect on or off. Requires the Direct3D renderer.");
 		generalGroup->Add(enabled, 0, wxALL, 4);
 
@@ -231,11 +231,11 @@ namespace OpenGlass
 			generalGroup->Add(row, 0, wxEXPAND | wxALL, 4);
 		}
 
-		std::vector<std::pair<wxButton*, const LiquidGlassPreset*>> presetButtons;
+		std::vector<std::pair<wxButton*, const FluidGlassPreset*>> presetButtons;
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
 			row->Add(new wxStaticText(panel, wxID_ANY, L"Presets:", wxDefaultPosition, FromDIP(wxSize(160, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-			for (const auto& preset : c_liquidGlassPresets)
+			for (const auto& preset : c_fluidGlassPresets)
 			{
 				auto* button = new wxButton(panel, wxID_ANY, preset.label);
 				button->SetToolTip(preset.hint);
@@ -276,7 +276,7 @@ namespace OpenGlass
 		wxFont hintFont = panel->GetFont();
 		hintFont.SetFractionalPointSize(hintFont.GetFractionalPointSize() * 0.9);
 
-		for (const auto& group : c_liquidGlassGroups)
+		for (const auto& group : c_fluidGlassGroups)
 		{
 			auto* groupSizer = ModernTheme::MakeCard(panel, group.title);
 			for (const auto& parameter : group.parameters)
@@ -313,17 +313,17 @@ namespace OpenGlass
 
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
 		auto* resetButton = new wxButton(panel, wxID_ANY, L"Reset to defaults");
-		resetButton->SetToolTip(L"Write the default Liquid Glass values to HKCU and apply them.");
+		resetButton->SetToolTip(L"Write the default Fluid Glass values to HKCU and apply them.");
 		auto* copyButton = new wxButton(panel, wxID_ANY, L"Copy values");
-		copyButton->SetToolTip(L"Copy the current values as set-liquid-glass.ps1 arguments.");
+		copyButton->SetToolTip(L"Copy the current values as set-fluid-glass.ps1 arguments.");
 		buttons->AddStretchSpacer();
 		buttons->Add(resetButton, 0, wxRIGHT, 5);
 		buttons->Add(copyButton, 0);
 		sizer->Add(buttons, 0, wxEXPAND | wxALL, 6);
 
-		auto showValue = [](const LiquidGlassRow& row)
+		auto showValue = [](const FluidGlassRow& row)
 		{
-			row.value->SetLabel(FormatLiquidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step));
+			row.value->SetLabel(FormatFluidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step));
 		};
 
 		auto load = [rows, enabled, profile, showValue]()
@@ -331,12 +331,12 @@ namespace OpenGlass
 			for (auto& row : *rows)
 			{
 				const auto& parameter = *row.parameter;
-				const float value = DecodeLiquidGlassValue(parameter, ReadLiquidGlassDword(parameter.name, EncodeLiquidGlassValue(parameter, parameter.defaultValue)));
+				const float value = DecodeFluidGlassValue(parameter, ReadFluidGlassDword(parameter.name, EncodeFluidGlassValue(parameter, parameter.defaultValue)));
 				row.slider->SetValue(static_cast<int>(std::lround(value / parameter.step)));
 				showValue(row);
 			}
-			enabled->SetValue(ReadLiquidGlassDword(L"LiquidGlass", 0) != 0);
-			profile->SetSelection(static_cast<int>(std::min(ReadLiquidGlassDword(L"LiquidGlassProfile", 0), 2ul)));
+			enabled->SetValue(ReadFluidGlassDword(L"FluidGlass", 0) != 0);
+			profile->SetSelection(static_cast<int>(std::min(ReadFluidGlassDword(L"FluidGlassProfile", 0), 2ul)));
 		};
 		load();
 
@@ -345,7 +345,7 @@ namespace OpenGlass
 			row.slider->Bind(wxEVT_SLIDER, [row, pending, applyTimer, showValue](wxCommandEvent&)
 			{
 				showValue(row);
-				(*pending)[row.parameter->name] = EncodeLiquidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step);
+				(*pending)[row.parameter->name] = EncodeFluidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step);
 				applyTimer->StartOnce(100);
 			});
 		}
@@ -354,37 +354,37 @@ namespace OpenGlass
 		{
 			for (const auto& [name, value] : *pending)
 			{
-				WriteLiquidGlassDword(name.c_str(), value);
+				WriteFluidGlassDword(name.c_str(), value);
 			}
 			pending->clear();
-			NotifyLiquidGlassChange();
-			SetStatusText(L"Liquid Glass: applied " + wxDateTime::Now().FormatISOTime());
+			NotifyFluidGlassChange();
+			SetStatusText(L"Fluid Glass: applied " + wxDateTime::Now().FormatISOTime());
 		}, applyTimer->GetId());
 
 		enabled->Bind(wxEVT_CHECKBOX, [this, enabled](wxCommandEvent&)
 		{
-			WriteLiquidGlassDword(L"LiquidGlass", enabled->GetValue() ? 1 : 0);
-			NotifyLiquidGlassChange();
-			SetStatusText(enabled->GetValue() ? L"Liquid Glass: on" : L"Liquid Glass: off");
+			WriteFluidGlassDword(L"FluidGlass", enabled->GetValue() ? 1 : 0);
+			NotifyFluidGlassChange();
+			SetStatusText(enabled->GetValue() ? L"Fluid Glass: on" : L"Fluid Glass: off");
 		});
 
 		profile->Bind(wxEVT_CHOICE, [this, profile](wxCommandEvent&)
 		{
-			WriteLiquidGlassDword(L"LiquidGlassProfile", static_cast<DWORD>(profile->GetSelection()));
-			NotifyLiquidGlassChange();
-			SetStatusText(L"Liquid Glass: bezel shape applied");
+			WriteFluidGlassDword(L"FluidGlassProfile", static_cast<DWORD>(profile->GetSelection()));
+			NotifyFluidGlassChange();
+			SetStatusText(L"Fluid Glass: bezel shape applied");
 		});
 
 		resetButton->Bind(wxEVT_BUTTON, [this, rows, load](wxCommandEvent&)
 		{
 			for (const auto& row : *rows)
 			{
-				WriteLiquidGlassDword(row.parameter->name, EncodeLiquidGlassValue(*row.parameter, row.parameter->defaultValue));
+				WriteFluidGlassDword(row.parameter->name, EncodeFluidGlassValue(*row.parameter, row.parameter->defaultValue));
 			}
-			WriteLiquidGlassDword(L"LiquidGlassProfile", 0);
-			NotifyLiquidGlassChange();
+			WriteFluidGlassDword(L"FluidGlassProfile", 0);
+			NotifyFluidGlassChange();
 			load();
-			SetStatusText(L"Liquid Glass: defaults applied");
+			SetStatusText(L"Fluid Glass: defaults applied");
 		});
 
 		for (const auto& [button, preset] : presetButtons)
@@ -393,12 +393,12 @@ namespace OpenGlass
 			{
 				for (const auto& row : *rows)
 				{
-					WriteLiquidGlassDword(row.parameter->name, EncodeLiquidGlassValue(*row.parameter, GetPresetValue(*preset, *row.parameter)));
+					WriteFluidGlassDword(row.parameter->name, EncodeFluidGlassValue(*row.parameter, GetPresetValue(*preset, *row.parameter)));
 				}
-				WriteLiquidGlassDword(L"LiquidGlassProfile", 0);
-				NotifyLiquidGlassChange();
+				WriteFluidGlassDword(L"FluidGlassProfile", 0);
+				NotifyFluidGlassChange();
 				load();
-				SetStatusText(wxString(L"Liquid Glass: ") + preset->label + L" applied");
+				SetStatusText(wxString(L"Fluid Glass: ") + preset->label + L" applied");
 			});
 		}
 
@@ -414,7 +414,7 @@ namespace OpenGlass
 
 		saveUserPreset->Bind(wxEVT_BUTTON, [this, rows, profile, refreshUserPresets](wxCommandEvent&)
 		{
-			wxTextEntryDialog dialog(this, L"Name for this preset:", L"Save Liquid Glass preset");
+			wxTextEntryDialog dialog(this, L"Name for this preset:", L"Save Fluid Glass preset");
 			if (dialog.ShowModal() != wxID_OK)
 			{
 				return;
@@ -422,29 +422,29 @@ namespace OpenGlass
 			const wxString name = dialog.GetValue().Strip(wxString::both);
 			if (name.empty() || name.length() > 64 || name.find_first_of(L"\\/") != wxString::npos)
 			{
-				ModernTheme::ShowMessage(L"Use a name of 1 to 64 characters without \\ or /.", L"Save Liquid Glass preset", wxOK | wxICON_WARNING, this);
+				ModernTheme::ShowMessage(L"Use a name of 1 to 64 characters without \\ or /.", L"Save Fluid Glass preset", wxOK | wxICON_WARNING, this);
 				return;
 			}
 			if (ListUserPresets().Index(name, false) != wxNOT_FOUND
-				&& ModernTheme::ShowMessage(L"A preset named \"" + name + L"\" already exists. Replace it?", L"Save Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
+				&& ModernTheme::ShowMessage(L"A preset named \"" + name + L"\" already exists. Replace it?", L"Save Fluid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
 			{
 				return;
 			}
 			wil::unique_hkey key;
 			if (RegCreateKeyExW(HKEY_CURRENT_USER, UserPresetPath(name).c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, key.put(), nullptr) != ERROR_SUCCESS)
 			{
-				SetStatusText(L"Liquid Glass: the preset could not be saved");
+				SetStatusText(L"Fluid Glass: the preset could not be saved");
 				return;
 			}
 			for (const auto& row : *rows)
 			{
-				const DWORD value = EncodeLiquidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step);
+				const DWORD value = EncodeFluidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step);
 				RegSetValueExW(key.get(), row.parameter->name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
 			}
 			const DWORD shape = static_cast<DWORD>(std::max(profile->GetSelection(), 0));
-			RegSetValueExW(key.get(), L"LiquidGlassProfile", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&shape), sizeof(shape));
+			RegSetValueExW(key.get(), L"FluidGlassProfile", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&shape), sizeof(shape));
 			refreshUserPresets(name);
-			SetStatusText(L"Liquid Glass: saved preset " + name);
+			SetStatusText(L"Fluid Glass: saved preset " + name);
 		});
 
 		applyUserPreset->Bind(wxEVT_BUTTON, [this, rows, load, userPresets](wxCommandEvent&)
@@ -453,7 +453,7 @@ namespace OpenGlass
 			wil::unique_hkey key;
 			if (name.empty() || RegOpenKeyExW(HKEY_CURRENT_USER, UserPresetPath(name).c_str(), 0, KEY_READ, key.put()) != ERROR_SUCCESS)
 			{
-				SetStatusText(L"Liquid Glass: the preset could not be read");
+				SetStatusText(L"Fluid Glass: the preset could not be read");
 				return;
 			}
 			const auto read = [&key](PCWSTR value, DWORD fallback)
@@ -463,25 +463,25 @@ namespace OpenGlass
 			};
 			for (const auto& row : *rows)
 			{
-				WriteLiquidGlassDword(row.parameter->name, read(row.parameter->name, EncodeLiquidGlassValue(*row.parameter, row.parameter->defaultValue)));
+				WriteFluidGlassDword(row.parameter->name, read(row.parameter->name, EncodeFluidGlassValue(*row.parameter, row.parameter->defaultValue)));
 			}
-			WriteLiquidGlassDword(L"LiquidGlassProfile", std::min(read(L"LiquidGlassProfile", 0), 2ul));
-			NotifyLiquidGlassChange();
+			WriteFluidGlassDword(L"FluidGlassProfile", std::min(read(L"FluidGlassProfile", 0), 2ul));
+			NotifyFluidGlassChange();
 			load();
-			SetStatusText(L"Liquid Glass: " + name + L" applied");
+			SetStatusText(L"Fluid Glass: " + name + L" applied");
 		});
 
 		deleteUserPreset->Bind(wxEVT_BUTTON, [this, userPresets, refreshUserPresets](wxCommandEvent&)
 		{
 			const wxString name = userPresets->GetStringSelection();
 			if (name.empty()
-				|| ModernTheme::ShowMessage(L"Delete the preset \"" + name + L"\"?", L"Delete Liquid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
+				|| ModernTheme::ShowMessage(L"Delete the preset \"" + name + L"\"?", L"Delete Fluid Glass preset", wxYES_NO | wxICON_QUESTION, this) != wxYES)
 			{
 				return;
 			}
 			RegDeleteTreeW(HKEY_CURRENT_USER, UserPresetPath(name).c_str());
 			refreshUserPresets(wxEmptyString);
-			SetStatusText(L"Liquid Glass: deleted preset " + name);
+			SetStatusText(L"Fluid Glass: deleted preset " + name);
 		});
 
 		userPresets->Bind(wxEVT_CHOICE, [userPresets, applyUserPreset, deleteUserPreset](wxCommandEvent&)
@@ -504,11 +504,11 @@ namespace OpenGlass
 			{
 				wxTheClipboard->SetData(new wxTextDataObject(text));
 				wxTheClipboard->Close();
-				SetStatusText(L"Liquid Glass: values copied");
+				SetStatusText(L"Fluid Glass: values copied");
 			}
 		});
 
 		panel->SetSizer(sizer);
-		m_notebook->AddPage(panel, L"Liquid Glass");
+		m_notebook->AddPage(panel, L"Fluid Glass");
 	}
 }

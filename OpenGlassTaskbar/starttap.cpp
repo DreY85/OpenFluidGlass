@@ -1,4 +1,4 @@
-// Liquid Glass Start menu and Search, inside StartMenuExperienceHost or SearchHost. Loaded by pillhost.exe, attaches as
+// Fluid Glass Start menu and Search, inside StartMenuExperienceHost or SearchHost. Loaded by pillhost.exe, attaches as
 // a XAML diagnostics TAP, swaps the flyout's own acrylic for a clear fill and publishes where the flyout is on screen,
 // so pillhost can keep a glass window under it. While pillhost's glass window is gone (the host stopped, or the
 // setting is off), the original acrylic comes back.

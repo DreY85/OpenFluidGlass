@@ -49,7 +49,7 @@ namespace OpenGlass::AccentOverrider
 	constexpr DWORD AccentFlagPill{ 0x80000000 };
 
 	// Apps that keep their own accent blur while the override is on. Their UI is drawn over a tinted
-	// acrylic, and over clear Liquid Glass it can't be read (ESET's egui.exe). GlassOverrideAccentExclusions
+	// acrylic, and over clear Fluid Glass it can't be read (ESET's egui.exe). GlassOverrideAccentExclusions
 	// lists executable names separated by semicolons; without the value, ESET is excluded.
 	constexpr PCWSTR c_exclusionsValue{ L"GlassOverrideAccentExclusions" };
 	constexpr PCWSTR c_defaultExclusions{ L"egui.exe" };
@@ -188,15 +188,15 @@ HRESULT AccentOverrider::MyCAccent__UpdateSolidFill(
 	// indicates window should transition on maximized, so we can receive colorization updates
 	// this make permanent change to the attribute during its lifetime, until a update to the attribute is made
 	// is there any better way to implement it?
-	// Liquid Glass stays clear while another window is maximized: the Vista transition would
+	// Fluid Glass stays clear while another window is maximized: the Vista transition would
 	// turn the glass opaque black, so it neither asks for the transition nor follows it.
-	if (!Shared::g_liquidGlass.enabled)
+	if (!Shared::g_fluidGlass.enabled)
 	{
 		data->GetClientBlurAttributeReference() |= 8;
 	}
 
 	winrt::com_ptr<uDWM::CSolidColorLegacyMilBrushProxy> effectBrush{ nullptr };
-	const auto maximized = !Shared::g_liquidGlass.enabled && window->TreatAsMaximized(data);
+	const auto maximized = !Shared::g_fluidGlass.enabled && window->TreatAsMaximized(data);
 
 	if (!visual->GetInstructions().views().empty())
 	{

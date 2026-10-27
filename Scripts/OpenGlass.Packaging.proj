@@ -70,13 +70,13 @@
 
   <Target Name="Package" DependsOnTargets="StageSignedFiles;StageUnsignedFiles;RemoveObsoletePackageOutputs">
     <Exec Condition="'$(Configuration)'=='Release'"
-          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenLiquidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
+          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
     <Exec Condition="'$(Configuration)'=='ReleaseSigned'"
-          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(UnsignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenLiquidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
+          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(UnsignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
     <Exec Condition="'$(Configuration)'=='ReleaseSigned'"
-          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenLiquidGlassSetup.Signed &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
+          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup.Signed &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
     <Exec Condition="'$(Configuration)'=='ReleaseSigned' and '$(OpenGlassSignArgs)'!=''"
-          Command="&quot;$(OpenGlassSignTool)&quot; $(OpenGlassSignArgs) &quot;$(InstallerOutput)OpenLiquidGlassSetup.Signed.exe&quot;" />
+          Command="&quot;$(OpenGlassSignTool)&quot; $(OpenGlassSignArgs) &quot;$(InstallerOutput)OpenFluidGlassSetup.Signed.exe&quot;" />
     <Exec WorkingDirectory="$(OpenGlassRoot)"
           Command="&quot;$(OpenGlassPython)&quot; &quot;$(OpenGlassRoot)Scripts\archive_pdbs.py&quot; --configuration $(Configuration) --output &quot;$(SymbolArchive)&quot;" />
   </Target>

@@ -18,8 +18,8 @@ namespace OpenGlass
 		// the DLL's path for turning it on again.
 		constexpr PCWSTR c_folderExtensionKey = L"SOFTWARE\\Classes\\Drive\\shellex\\FolderExtensions\\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}";
 
-		// How the glass looks is set in one place, the Liquid Glass tab. So the library always asks File Explorer for the
-		// Mica backdrop (its effect 2) and lays no tint of its own: Open Liquid Glass then draws File Explorer on the same
+		// How the glass looks is set in one place, the Fluid Glass tab. So the library always asks File Explorer for the
+		// Mica backdrop (its effect 2) and lays no tint of its own: Open Fluid Glass then draws File Explorer on the same
 		// path as every other modern window. Its Blur effect took another path, which came out darker and blurrier than
 		// other windows, and its tint added a milky layer only File Explorer had.
 		// Mica exists only on Windows 11, so Windows 10 keeps the Blur effect (0), the one that works there.
@@ -225,16 +225,16 @@ namespace OpenGlass
 
 		auto* generalGroup = ModernTheme::MakeCard(panel, L"File Explorer glass");
 		auto* note = new wxStaticText(panel, wxID_ANY,
-			L"Makes the content of File Explorer windows (navigation pane and file list) see-through, so Open Liquid Glass draws "
+			L"Makes the content of File Explorer windows (navigation pane and file list) see-through, so Open Fluid Glass draws "
 			L"its glass there too, the same as in every other window. How the glass looks, its blur and colour, is set in the "
-			L"Liquid Glass tab. The options below go to config.ini at once, so Save and Revert do not affect them. "
+			L"Fluid Glass tab. The options below go to config.ini at once, so Save and Revert do not affect them. "
 			L"They are used by File Explorer windows opened afterwards, and Restart Explorer applies them to all.");
 		note->SetForegroundColour(hintColour);
 		note->Wrap(FromDIP(560));
 		generalGroup->Add(note, 0, wxEXPAND | wxALL, 4);
 
 		auto* enabled = new wxCheckBox(panel, wxID_ANY, L"Use ExplorerBlurMica in File Explorer");
-		enabled->SetToolTip(L"Turning it on or off takes effect when Explorer restarts. Needs Open Liquid Glass started as administrator.");
+		enabled->SetToolTip(L"Turning it on or off takes effect when Explorer restarts. Needs Open Fluid Glass started as administrator.");
 		generalGroup->Add(enabled, 0, wxALL, 4);
 
 		wxStaticText* status{};
@@ -259,7 +259,7 @@ namespace OpenGlass
 
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
 		auto* resetButton = new wxButton(panel, wxID_ANY, L"Reset to defaults");
-		resetButton->SetToolTip(L"Write the settings Open Liquid Glass ships with to config.ini.");
+		resetButton->SetToolTip(L"Write the settings Open Fluid Glass ships with to config.ini.");
 		auto* restartButton = new wxButton(panel, wxID_ANY, L"Restart Explorer");
 		restartButton->SetToolTip(L"Closes all File Explorer windows and the taskbar for a moment, then applies the settings everywhere.");
 		buttons->AddStretchSpacer();
@@ -304,10 +304,10 @@ namespace OpenGlass
 		// A write can fail when the settings sit in Program Files and OpenGlass was not started as administrator.
 		auto report = [this](bool ok, const wxString& done)
 		{
-			SetStatusText(ok ? done : wxString(L"File Explorer: could not write config.ini (start Open Liquid Glass as administrator)"));
+			SetStatusText(ok ? done : wxString(L"File Explorer: could not write config.ini (start Open Fluid Glass as administrator)"));
 		};
 
-		// An install from before the look moved to the Liquid Glass tab still has its own effect and tint in config.ini.
+		// An install from before the look moved to the Fluid Glass tab still has its own effect and tint in config.ini.
 		// The status bar is not there yet while the tabs are built, so the result is shown once the window is up.
 		if (!RegisteredLibrary().empty())
 		{
@@ -315,7 +315,7 @@ namespace OpenGlass
 			const bool ok = ApplyManagedLook(ExplorerConfigPath(), changed);
 			if (changed)
 			{
-				CallAfter([report, ok] { report(ok, L"ExplorerBlurMica: the look now follows the Liquid Glass tab, restart Explorer to apply"); });
+				CallAfter([report, ok] { report(ok, L"ExplorerBlurMica: the look now follows the Fluid Glass tab, restart Explorer to apply"); });
 			}
 		}
 
@@ -329,7 +329,7 @@ namespace OpenGlass
 			else
 			{
 				enabled->SetValue(IsLibraryEnabled());
-				SetStatusText(result == ERROR_ACCESS_DENIED ? wxString(L"ExplorerBlurMica: start Open Liquid Glass as administrator to change this")
+				SetStatusText(result == ERROR_ACCESS_DENIED ? wxString(L"ExplorerBlurMica: start Open Fluid Glass as administrator to change this")
 					: result == ERROR_FILE_NOT_FOUND ? wxString(L"ExplorerBlurMica: ExplorerBlurMica.dll was not found")
 					: wxString::Format(L"ExplorerBlurMica: could not change the registration (error %ld)", static_cast<long>(result)));
 			}
@@ -377,7 +377,7 @@ namespace OpenGlass
 					{
 						frame->SetStatusText(
 							result == RestartResult::Restarted ? L"File Explorer: Explorer restarted"
-							: result == RestartResult::NoScript ? L"File Explorer: Restart-Explorer.cmd is missing beside Open Liquid Glass, nothing was restarted"
+							: result == RestartResult::NoScript ? L"File Explorer: Restart-Explorer.cmd is missing beside Open Fluid Glass, nothing was restarted"
 							: result == RestartResult::NotStarted ? L"File Explorer: could not ask Explorer to restart, nothing was restarted"
 							: L"File Explorer: Explorer did not come back (Ctrl+Shift+Esc, Run new task, explorer.exe)");
 					}

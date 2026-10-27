@@ -561,8 +561,8 @@ HRESULT CD3DGlassRealizer::Render(
 	// The compose pass reads the quarter-width buffer up to the refraction reach away, so pass 1 must refresh that
 	// much around the glass as well. It used to refresh only the blur radius: the texels further out kept whatever
 	// glass was last blurred there, an Explorer window dragged past for one, and a caption kept that window's tint
-	// until moving it refreshed them; turning Liquid Glass off and on brought the same tint back.
-	const float pass1Reach = expansion + GetLiquidGlassReach();
+	// until moving it refreshed them; turning Fluid Glass off and on brought the same tint back.
+	const float pass1Reach = expansion + GetFluidGlassReach();
 	const UINT quarterWidth = std::max<UINT>(1u, backBufferDesc.Width >> 2);
 
 	std::vector<BlurVertex> verticesBlur{};
@@ -656,16 +656,16 @@ HRESULT CD3DGlassRealizer::Render(
 		cbPS.color.w = params.color.a;
 	}
 	{
-		const auto& lg = Shared::g_liquidGlass;
-		cbPS.lgRect = { geometryBounds.left, geometryBounds.top, geometryBounds.right, geometryBounds.bottom };
+		const auto& fg = Shared::g_fluidGlass;
+		cbPS.fgRect = { geometryBounds.left, geometryBounds.top, geometryBounds.right, geometryBounds.bottom };
 		// Pass 2 samples the quarter-width buffer: u advances by 0.25 / quarterWidth per back-buffer pixel.
 		// A pill takes its own corner radius; by default more than any glass can hold, which the shader clamps to half the height.
-		cbPS.lgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), params.pill ? lg.pillRadius : lg.radius, lg.enabled ? 1.f : 0.f };
-		cbPS.lgOptics = { lg.ior, lg.bezel, lg.thickness, lg.scale };
-		cbPS.lgLook = { lg.chroma, lg.saturation, lg.readability, lg.gap };
-		cbPS.lgRim = { lg.rim, lg.shine, lg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(lg.profile) };
-		cbPS.lgLimit = { GetLiquidGlassReach(), params.pill ? 1.f : 0.f, 0.f, 0.f };
-		cbPS.lgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), lg.enabled ? lg.clarity : 0.f, lg.softness };
+		cbPS.fgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), params.pill ? fg.pillRadius : fg.radius, fg.enabled ? 1.f : 0.f };
+		cbPS.fgOptics = { fg.ior, fg.bezel, fg.thickness, fg.scale };
+		cbPS.fgLook = { fg.chroma, fg.saturation, fg.readability, fg.gap };
+		cbPS.fgRim = { fg.rim, fg.shine, fg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(fg.profile) };
+		cbPS.fgLimit = { GetFluidGlassReach(), params.pill ? 1.f : 0.f, 0.f, 0.f };
+		cbPS.fgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), fg.enabled ? fg.clarity : 0.f, fg.softness };
 	}
 	if (memcmp(&m_cbPS, &cbPS, sizeof(cbPS)) != 0)
 	{
@@ -715,8 +715,8 @@ HRESULT CD3DGlassRealizer::Render(
 	//
 	// https://github.com/ALTaleX531/OpenGlass/issues/257#issuecomment-3856945555
 	ID3D11ShaderResourceView* pass1InputSRV = backBufferSRV;
-	const bool liquidGlassSharp = Shared::g_liquidGlass.enabled && Shared::g_liquidGlass.clarity > 0.f;
-	if (!pass1InputSRV || liquidGlassSharp)
+	const bool fluidGlassSharp = Shared::g_fluidGlass.enabled && Shared::g_fluidGlass.clarity > 0.f;
+	if (!pass1InputSRV || fluidGlassSharp)
 	{
 		RETURN_IF_FAILED(
 			m_intermediateBuffer.Ensure(
@@ -742,7 +742,7 @@ HRESULT CD3DGlassRealizer::Render(
 		const float copyLeftMargin = pass1Reach + static_cast<float>(m_dwmHwSamples.radius + 1);
 		const float copyRightMargin = pass1Reach + static_cast<float>(m_dwmHwSamples.radius);
 
-		if (liquidGlassSharp)
+		if (fluidGlassSharp)
 		{
 			// Refraction samples the sharp copy anywhere under the glass, not only inside the
 			// rectangles being redrawn, so copy the whole glass plus the blur reach.
@@ -899,7 +899,7 @@ HRESULT CD3DGlassRealizer::Render(
 	{
 		context->OMSetBlendState(m_blendStatePill.get(), nullptr, 0xffffffff);
 	}
-	ID3D11ShaderResourceView* srvsQuarter[] = { m_quarterResBuffer.m_srv.get(), liquidGlassSharp ? m_intermediateBuffer.m_srv.get() : nullptr };
+	ID3D11ShaderResourceView* srvsQuarter[] = { m_quarterResBuffer.m_srv.get(), fluidGlassSharp ? m_intermediateBuffer.m_srv.get() : nullptr };
 	context->PSSetShaderResources(0, 2, srvsQuarter);
 
 	clipRect = ToScissorRect(
@@ -920,22 +920,22 @@ HRESULT CD3DGlassRealizer::Render(
 	return S_OK;
 }
 
-float CD3DGlassRealizer::GetLiquidGlassReach()
+float CD3DGlassRealizer::GetFluidGlassReach()
 {
-	const auto& lg = Shared::g_liquidGlass;
-	if (!lg.enabled)
+	const auto& fg = Shared::g_fluidGlass;
+	if (!fg.enabled)
 	{
 		return 0.f;
 	}
-	return std::ceil(std::min((lg.thickness + lg.gap) * lg.scale, 160.f));
+	return std::ceil(std::min((fg.thickness + fg.gap) * fg.scale, 160.f));
 }
 
 float CD3DGlassRealizer::GetBlurExpansion()
 {
-	// Liquid Glass samples up to its reach plus the blur disc away, so DWM must redraw that much around changes.
-	if (Shared::g_liquidGlass.enabled)
+	// Fluid Glass samples up to its reach plus the blur disc away, so DWM must redraw that much around changes.
+	if (Shared::g_fluidGlass.enabled)
 	{
-		return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f) + GetLiquidGlassReach() + std::ceil(Shared::g_liquidGlass.softness) + 2.f;
+		return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f) + GetFluidGlassReach() + std::ceil(Shared::g_fluidGlass.softness) + 2.f;
 	}
 	// Keep the existing conservative capture margin; the pass-local DWM kernel radius is ceil(σ × 2.3).
 	return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f);
