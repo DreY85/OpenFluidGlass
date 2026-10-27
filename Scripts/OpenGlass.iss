@@ -66,6 +66,7 @@ CloseApplications=yes
 RestartApplications=no
 CloseApplicationsFilter=OpenGlassGUI.exe,OpenGlassHost.exe,pillhost.exe
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile={#MyProjPath}\OpenGlassGUI\Assets\OpenGlass.ico
 UninstallDisplayName=Open Fluid Glass v{#MyAppVersion}
 Uninstallable=yes
 UpdateUninstallLogAppName=yes
