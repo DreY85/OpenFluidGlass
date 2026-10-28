@@ -47,6 +47,15 @@ namespace OpenGlass::GlassKernel
 		{
 			m_flag.set(3, value);
 		}
+		// Light glass: the window draws dark text (GlassKernel::IsLightWindow).
+		bool GetIsLight() const
+		{
+			return m_flag.test(4);
+		}
+		void SetIsLight(bool value)
+		{
+			m_flag.set(4, value);
+		}
 
 		float ToFloat() const
 		{
@@ -86,13 +95,15 @@ namespace OpenGlass::GlassKernel
 	};
 	float GetColorizationOpacity(bool active, bool maximized);
 	D2D1_COLOR_F GetBaseColor(bool opaque, bool maximized);
-	D2D1_COLOR_F GetSourceColor(bool active);
+	bool IsLightWindow(const uDWM::CWindowData* data);
+	D2D1_COLOR_F GetSourceColor(bool active, bool light);
 	CRealizedGlassColorizationParameters RealizeWindowColorization(
 		const D2D1_COLOR_F& baseColor,
 		const D2D1_COLOR_F& srcColor,
 		float colorizationOpacity,
 		bool opaque,
-		bool livePreview
+		bool livePreview,
+		bool light
 	);
 	float GetAdjustedReflectionIntensity(bool active, bool maximized);
 

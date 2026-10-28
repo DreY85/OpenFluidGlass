@@ -662,7 +662,8 @@ HRESULT CD3DGlassRealizer::Render(
 		// A pill takes its own corner radius; by default more than any glass can hold, which the shader clamps to half the height.
 		cbPS.fgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), params.pill ? fg.pillRadius : fg.radius, fg.enabled ? 1.f : 0.f };
 		cbPS.fgOptics = { fg.ior, fg.bezel, fg.thickness, fg.scale };
-		cbPS.fgLook = { fg.chroma, fg.saturation, fg.readability, fg.gap };
+		// Negative readability tells the shader the text is dark, so it lightens dark backdrops instead.
+		cbPS.fgLook = { fg.chroma, fg.saturation, params.light ? -fg.readabilityLight : fg.readability, fg.gap };
 		cbPS.fgRim = { fg.rim, fg.shine, fg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(fg.profile) };
 		cbPS.fgLimit = { GetFluidGlassReach(), params.pill ? 1.f : 0.f, 0.f, 0.f };
 		cbPS.fgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), fg.enabled ? fg.clarity : 0.f, fg.softness };

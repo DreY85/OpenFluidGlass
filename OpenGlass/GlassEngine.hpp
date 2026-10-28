@@ -33,14 +33,10 @@ namespace OpenGlass::GlassEngine
 		return personalize && RegGetValueW(personalize, nullptr, L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size) == ERROR_SUCCESS && light;
 	}
 
-	// Apps in light mode draw dark text and icons, which a dark tint would hide. There the tint keeps its hue but is
-	// lifted most of the way to white. The Windows theme switch sends ImmersiveColorSet, which rereads the colors.
-	inline D2D1_COLOR_F ForAppTheme(D2D1_COLOR_F color) noexcept
+	// Light windows draw dark text and icons, which a dark tint would hide. Behind them the tint keeps its hue but is
+	// lifted most of the way to white.
+	inline D2D1_COLOR_F ForLightWindow(D2D1_COLOR_F color) noexcept
 	{
-		if (!AppsUseLightTheme())
-		{
-			return color;
-		}
 		constexpr float lift = 0.9f;
 		color.r += (1.f - color.r) * lift;
 		color.g += (1.f - color.g) * lift;

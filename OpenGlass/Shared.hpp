@@ -37,7 +37,7 @@ namespace OpenGlass::Shared
 	{
 		bool enabled{ false };
 		float ior{ 1.5f }, bezel{ 26.f }, thickness{ 26.f }, gap{ 0.f }, scale{ 1.f };
-		float chroma{ 0.03f }, saturation{ 1.4f }, readability{ 0.5f };
+		float chroma{ 0.03f }, saturation{ 1.4f }, readability{ 0.5f }, readabilityLight{ 0.8f };
 		float rim{ 1.f }, shine{ 2.f }, lightDegrees{ -135.f }, radius{ 8.f };
 		float pillRadius{ 1000.f };	// corners of pill-marked glass (the floating taskbar); beyond half its height it is fully round
 		float clarity{ 0.75f }, softness{ 1.5f };
@@ -46,6 +46,8 @@ namespace OpenGlass::Shared
 
 	inline D2D1_COLOR_F g_color{};
 	inline D2D1_COLOR_F g_colorInactive{};
+	// Apps in light mode: glass behind a window that did not ask for dark mode turns light (GlassKernel::IsLightWindow).
+	inline bool g_appsUseLightTheme{ false };
 
 	// vista: 1.f
 	// w7: 1.f

@@ -216,18 +216,21 @@ HRESULT AccentOverrider::MyCAccent__UpdateSolidFill(
 					effectBrush.put()
 				)
 			);
+			const bool light = GlassKernel::IsLightWindow(data);
 			auto glassColor = Color::sRGBToscRGB(
 				GlassKernel::RealizeWindowColorization(
 					GlassKernel::GetBaseColor(Shared::IsTransparencyDisabled(), maximized),
-					GlassKernel::GetSourceColor(true),
+					GlassKernel::GetSourceColor(true, light),
 					GlassKernel::GetColorizationOpacity(true, maximized),
 					Shared::IsTransparencyDisabled(),
-					false
+					false,
+					light
 				).GetEffectivescRGBBlendColor(0.f),
 				0.f
 			);
 			GlassKernel::AlphaChannelReinterpreter marker{ true, maximized };
 			marker.SetIsPill((data->GetAccentPolicy()->AccentFlags & AccentFlagPill) != 0);
+			marker.SetIsLight(light);
 			glassColor.a = marker.ToFloat();
 			RETURN_IF_FAILED(effectBrush->Update(1.0, glassColor));
 

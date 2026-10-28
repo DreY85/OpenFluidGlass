@@ -2453,6 +2453,19 @@
       "notes": "CWindowList::SetSystemBackdropType"
     },
     {
+      "name": "CWindowData_GetDarkModeFlags",
+      "id": "CWindowData_GetDarkModeFlags",
+      "kind": "field",
+      "type": "BYTE",
+      "cases": [
+        {
+          "offset": "0x2E5",
+          "otherwise": true
+        }
+      ],
+      "notes": "CWindowList::SetUseDarkModeColors: GetSyncedWindowData, then bit 2 of this byte is set to the new value and\nCWindowData::OnColorizationUpdated runs when it changed. It is DWMWA_USE_IMMERSIVE_DARK_MODE. Verified only on\nuDWM 10.0.26100.1 (26300 sample, PDB GUID 28cf5a3b-d2bc-549f-2f4e-4efcb7fbf89c); consumers gate on build 26100."
+    },
+    {
       "name": "CWindowData_GetWindowDPI",
       "id": "CWindowData_GetWindowDPI",
       "kind": "field",

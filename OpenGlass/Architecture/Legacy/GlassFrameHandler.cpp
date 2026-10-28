@@ -163,15 +163,17 @@ void GlassFrameHandler::MyCGlassColorizationParameters_AdjustWindowColorization(
 {
 	const auto active = (flag & 1) != 0;
 	const auto maximized = GlassKernel::g_window ? GlassKernel::g_window->TreatAsMaximized() : false;
+	const auto light = GlassKernel::IsLightWindow(GlassKernel::g_window ? GlassKernel::g_window->GetData() : nullptr);
 
 	This->color = Color::ToArgb(
 		Color::scRGBTosRGB(
 			GlassKernel::RealizeWindowColorization(
 				GlassKernel::GetBaseColor(Shared::IsTransparencyDisabled(), maximized),
-				GlassKernel::GetSourceColor(active),
+				GlassKernel::GetSourceColor(active, light),
 				GlassKernel::GetColorizationOpacity(active, maximized),
 				Shared::IsTransparencyDisabled(),
-				false
+				false,
+				light
 			).GetEffectivescRGBBlendColor(0.f),
 			0.f
 		)
@@ -293,7 +295,9 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateNCAreaBackground(uDWM::CTopLe
 	if (effectBrush)
 	{
 		auto color = This->GetCaptionColorizationParameters()->getArgbcolor();
-		color.a = GlassKernel::AlphaChannelReinterpreter(active, maximized).ToFloat();
+		GlassKernel::AlphaChannelReinterpreter marker{ active, maximized };
+		marker.SetIsLight(GlassKernel::IsLightWindow(This->GetData()));
+		color.a = marker.ToFloat();
 		RETURN_IF_FAILED(effectBrush->Update(1.0, color));
 	}
 	else if (Shared::g_overrideAccent)
@@ -411,7 +415,9 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateClientBlur(uDWM::CTopLevelWin
 	if (effectBrush)
 	{
 		auto color = This->GetCaptionColorizationParameters()->getArgbcolor();
-		color.a = GlassKernel::AlphaChannelReinterpreter(active, maximized).ToFloat();
+		GlassKernel::AlphaChannelReinterpreter marker{ active, maximized };
+		marker.SetIsLight(GlassKernel::IsLightWindow(This->GetData()));
+		color.a = marker.ToFloat();
 		RETURN_IF_FAILED(effectBrush->Update(1.0, color));
 	}
 	else if (Shared::g_overrideAccent)

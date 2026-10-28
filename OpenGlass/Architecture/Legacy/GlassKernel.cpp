@@ -389,11 +389,15 @@ D2D1_COLOR_F GlassKernel::GetBaseColor(bool opaque, bool maximized)
 
 	return color;
 }
-D2D1_COLOR_F GlassKernel::GetSourceColor(bool active)
+bool GlassKernel::IsLightWindow(const uDWM::CWindowData* data)
+{
+	return Shared::g_appsUseLightTheme && !(data && data->UsesDarkModeColors());
+}
+D2D1_COLOR_F GlassKernel::GetSourceColor(bool active, bool light)
 {
 	if (Shared::g_type == Shared::GlassType::Blur)
 	{
-		const auto& color = active ? Shared::g_color : Shared::g_colorInactive;
+		const auto color = light ? GlassEngine::ForLightWindow(active ? Shared::g_color : Shared::g_colorInactive) : (active ? Shared::g_color : Shared::g_colorInactive);
 		return
 		{
 			color.r,
@@ -404,11 +408,12 @@ D2D1_COLOR_F GlassKernel::GetSourceColor(bool active)
 	}
 	else if (Shared::g_type == Shared::GlassType::Aero)
 	{
+		const auto color = light ? GlassEngine::ForLightWindow(Shared::g_color) : Shared::g_color;
 		return
 		{
-			Shared::g_color.r,
-			Shared::g_color.g,
-			Shared::g_color.b,
+			color.r,
+			color.g,
+			color.b,
 			1.f
 		};
 	}
@@ -469,7 +474,8 @@ GlassKernel::CRealizedGlassColorizationParameters GlassKernel::RealizeWindowColo
 	const D2D1_COLOR_F& srcColor,
 	float colorizationOpacity,
 	bool opaque,
-	bool livePreview
+	bool livePreview,
+	bool light
 )
 {
 	CRealizedGlassColorizationParameters parameters{};
@@ -496,7 +502,7 @@ GlassKernel::CRealizedGlassColorizationParameters GlassKernel::RealizeWindowColo
 		parameters.afterglowBalance = Shared::g_afterglowBalance * (1.f - baseColor.a);
 		parameters.blurBalance = Shared::g_blurBalance * (1.f - baseColor.a);
 
-		parameters.afterglow = Shared::g_afterglow;
+		parameters.afterglow = light ? GlassEngine::ForLightWindow(Shared::g_afterglow) : Shared::g_afterglow;
 		parameters.color = srcColor;
 
 		float colorBalance = Shared::g_colorBalance * colorizationOpacity;
@@ -592,8 +598,10 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		ApplyCornerRadiusToWindowFrames(Shared::g_roundRectRadius);
 		
 		value = GlassEngine::GetOverridableDwordFromRegistry(L"ColorizationColor", L"ColorizationColorOverride", 0xFFFFFFFF);
-		Shared::g_color = GlassEngine::ForAppTheme(Color::FromArgb(value));
-		Shared::g_colorInactive = GlassEngine::ForAppTheme(Color::FromArgb(GlassEngine::GetDwordFromRegistry(L"ColorizationColorInactive", value)));
+		Shared::g_color = Color::FromArgb(value);
+		Shared::g_colorInactive = Color::FromArgb(GlassEngine::GetDwordFromRegistry(L"ColorizationColorInactive", value));
+		// The Windows theme switch sends ImmersiveColorSet, which rereads this.
+		Shared::g_appsUseLightTheme = GlassEngine::AppsUseLightTheme();
 
 		value = GlassEngine::GetDwordFromRegistry(L"ColorizationOpaqueBlendPriority", 0xFFFFFFFF);
 		Shared::g_opaqueBlend = static_cast<int>(GlassEngine::GetDwordFromRegistry(L"ColorizationOpaqueBlend"));
@@ -626,11 +634,10 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		fg.scale = std::clamp(fgValue(L"FluidGlassScale", 1.f), 0.f, 5.f);
 		fg.chroma = std::clamp(fgValue(L"FluidGlassChroma", 0.03f), 0.f, 0.5f);
 		fg.saturation = std::clamp(fgValue(L"FluidGlassSaturation", 1.4f), 0.f, 4.f);
-		// Negative tells the shader the text is dark (light mode), so it lightens dark backgrounds instead. Light mode
-		// has its own, stronger default: glass over a dark wallpaper stayed a dull grey at the dark mode strength.
-		fg.readability = GlassEngine::AppsUseLightTheme() ?
-			-std::clamp(fgValue(L"FluidGlassReadabilityLight", 0.8f), 0.f, 1.f) :
-			std::clamp(fgValue(L"FluidGlassReadability", 0.5f), 0.f, 1.f);
+		fg.readability = std::clamp(fgValue(L"FluidGlassReadability", 0.5f), 0.f, 1.f);
+		// Light windows have their own, stronger default: glass over a dark wallpaper stayed a dull grey at the dark
+		// mode strength.
+		fg.readabilityLight = std::clamp(fgValue(L"FluidGlassReadabilityLight", 0.8f), 0.f, 1.f);
 		fg.rim = std::clamp(fgValue(L"FluidGlassRim", 1.f), 0.f, 5.f);
 		fg.shine = std::clamp(fgValue(L"FluidGlassShine", 2.f), 0.1f, 16.f);
 		fg.lightDegrees = fgValue(L"FluidGlassLight", 360.f - 135.f) - 360.f;

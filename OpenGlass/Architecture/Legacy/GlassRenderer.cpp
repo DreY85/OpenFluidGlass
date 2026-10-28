@@ -416,10 +416,11 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 
 			const auto realizedGlassColorizationParameters = GlassKernel::RealizeWindowColorization(
 				GlassKernel::GetBaseColor(Shared::IsTransparencyDisabled(), maximized),
-				GlassKernel::GetSourceColor(active),
+				GlassKernel::GetSourceColor(active, reinterpreter.GetIsLight()),
 				GlassKernel::GetColorizationOpacity(active, maximized),
 				Shared::IsTransparencyDisabled(),
-				false
+				false,
+				reinterpreter.GetIsLight()
 			);
 			color = realizedGlassColorizationParameters.GetEffectivescRGBBlendColor(sdrBoost);
 			if (!colorSpaceIsScRGB)
@@ -444,6 +445,7 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 				g_params.blurAmount = Shared::g_blurAmount;
 				g_params.optimization = Shared::g_blurOptimization;
 				g_params.pill = reinterpreter.GetIsPill();
+				g_params.light = reinterpreter.GetIsLight();
 				if (colorSpaceIsScRGB)
 				{
 					g_params.color = Color::sRGBToscRGB(realizedGlassColorizationParameters.color, sdrBoost);
@@ -746,7 +748,7 @@ void GlassRenderer::Update(GlassEngine::UpdateType type)
 		Shared::g_glassOpacityInactive = std::clamp(static_cast<float>(GlassEngine::GetDwordFromRegistry(L"GlassOpacityInactive", value)) / 100.f, 0.f, 1.f);
 		
 		value = GlassEngine::GetOverridableDwordFromRegistry(L"ColorizationAfterglow", L"ColorizationAfterglowOverride");
-		Shared::g_afterglow = GlassEngine::ForAppTheme(Color::FromArgb(value));
+		Shared::g_afterglow = Color::FromArgb(value);
 
 		value = GlassEngine::GetOverridableDwordFromRegistry(L"ColorizationBlurBalance", L"ColorizationBlurBalanceOverride");
 		Shared::g_blurBalance = std::clamp(static_cast<float>(value) / 100.f, 0.f, 1.f);

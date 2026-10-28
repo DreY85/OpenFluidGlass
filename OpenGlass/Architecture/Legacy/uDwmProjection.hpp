@@ -725,6 +725,12 @@ namespace OpenGlass::uDWM
 			return *CWindowData_GetSystemBackdropType_Index.address(this);
 		}
 
+		// DWMWA_USE_IMMERSIVE_DARK_MODE as the window set it. Only known on 24H2 and later; earlier builds report false.
+		inline bool UsesDarkModeColors() const
+		{
+			return g_versionInfo.build >= os::build_w11_24h2 && (*CWindowData_GetDarkModeFlags.address(this) & 0x4) != 0;
+		}
+
 		inline UINT GetWindowDPI() const
 		{
 			return *CWindowData_GetWindowDPI.address(this);
