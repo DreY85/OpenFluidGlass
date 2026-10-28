@@ -7,6 +7,7 @@
 #include <ocidl.h>
 #include <xamlOM.h>
 #undef GetCurrentTime	// windows.h macro clashes with C++/WinRT
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -15,8 +16,10 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.h>
+#include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include "pilllog.h"
 #include "pillshare.h"
@@ -163,7 +166,18 @@ namespace
 			m_timer = wux::DispatcherTimer();
 			m_timer.Interval(std::chrono::milliseconds(500));
 			m_iconSize = static_cast<int>(ReadPillSetting(PillIconSize));
-			m_timer.Tick([this](auto&&, auto&&) { m_iconSize = static_cast<int>(ReadPillSetting(PillIconSize)); Update(); });
+			m_style = ReadStyle();
+			m_timer.Tick([this](auto&&, auto&&)
+			{
+				m_iconSize = static_cast<int>(ReadPillSetting(PillIconSize));
+				// A new pill size or radius changes no button, so it would not republish on its own: force it.
+				if (const auto style = ReadStyle(); style != m_style)
+				{
+					m_style = style;
+					m_published = false;
+				}
+				Update();
+			});
 			m_timer.Start();
 			Update();
 		}
@@ -214,6 +228,147 @@ namespace
 			if (element.Opacity() != opacity) element.Opacity(opacity);
 		}
 
+		// Windows draws a square-cornered hover background behind each tray button. On the light glass it showed as a
+		// grey block over the pill. While our pills are up, the tall layers of the tray and app buttons (their
+		// backgrounds, never the icons) get the pill's rounding, and the empty ones, which only paint a background,
+		// are also shrunk to fit inside their pill: the buttons are as tall as the taskbar and reach into the gap
+		// between pills. They follow the pill size and radius settings live.
+		// Everything gets its own corners and size back when the pills go away.
+		struct Rounded
+		{
+			winrt::weak_ref<wux::DependencyObject> node;
+			wux::DependencyProperty property{ nullptr };
+			winrt::Windows::Foundation::IInspectable original, originalTransform;
+			void* key{};
+		};
+
+		static constexpr float HoverInset = 2;	// DIPs between a hover background and the edge of its pill
+
+		static wux::DependencyProperty CornerProperty(const wux::DependencyObject& node)
+		{
+			namespace controls = wux::Controls;
+			if (node.try_as<controls::Border>()) return controls::Border::CornerRadiusProperty();
+			if (node.try_as<controls::ContentPresenter>()) return controls::ContentPresenter::CornerRadiusProperty();
+			if (node.try_as<controls::Control>()) return controls::Control::CornerRadiusProperty();
+			return nullptr;
+		}
+
+		static void Restore(const wux::DependencyObject& node, const wux::DependencyProperty& property, const winrt::Windows::Foundation::IInspectable& original)
+		{
+			if (original == wux::DependencyProperty::UnsetValue()) node.ClearValue(property);
+			else node.SetValue(property, original);
+		}
+
+		// The pill look the hovers follow. The Taskbar tab writes the sizes, the Fluid Glass tab the pill corner radius.
+		struct PillStyle
+		{
+			DWORD height{}, padding{}, gap{}, join{}, radius{};
+			bool operator==(const PillStyle&) const = default;
+		};
+
+		static PillStyle ReadStyle()
+		{
+			// Hundredths of a pixel, like every Fluid Glass value; the default is more than any pill holds, so round ends.
+			DWORD radius = 100000, size = sizeof(radius);
+			RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassPillRadius", RRF_RT_REG_DWORD, nullptr, &radius, &size);
+			return { ReadPillSetting(PillHeight), ReadPillSetting(PillPadding), ReadPillSetting(PillGap), ReadPillSetting(PillJoin), radius };
+		}
+
+		void RoundTray(const wux::DependencyObject& node, int depth, const std::vector<winrt::Windows::Foundation::Rect>& pills, double pillRadius, double minHeight)
+		{
+			const int count = wux::Media::VisualTreeHelper::GetChildrenCount(node);
+			for (int index = 0; index < count; ++index)
+			{
+				const auto child = wux::Media::VisualTreeHelper::GetChild(node, index);
+				const auto element = child.try_as<wux::FrameworkElement>();
+				const auto property = element && element.ActualHeight() >= minHeight ? CornerProperty(child) : nullptr;
+				if (property)
+				{
+					void* const key = winrt::get_abi(child);
+					if (m_roundedNodes.insert(key).second)
+						m_rounded.push_back({ winrt::make_weak(child), property, child.ReadLocalValue(property), child.ReadLocalValue(wux::UIElement::RenderTransformProperty()), key });
+					const auto& rounded = *std::find_if(m_rounded.begin(), m_rounded.end(), [key](const Rounded& r) { return r.key == key; });
+					FitHover(element, property, rounded, wux::Media::VisualTreeHelper::GetChildrenCount(child) == 0, pills, pillRadius);
+				}
+				if (depth > 0) RoundTray(child, depth - 1, pills, pillRadius, minHeight);
+			}
+		}
+
+		// pillRadius is the corner radius of the pills in DIPs. A hover inside keeps the same distance to the pill edge
+		// all around its corners, so it is rounded by that radius less the inset, and never past a capsule.
+		static void FitHover(const wux::FrameworkElement& element, const wux::DependencyProperty& property, const Rounded& rounded, bool empty, const std::vector<winrt::Windows::Foundation::Rect>& pills, double pillRadius)
+		{
+			using winrt::Windows::Foundation::Rect;
+			// Measured without our own transform, which TransformToVisual would include.
+			Restore(element, wux::UIElement::RenderTransformProperty(), rounded.originalTransform);
+			Rect own{};
+			Rect target{};
+			bool fitted = false;
+			if (empty && Bounds(element, own))
+			{
+				const float centerX = own.X + own.Width / 2, centerY = own.Y + own.Height / 2;
+				for (const Rect& pill : pills)
+				{
+					if (centerX < pill.X || centerX > pill.X + pill.Width || centerY < pill.Y || centerY > pill.Y + pill.Height) continue;
+					const float left = (std::max)(own.X, pill.X + HoverInset), top = (std::max)(own.Y, pill.Y + HoverInset);
+					const float right = (std::min)(own.X + own.Width, pill.X + pill.Width - HoverInset), bottom = (std::min)(own.Y + own.Height, pill.Y + pill.Height - HoverInset);
+					if (right - left < 1 || bottom - top < 1) break;
+					target = { left, top, right - left, bottom - top };
+					fitted = true;
+					break;
+				}
+			}
+			double scaleX = 1, scaleY = 1;
+			if (fitted)
+			{
+				scaleX = target.Width / own.Width;
+				scaleY = target.Height / own.Height;
+				wux::Media::MatrixTransform transform;
+				transform.Matrix({ scaleX, 0, 0, scaleY, target.X - own.X, target.Y - own.Y });
+				element.RenderTransform(transform);
+			}
+			// The radius applies before the shrink, so it is scaled back up along the short side.
+			const double width = element.ActualWidth() * scaleX, height = element.ActualHeight() * scaleY;
+			const double shown = (std::min)((std::min)(width, height) / 2, (std::max)(0.0, pillRadius - HoverInset));
+			const double radius = width < height ? shown / scaleX : shown / scaleY;
+			const wux::CornerRadius corners{ radius, radius, radius, radius };
+			if (winrt::unbox_value_or<wux::CornerRadius>(element.GetValue(property), {}) != corners)
+				element.SetValue(property, winrt::box_value(corners));
+		}
+
+		void UnroundTray()
+		{
+			for (const auto& rounded : m_rounded)
+			{
+				const auto node = rounded.node.get();
+				if (!node) continue;
+				Restore(node, rounded.property, rounded.original);
+				Restore(node, wux::UIElement::RenderTransformProperty(), rounded.originalTransform);
+			}
+			m_rounded.clear();
+			m_roundedNodes.clear();
+		}
+
+		// Once per TAP: what the tray and the app buttons are made of, to know which layer draws the hover background.
+		void DumpTray(const wux::DependencyObject& node, int depth, int indent)
+		{
+			const int count = wux::Media::VisualTreeHelper::GetChildrenCount(node);
+			for (int index = 0; index < count; ++index)
+			{
+				const auto child = wux::Media::VisualTreeHelper::GetChild(node, index);
+				const auto element = child.try_as<wux::FrameworkElement>();
+				wchar_t line[256];
+				swprintf_s(line, L"tray %*s%s '%s' %.0fx%.0f children %d", indent * 2, L"", winrt::get_class_name(child).c_str(),
+					element ? element.Name().c_str() : L"", element ? element.ActualWidth() : 0.0, element ? element.ActualHeight() : 0.0,
+					wux::Media::VisualTreeHelper::GetChildrenCount(child));
+				Log(line);
+				if (depth > 0) DumpTray(child, depth - 1, indent + 1);
+			}
+		}
+
+		static constexpr double MinRoundedHeight = 28;	// taller than any tray icon (at most 24), so only backgrounds
+		static constexpr int HoverDepth = 10;	// how deep the button templates go below the tray grid and the app list
+
 		// Bounds of an element on the taskbar, in DIPs; empty when it takes no room.
 		static bool Bounds(const wux::FrameworkElement& element, winrt::Windows::Foundation::Rect& out)
 		{
@@ -235,6 +390,36 @@ namespace
 			bool Empty() const { return end <= start; }
 		};
 
+		// The pills as the host draws them, in DIPs on the taskbar (Layout in pillhost.cpp does the same in pixels):
+		// as tall as the Height setting, centered, Padding beyond the icons and half the Gap between tray and clock.
+		static std::vector<winrt::Windows::Foundation::Rect> Pills(const winrt::Windows::Foundation::Rect& frame, const Span& apps, const Span& tray, const Span& clock, const PillStyle& style)
+		{
+			const double padding = style.padding, halfGap = style.gap / 2.0;
+			const double across = tray.vertical ? frame.Width : frame.Height;
+			const double thickness = (std::min)(static_cast<double>(style.height), across);
+			const double side = (tray.vertical ? frame.X : frame.Y) + (across - thickness) / 2;
+			std::vector<winrt::Windows::Foundation::Rect> pills;
+			const auto add = [&](double start, double end)
+			{
+				if (end <= start) return;
+				if (tray.vertical) pills.push_back({ float(side), float(start), float(thickness), float(end - start) });
+				else pills.push_back({ float(start), float(side), float(end - start), float(thickness) });
+			};
+			if (!apps.Empty()) add(apps.start - padding, apps.end + padding);
+			if (style.join || tray.Empty() || clock.Empty())
+			{
+				const double start = (std::min)(tray.Empty() ? 1e9 : tray.start, clock.Empty() ? 1e9 : clock.start);
+				const double end = (std::max)(tray.Empty() ? -1e9 : tray.end, clock.Empty() ? -1e9 : clock.end);
+				add(start - padding, end + padding / 2);
+			}
+			else
+			{
+				add(tray.start - padding, tray.end - halfGap);
+				add(clock.start + halfGap, clock.end + padding / 2);
+			}
+			return pills;
+		}
+
 		void Update()
 		{
 			try
@@ -245,6 +430,7 @@ namespace
 				SizeIcons(host ? m_iconSize : DefaultIconSize);
 				if (!host || !m_share)
 				{
+					if (!m_rounded.empty()) UnroundTray();
 					m_published = false;
 					return;
 				}
@@ -290,6 +476,18 @@ namespace
 				const RECT next[PillCount]{ toPixels(apps), toPixels(tray), toPixels(clock) };
 
 				if (m_published && memcmp(next, m_last, sizeof(next)) == 0) return;
+				// The buttons changed, the pills just came up or their look changed: the hovers follow the pills again.
+				const auto pills = Pills(frame, apps, tray, clock, m_style);
+				const double pillRadius = m_style.radius / 100.0 / scale;
+				RoundTray(m_trayGrid, HoverDepth, pills, pillRadius, MinRoundedHeight);
+				// App icons can be set larger than the tray's, so a layer has to be taller than the icon to count.
+				RoundTray(m_repeater, HoverDepth, pills, pillRadius, (std::max)(MinRoundedHeight, m_iconSize + 4.0));
+				if (!m_trayDumped)
+				{
+					m_trayDumped = true;
+					DumpTray(m_trayGrid, HoverDepth, 0);
+					DumpTray(m_repeater, HoverDepth, 0);
+				}
 				memcpy(m_last, next, sizeof(next));
 				m_published = true;
 				InterlockedIncrement(&m_share->sequence);
@@ -319,6 +517,10 @@ namespace
 		HANDLE m_mapping{};
 		PillShare* m_share{};
 		RECT m_last[PillCount]{};
+		std::vector<Rounded> m_rounded;
+		std::set<void*> m_roundedNodes;
+		bool m_trayDumped{};
+		PillStyle m_style{};
 	};
 
 	class Factory : public IClassFactory

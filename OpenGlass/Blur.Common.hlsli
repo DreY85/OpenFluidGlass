@@ -212,9 +212,17 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 
 	float luminance = dot(background.rgb, float3(0.2126f, 0.7152f, 0.0722f));
 	background.rgb = max(lerp(luminance.xxx, background.rgb, fgLook.y), 0.0f);
-	// Readability: where the background is too bright for white text, the glass darkens it.
+	// Readability: where the background is too bright for white text, the glass darkens it. A negative value means
+	// dark text (light mode): there the glass lightens a background that is too dark, the mirror of the same rule.
 	luminance = dot(background.rgb, float3(0.2126f, 0.7152f, 0.0722f));
-	background.rgb *= lerp(1.0f, min(1.0f, 0.22f / max(luminance, 1e-3f)), fgLook.z);
+	if (fgLook.z >= 0.0f)
+	{
+		background.rgb *= lerp(1.0f, min(1.0f, 0.22f / max(luminance, 1e-3f)), fgLook.z);
+	}
+	else
+	{
+		background.rgb = 1.0f - (1.0f - background.rgb) * lerp(1.0f, min(1.0f, 0.22f / max(1.0f - luminance, 1e-3f)), -fgLook.z);
+	}
 
 	// Rim light: how steep the bezel is and how much it faces the light.
 	// The opposite edge catches a weaker reflection, like light leaving through the far side.

@@ -746,7 +746,7 @@ void GlassRenderer::Update(GlassEngine::UpdateType type)
 		Shared::g_glassOpacityInactive = std::clamp(static_cast<float>(GlassEngine::GetDwordFromRegistry(L"GlassOpacityInactive", value)) / 100.f, 0.f, 1.f);
 		
 		value = GlassEngine::GetOverridableDwordFromRegistry(L"ColorizationAfterglow", L"ColorizationAfterglowOverride");
-		Shared::g_afterglow = Color::FromArgb(value);
+		Shared::g_afterglow = GlassEngine::ForAppTheme(Color::FromArgb(value));
 
 		value = GlassEngine::GetOverridableDwordFromRegistry(L"ColorizationBlurBalance", L"ColorizationBlurBalanceOverride");
 		Shared::g_blurBalance = std::clamp(static_cast<float>(value) / 100.f, 0.f, 1.f);

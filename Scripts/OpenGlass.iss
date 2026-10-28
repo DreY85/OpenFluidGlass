@@ -25,7 +25,7 @@
 ; ThirdParty\ExplorerBlurMica holds the second (unmodified, with its notice).
 #define TaskbarPath MyProjPath + "\Build\taskbar"
 #define EbmPath MyProjPath + "\ThirdParty\ExplorerBlurMica"
-#if !FileExists(SourcePath + "\" + TaskbarPath + "\pillhost.exe") || !FileExists(SourcePath + "\" + TaskbarPath + "\pilltap.dll") || !FileExists(SourcePath + "\" + TaskbarPath + "\starttap.dll")
+#if !FileExists(SourcePath + "\" + TaskbarPath + "\pillhost.exe") || !FileExists(SourcePath + "\" + TaskbarPath + "\pilltap.dll") || !FileExists(SourcePath + "\" + TaskbarPath + "\starttap.dll") || !FileExists(SourcePath + "\" + TaskbarPath + "\itemglass.dll")
 #error The taskbar is not built. Run OpenGlassTaskbar\build.cmd first.
 #endif
 #if !FileExists(SourcePath + "\" + EbmPath + "\ExplorerBlurMica.dll")
@@ -152,12 +152,13 @@ Source: "{#MyAppBuildPath}\milcomp\OpenGlass.dll"; DestDir: "{app}"; DestName: "
 Source: "{#MyAppBuildPath}\OpenGlassHost.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "{#MyAppBuildPath}\OpenGlassGUI.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 
-; Fluid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll,
-; and Start and Search a copy of starttap.dll.
+; Fluid Glass taskbar. pillhost.exe starts at sign-in and has explorer load a copy of pilltap.dll and of itemglass.dll
+; (File Explorer's hover and selection glass), and Start and Search a copy of starttap.dll.
 ; It works on the XAML taskbar of Windows 11 only, so Windows 10 gets neither the files nor the logon task.
 Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#TaskbarPath}\pilltap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#TaskbarPath}\starttap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
+Source: "{#TaskbarPath}\itemglass.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
 Source: "{#MyProjPath}\Scripts\Restart-Explorer.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -176,6 +177,12 @@ Filename: "{app}\ExplorerBlurMica\config.ini"; Section: "config"; Key: "effect";
 
 [Registry]
 ; What "regsvr32 ExplorerBlurMica.dll" registers: a folder extension that explorer loads into every File Explorer window.
+; The item glass is also a folder extension, so Open and Save dialogs load it. It stays only when the user turns
+; FluidGlassDialogs on in the settings, and explorer refuses the second copy beside the one pillhost loads.
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{31DCA04E-200A-45C4-8969-9FEA9673B3D9}"; ValueType: string; ValueName: ""; ValueData: "Open Fluid Glass item glass"; Flags: uninsdeletekey; Check: IsWindows11
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{31DCA04E-200A-45C4-8969-9FEA9673B3D9}\InProcServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\taskbar\itemglass.dll"; Flags: uninsdeletekey; Check: IsWindows11
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{31DCA04E-200A-45C4-8969-9FEA9673B3D9}\InProcServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Check: IsWindows11
+Root: HKLM; Subkey: "SOFTWARE\Classes\Drive\shellex\FolderExtensions\{{31DCA04E-200A-45C4-8969-9FEA9673B3D9}"; ValueType: dword; ValueName: "DriveMask"; ValueData: "255"; Flags: uninsdeletekey; Check: IsWindows11
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; ValueType: string; ValueName: ""; ValueData: "ExplorerBlurMica DLL"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\ExplorerBlurMica\ExplorerBlurMica.dll"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"
@@ -537,9 +544,9 @@ begin
     'DisableGlassOnBattery', 'DisabledHooks', 'GlassSafetyZoneMode',
     'MINMAXBUTTONGLOWid', 'CLOSEBUTTONGLOWid', 'TOOLCLOSEBUTTONGLOWid',
     'FluidGlass', 'FluidGlassIor', 'FluidGlassBezel', 'FluidGlassThickness', 'FluidGlassGap', 'FluidGlassScale',
-    'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassRim', 'FluidGlassShine',
+    'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassReadabilityLight', 'FluidGlassRim', 'FluidGlassShine',
     'FluidGlassLight', 'FluidGlassRadius', 'FluidGlassPillRadius', 'FluidGlassProfile', 'FluidGlassClarity',
-    'FluidGlassSoftness'
+    'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs'
   ];
 
   DeleteConfigValues(HKEY_CURRENT_USER, 'SOFTWARE\Microsoft\Windows\DWM', OpenGlassKeys);

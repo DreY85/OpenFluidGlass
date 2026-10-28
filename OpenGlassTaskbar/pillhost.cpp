@@ -147,25 +147,12 @@ namespace
 		return false;
 	}
 
-	// Has explorer load a copy of pilltap.dll on a thread of its own, started at LoadLibraryW, which
-	// kernel32 maps at the same address in every process. A hook on the taskbar's thread would wait for
-	// that thread to be free, and while explorer starts, it is busy building the taskbar for seconds.
-	// The TAP drops this load's reference when its attempt ends; a successful attach pins the DLL.
-	void Inject(DWORD pid)
+	// Starts LoadLibraryW(dll) in explorer on a thread of its own and waits up to five seconds for it to return.
+	// False if the thread could not be started.
+	bool LoadIntoExplorer(DWORD pid, const wchar_t* dll)
 	{
-		if (!pid || (!g_staged[0] && !StageTap())) return;
-		wchar_t dll[MAX_PATH];
-		wcscpy_s(dll, g_staged);
-		g_staged[0] = L'\0';
 		const HANDLE explorer = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE, FALSE, pid);
-		if (!explorer) { Log(L"cannot open explorer"); return; }
-		wchar_t name[96];
-		PillEventName(name, pid, L"Done");
-		g_tapDone = CreateEventW(nullptr, TRUE, FALSE, name);
-		PillEventName(name, pid, L"Attached");
-		g_tapAttached = CreateEventW(nullptr, TRUE, FALSE, name);
-		if (g_tapDone) ResetEvent(g_tapDone);
-		if (g_tapAttached) ResetEvent(g_tapAttached);
+		if (!explorer) { Log(L"cannot open explorer"); return false; }
 		const SIZE_T size = (wcslen(dll) + 1) * sizeof(wchar_t);
 		void* remote = VirtualAllocEx(explorer, nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 		const auto load = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryW"));
@@ -176,19 +163,62 @@ namespace
 		}
 		if (thread)
 		{
-			// LoadLibraryW only runs DllMain, which hands the attempt to a thread of the TAP's own.
 			if (WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0) VirtualFreeEx(explorer, remote, 0, MEM_RELEASE);
 			CloseHandle(thread);
-			g_tap = TapState::Waiting;
-			g_tapTime = GetTickCount64();
 		}
 		else
 		{
 			Log(L"cannot start a thread in explorer");
 			if (remote) VirtualFreeEx(explorer, remote, 0, MEM_RELEASE);
-			ReleaseTap();
 		}
 		CloseHandle(explorer);
+		return thread != nullptr;
+	}
+
+	// Has explorer load a copy of pilltap.dll on a thread of its own, started at LoadLibraryW, which
+	// kernel32 maps at the same address in every process. A hook on the taskbar's thread would wait for
+	// that thread to be free, and while explorer starts, it is busy building the taskbar for seconds.
+	// The TAP drops this load's reference when its attempt ends; a successful attach pins the DLL.
+	void Inject(DWORD pid)
+	{
+		if (!pid || (!g_staged[0] && !StageTap())) return;
+		wchar_t dll[MAX_PATH];
+		wcscpy_s(dll, g_staged);
+		g_staged[0] = L'\0';
+		wchar_t name[96];
+		PillEventName(name, pid, L"Done");
+		g_tapDone = CreateEventW(nullptr, TRUE, FALSE, name);
+		PillEventName(name, pid, L"Attached");
+		g_tapAttached = CreateEventW(nullptr, TRUE, FALSE, name);
+		if (g_tapDone) ResetEvent(g_tapDone);
+		if (g_tapAttached) ResetEvent(g_tapAttached);
+		// LoadLibraryW only runs DllMain, which hands the attempt to a thread of the TAP's own.
+		if (LoadIntoExplorer(pid, dll))
+		{
+			g_tap = TapState::Waiting;
+			g_tapTime = GetTickCount64();
+		}
+		else
+		{
+			ReleaseTap();
+		}
+	}
+
+	// File Explorer's item glass (itemglass.cpp) goes into each explorer once, from a copy like the TAP's, so an
+	// update can replace itemglass.dll while explorer holds the copy. The DLL refuses a second load by itself.
+	DWORD g_itemGlassPid{};
+
+	void LoadItemGlass(DWORD pid)
+	{
+		if (!pid || pid == g_itemGlassPid) return;
+		g_itemGlassPid = pid;
+		wchar_t folder[MAX_PATH], tap[MAX_PATH], source[MAX_PATH], copy[MAX_PATH];
+		HostFolder(folder);
+		swprintf_s(source, L"%sitemglass.dll", folder);
+		if (GetFileAttributesW(source) == INVALID_FILE_ATTRIBUTES || !TapFolder(tap)) return;
+		swprintf_s(copy, L"%sitemglass-%llu.dll", tap, GetTickCount64());
+		if (!CopyFileW(source, copy, FALSE)) { Log(L"cannot copy the item glass"); return; }
+		Log(LoadIntoExplorer(pid, copy) ? L"item glass loaded into explorer" : L"cannot load the item glass");
 	}
 
 	// XAML does not list the taskbar's existing elements to the TAP, so the TAP only finds the
@@ -248,7 +278,7 @@ namespace
 			// Once attached, the next wait is for the nudge: just long enough for the TAP to subscribe.
 			g_tapTime = now + (attached ? NudgeDelay : TapRetryDelay);
 			// Refused copies are unloaded by now; the attached one is locked and stays.
-			if (attached) { CleanTapCopies(); g_nudges = 0; g_shellReady = true; }
+			if (attached) { CleanTapCopies(); g_nudges = 0; g_shellReady = true; LoadItemGlass(explorer); }
 		}
 		else if (g_tap == TapState::Attached)
 		{

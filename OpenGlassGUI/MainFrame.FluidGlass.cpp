@@ -50,6 +50,7 @@ namespace OpenGlass
 				{ L"FluidGlassChroma", L"Dispersion:", L"Red and blue split at the edges, like a prism.", L"Chroma", 0.f, 0.5f, 0.01f, 0.03f, L"" },
 				{ L"FluidGlassSaturation", L"Saturation:", L"0 is grayscale, 1 leaves colors unchanged.", L"Saturation", 0.f, 4.f, 0.05f, 1.4f, L"×" },
 				{ L"FluidGlassReadability", L"Text readability:", L"Darkens backdrops that are too bright for white text.", L"Readability", 0.f, 1.f, 0.01f, 0.5f, L"" },
+				{ L"FluidGlassReadabilityLight", L"Readability in light mode:", L"When apps use light mode, lightens backdrops that are too dark for black text.", L"ReadabilityLight", 0.f, 1.f, 0.01f, 0.8f, L"" },
 			} },
 			{ L"Rim light", {
 				{ L"FluidGlassRim", L"Rim light:", L"How brightly the edge catches the light.", L"Rim", 0.f, 5.f, 0.05f, 1.f, L"" },
@@ -217,6 +218,14 @@ namespace OpenGlass
 		enabled->SetToolTip(L"Turns the refraction effect on or off. Requires the Direct3D renderer.");
 		generalGroup->Add(enabled, 0, wxALL, 4);
 
+		auto* items = new wxCheckBox(panel, wxID_ANY, L"Glass hover and selection in File Explorer");
+		items->SetToolTip(L"Replaces the grey hover, selection and tooltips in File Explorer with dark rounded glass tinted with the accent color.");
+		generalGroup->Add(items, 0, wxALL, 4);
+
+		auto* dialogs = new wxCheckBox(panel, wxID_ANY, L"Also in the Open and Save dialogs of other apps");
+		dialogs->SetToolTip(L"Loads the same glass into any app that opens a file dialog. It runs inside that app, so leave it off if an app or game complains about injected code.");
+		generalGroup->Add(dialogs, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
 		wxChoice* profile{};
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
@@ -326,7 +335,7 @@ namespace OpenGlass
 			row.value->SetLabel(FormatFluidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step));
 		};
 
-		auto load = [rows, enabled, profile, showValue]()
+		auto load = [rows, enabled, items, dialogs, profile, showValue]()
 		{
 			for (auto& row : *rows)
 			{
@@ -336,6 +345,8 @@ namespace OpenGlass
 				showValue(row);
 			}
 			enabled->SetValue(ReadFluidGlassDword(L"FluidGlass", 0) != 0);
+			items->SetValue(ReadFluidGlassDword(L"FluidGlassItems", 1) != 0);
+			dialogs->SetValue(ReadFluidGlassDword(L"FluidGlassDialogs", 0) != 0);
 			profile->SetSelection(static_cast<int>(std::min(ReadFluidGlassDword(L"FluidGlassProfile", 0), 2ul)));
 		};
 		load();
@@ -366,6 +377,20 @@ namespace OpenGlass
 			WriteFluidGlassDword(L"FluidGlass", enabled->GetValue() ? 1 : 0);
 			NotifyFluidGlassChange();
 			SetStatusText(enabled->GetValue() ? L"Fluid Glass: on" : L"Fluid Glass: off");
+		});
+
+		// The item glass in explorer reads this value about once a second, so no notification is needed.
+		items->Bind(wxEVT_CHECKBOX, [this, items](wxCommandEvent&)
+		{
+			WriteFluidGlassDword(L"FluidGlassItems", items->GetValue() ? 1 : 0);
+			SetStatusText(items->GetValue() ? L"File Explorer glass: on" : L"File Explorer glass: off");
+		});
+
+		// Read when a dialog loads the glass, and about once a second after that.
+		dialogs->Bind(wxEVT_CHECKBOX, [this, dialogs](wxCommandEvent&)
+		{
+			WriteFluidGlassDword(L"FluidGlassDialogs", dialogs->GetValue() ? 1 : 0);
+			SetStatusText(dialogs->GetValue() ? L"Dialog glass: on for dialogs opened from now on" : L"Dialog glass: off");
 		});
 
 		profile->Bind(wxEVT_CHOICE, [this, profile](wxCommandEvent&)

@@ -592,8 +592,8 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		ApplyCornerRadiusToWindowFrames(Shared::g_roundRectRadius);
 		
 		value = GlassEngine::GetOverridableDwordFromRegistry(L"ColorizationColor", L"ColorizationColorOverride", 0xFFFFFFFF);
-		Shared::g_color = Color::FromArgb(value);
-		Shared::g_colorInactive = Color::FromArgb(GlassEngine::GetDwordFromRegistry(L"ColorizationColorInactive", value));
+		Shared::g_color = GlassEngine::ForAppTheme(Color::FromArgb(value));
+		Shared::g_colorInactive = GlassEngine::ForAppTheme(Color::FromArgb(GlassEngine::GetDwordFromRegistry(L"ColorizationColorInactive", value)));
 
 		value = GlassEngine::GetDwordFromRegistry(L"ColorizationOpaqueBlendPriority", 0xFFFFFFFF);
 		Shared::g_opaqueBlend = static_cast<int>(GlassEngine::GetDwordFromRegistry(L"ColorizationOpaqueBlend"));
@@ -626,7 +626,11 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		fg.scale = std::clamp(fgValue(L"FluidGlassScale", 1.f), 0.f, 5.f);
 		fg.chroma = std::clamp(fgValue(L"FluidGlassChroma", 0.03f), 0.f, 0.5f);
 		fg.saturation = std::clamp(fgValue(L"FluidGlassSaturation", 1.4f), 0.f, 4.f);
-		fg.readability = std::clamp(fgValue(L"FluidGlassReadability", 0.5f), 0.f, 1.f);
+		// Negative tells the shader the text is dark (light mode), so it lightens dark backgrounds instead. Light mode
+		// has its own, stronger default: glass over a dark wallpaper stayed a dull grey at the dark mode strength.
+		fg.readability = GlassEngine::AppsUseLightTheme() ?
+			-std::clamp(fgValue(L"FluidGlassReadabilityLight", 0.8f), 0.f, 1.f) :
+			std::clamp(fgValue(L"FluidGlassReadability", 0.5f), 0.f, 1.f);
 		fg.rim = std::clamp(fgValue(L"FluidGlassRim", 1.f), 0.f, 5.f);
 		fg.shine = std::clamp(fgValue(L"FluidGlassShine", 2.f), 0.1f, 16.f);
 		fg.lightDegrees = fgValue(L"FluidGlassLight", 360.f - 135.f) - 360.f;
