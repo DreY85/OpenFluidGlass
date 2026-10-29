@@ -67,13 +67,13 @@ BEGIN
     BEGIN
         BLOCK "040004b0"
         BEGIN
-            VALUE "CompanyName", "ALTaleX"
-            VALUE "FileDescription", "Aero Glass Extension Loader for Desktop Window Manager"
+            VALUE "CompanyName", "drey85"
+            VALUE "FileDescription", "Open Fluid Glass DWM Extension Loader"
             VALUE "FileVersion", OPENGLASS_PRODUCT_VERSION_STRING
             VALUE "InternalName", "Aero Glass for Win10+"
-            VALUE "LegalCopyright", "Copyright (C) 2024-2026 ALTaleX531"
+            VALUE "LegalCopyright", "Copyright (C) 2024-2026 ALTaleX531, 2026 drey85"
             VALUE "OriginalFilename", "OpenGlassHost.exe"
-            VALUE "ProductName", "OpenGlass"
+            VALUE "ProductName", "Open Fluid Glass"
             VALUE "ProductVersion", OPENGLASS_PRODUCT_VERSION_STRING
         END
     END

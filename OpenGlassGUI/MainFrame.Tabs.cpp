@@ -234,7 +234,7 @@ namespace OpenGlass
 		auto* symbolNoticeContent = new wxBoxSizer(wxVERTICAL);
 		const wxString symbolNoticeText =
 			L"If you experience a DWM crash, open a GitHub issue promptly with the exact Windows build and revision and a full dump. "
-			L"Reddit, Discord, and other third-party posts are not tracked as OpenGlass bug reports.";
+			L"Reddit, Discord, and other third-party posts are not tracked as Open Fluid Glass bug reports.";
 		auto* symbolNoticeLabel = CreateWrappingLabel(symbolNoticePanel, symbolNoticeText);
 		symbolNoticeLabel->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_INFOTEXT));
 		symbolNoticeContent->Add(symbolNoticeLabel, 0, wxEXPAND | wxBOTTOM, 4);
@@ -242,7 +242,7 @@ namespace OpenGlass
 			symbolNoticePanel,
 			wxID_ANY,
 			L"Open a GitHub issue",
-			L"https://github.com/ALTaleX531/OpenGlass/issues/new"
+			L"https://github.com/DreY85/OpenFluidGlass/issues/new"
 		);
 		symbolIssueLink->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_INFOBK));
 		symbolNoticeContent->Add(symbolIssueLink, 0);
