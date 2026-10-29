@@ -187,6 +187,8 @@ namespace
 				HWND window{};
 				if (const auto interop = core.try_as<ICoreWindowInterop>()) interop->get_WindowHandle(&window);
 				m_window = window;
+				// The host knows the window at once, even while the outline is held back (see Publish).
+				if (m_share) m_share->window = reinterpret_cast<UINT64>(window);
 				core.VisibilityChanged([this](auto&&, auto&&) { Wake(L"visibility"); });
 				core.Activated([this](auto&&, auto&&) { Wake(L"activated"); });
 				const auto dispatcher = core.Dispatcher();
@@ -226,7 +228,9 @@ namespace
 				m_glassChecked = now;
 				const HWND glass = FindWindowW(StartGlassClass, nullptr);
 				Restyle(glass != nullptr);
-				m_glassVisible = glass && IsWindowVisible(glass);
+				// The host keeps the glass out and cloaks it while unneeded, so it says in the window's user data
+				// whether the glass shows.
+				m_glassVisible = glass && GetWindowLongPtrW(glass, GWLP_USERDATA) != 0;
 			}
 			RECT menu{};
 			try
@@ -249,6 +253,19 @@ namespace
 				// Once per opening: a menu top still below the screen means we woke before the slide.
 				Log(std::wstring(L"awake by ") + m_wokeBy + L", menu top " + std::to_wstring(menu.top));
 				m_wokeBy = nullptr;
+			}
+			// A fresh Start keeps its menu where it laid it out, on screen, until its first opening is under way, then
+			// drops it below the screen and slides it up from there. Followed before that, the glass came out at the top
+			// before the menu did, so Start's outline counts only once its menu has been seen parked.
+			if (!g_search && !m_parked)
+			{
+				MONITORINFO monitor{ sizeof(monitor) };
+				if (!IsRectEmpty(&menu) && GetMonitorInfoW(MonitorFromRect(&menu, MONITOR_DEFAULTTONEAREST), &monitor) && menu.top >= monitor.rcWork.bottom)
+				{
+					m_parked = true;
+					Log(L"menu parked, the glass follows it from here");
+				}
+				else menu = {};
 			}
 			if (EqualRect(&menu, &m_last) || !m_share)
 			{
@@ -280,6 +297,7 @@ namespace
 		ULONGLONG m_movedAt{};	// last move or wake
 		bool m_glassVisible{};
 		const wchar_t* m_wokeBy{};
+		bool m_parked{};	// Start's menu has been below the screen once
 	};
 
 	class Factory : public IClassFactory

@@ -10,6 +10,7 @@
 #include <tlhelp32.h>
 #include <winternl.h>
 #include <dwmapi.h>
+#include <timeapi.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>

@@ -8,6 +8,43 @@
 namespace StartGlass
 {
 	constexpr ULONGLONG ShellWaitLimit = 30000;	// how long, in ms, Start and Search wait for our TAP in explorer before we load into them
+	// Start's close slide, measured at 75 Hz: from the moment it loses the foreground it eases in as e^(t / 43 ms) and is gone 200 ms in.
+	constexpr double CloseEase = 43.3, CloseLength = 200;
+	// DWM uncloaks Start two frames before its opening starts to slide, and the TAP sees the first frame a frame after it shows.
+	constexpr double OpeningWait = 300;	// how long, in ms, the glass goes by the uncloak alone before it gives up
+	// Start's opening, measured at 75 Hz: how far up the menu is, frame by frame, as a share of the way from where it parks
+	// to where it rests. It runs on the compositor's clock, whatever Start's UI thread does meanwhile.
+	constexpr double OpenCurve[] = { 0, .3916, .5568, .6705, .7558, .8211, .8716, .9116, .9421, .9653, .9821, .9926, .9989, 1 };
+	constexpr double OpenStep = 1000.0 / 75;
+	constexpr double UncloakEarly = 2 * OpenStep;
+	// Filmed, the glass that started 35 ms after Start lost the foreground ran 5 to 20 ms behind its close. Ahead of the
+	// menu the glass leaves it bare, and behind it the glass only shows a little more of itself, so it errs late.
+	constexpr double CloseDelay = 24;
+
+	// While the glass moves with a flyout, the cloak watcher asks four times as often.
+	inline std::atomic<bool> g_watchFast{};
+	// The cloak watcher sets this when a flyout cloaks or uncloaks, so the glass hears of an opening at once.
+	inline const HANDLE g_cloakChanged = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+
+	// How far up Start's opening is, ms into it.
+	inline double OpenShare(double ms)
+	{
+		const double at = ms / OpenStep;
+		if (at <= 0) return 0;
+		const size_t index = static_cast<size_t>(at);
+		if (index + 1 >= std::size(OpenCurve)) return 1;
+		return OpenCurve[index] + (at - index) * (OpenCurve[index + 1] - OpenCurve[index]);
+	}
+
+	// How many ms into Start's opening the menu is this far up.
+	inline double OpenTime(double share)
+	{
+		if (share <= 0) return 0;
+		for (size_t index = 1; index < std::size(OpenCurve); ++index)
+			if (share <= OpenCurve[index])
+				return (index - 1 + (share - OpenCurve[index - 1]) / (OpenCurve[index] - OpenCurve[index - 1])) * OpenStep;
+		return (std::size(OpenCurve) - 1) * OpenStep;
+	}
 
 	struct Surface
 	{
@@ -230,9 +267,9 @@ namespace StartGlass
 				const HWND window = surfaces[index].watched;
 				DWORD cloaked = 1;
 				if (window) DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
-				surfaces[index].cloakState = cloaked;
+				if (surfaces[index].cloakState.exchange(cloaked) != cloaked) SetEvent(g_cloakChanged);
 			}
-			Sleep(16);
+			Sleep(g_watchFast ? 4 : 16);
 		}
 	}
 
@@ -247,6 +284,11 @@ namespace StartGlass
 		DwmSetWindowAttribute(glass, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
 		const BOOL excluded = TRUE;
 		DwmSetWindowAttribute(glass, DWMWA_EXCLUDED_FROM_PEEK, &excluded, sizeof(excluded));
+		// Out for good and cloaked while no flyout needs it: shown from hidden, it came out two frames into the slide.
+		// While Start's menu is parked below the screen, it waits there uncloaked too.
+		const BOOL cloak = TRUE;
+		DwmSetWindowAttribute(glass, DWMWA_CLOAK, &cloak, sizeof(cloak));
+		ShowWindow(glass, SW_SHOWNOACTIVATE);
 		return glass;
 	}
 
@@ -269,12 +311,22 @@ namespace StartGlass
 		std::thread(WatchCloaks, surfaces, std::size(surfaces)).detach();
 
 		HWND glass{};
-		bool shown{}, focused{}, closing{}, met{}, startWasUp{};
+		bool shown{}, focused{}, closing{}, met{}, startWasUp{}, hurried{};
 		DWORD startPid{}, searchPid{};
-		RECT last{};
+		RECT last{}, seen{}, parked{}, rest{}, slideFrom{};
+		LONG step{}, stepBefore{}, slideSeen{};
+		bool fromBelow{};	// the last step came from below every screen
+		bool seenStart{};	// what was last seen was Start's menu, not Search's
+		bool openSeen{};	// the TAP has seen a frame of this opening
+		double seenAt{}, gap{}, gapBefore{}, slideAt{}, anchorAt{}, openAt{};
+		double frame = 1000.0 / 60;	// ms between two frames of the display
 		ULONGLONG settingRead{}, wokeAt{};
+		bool out{};	// uncloaked, on screen or parked below it
 		int lastStirring{};
 		const ULONGLONG began = GetTickCount64();
+		// The glass checked the foreground every 8 ms, so it heard of a close up to 8 ms late. Now a change of foreground
+		// wakes it at once. The hook's message alone wakes the wait, so it does nothing itself.
+		SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, [](HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {}, 0, 0, WINEVENT_OUTOFCONTEXT);
 		for (;;)
 		{
 			MSG message;
@@ -284,9 +336,11 @@ namespace StartGlass
 			if (tick - settingRead >= 500)
 			{
 				settingRead = tick;
+				DWM_TIMING_INFO timing{ sizeof(timing) };
+				if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &timing)) && timing.rateRefresh.uiNumerator) frame = 1000.0 * timing.rateRefresh.uiDenominator / timing.rateRefresh.uiNumerator;
 				const bool enabled = ReadPillSetting(PillStartGlass) != 0;
 				const bool switched = enabled != (glass != nullptr);
-				if (enabled && !glass) { glass = MakeGlass(instance); shown = false; Log(L"start glass: on"); }
+				if (enabled && !glass) { glass = MakeGlass(instance); shown = out = false; last = {}; Log(L"start glass: on"); }
 				else if (!enabled && glass) { DestroyWindow(glass); glass = nullptr; Log(L"start glass: off"); }
 				// Resting TAPs would only swap the acrylic the next time their flyout opens.
 				if (switched) for (const auto& surface : surfaces) if (surface.wake) SetEvent(surface.wake);
@@ -327,30 +381,168 @@ namespace StartGlass
 			else if (start.onScreen) startWasUp = true;
 			else if (startWasUp && search.visible) startShown = false;
 			const bool open = startShown ? start.onScreen : search.visible;
-			// XAML only moves a closing Start menu at the end of its slide, so the glass goes as soon as another window
-			// takes the foreground. Focus moves between Start and Search, and through no window at all, on the way.
+			// Focus moves between Start and Search, and through no window at all, on the way. Once another window has it,
+			// the flyout is closing, and the glass goes, or for Start slides away with it (see below).
+			const RECT& rect = startShown ? start.rect : search.rect;
+			const bool wasClosing = closing;
 			if (!open) focused = closing = false;
 			else if (flyoutFocused) focused = true;
 			else if (focused) closing = true;
-			const RECT& rect = startShown ? start.rect : search.rect;
-			const bool show = open && !closing && met;
-			if (show && (!shown || !EqualRect(&rect, &last)))
+			bool show = open && met && !closing;
+			LARGE_INTEGER counter, frequency;
+			QueryPerformanceFrequency(&frequency);
+			QueryPerformanceCounter(&counter);
+			const double ms = counter.QuadPart * 1000.0 / frequency.QuadPart;
+			// The glass lands a frame after the menu, so while the menu slides it goes where the next frame should put it.
+			// The slides ease in and out, so each step is about the last one times the ratio of the last two, never more
+			// than the last one, both taken per frame, as a step that took two frames overshot. Start's opening always
+			// goes 1104, 732, 575 on a 1080 screen, so its first step from below the screen is followed by one 0.42 as long.
+			// Once no new frame has come for 20 ms, the glass goes where the menu is.
+			// Before the slide the glass may still go by Search, so the first step is taken from where Start was parked.
+			if (start.window && !start.onScreen && !IsRectEmpty(&start.rect)) parked = start.rect;
+			const bool fresh = !EqualRect(&rect, &seen);
+			if (fresh)
 			{
-				SetWindowPos(glass, HWND_TOPMOST, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-				last = rect;
-				shown = true;
+				const auto alongside = [&](const RECT& other) { return rect.left == other.left && rect.right == other.right && rect.bottom - rect.top == other.bottom - other.top; };
+				const bool along = alongside(seen) && seenStart == startShown;
+				fromBelow = startShown && !IsRectEmpty(&parked) && rect.top < parked.top && alongside(parked) && (!along || EqualRect(&seen, &parked));
+				stepBefore = along && !fromBelow ? step : 0;
+				step = fromBelow ? rect.top - parked.top : along ? rect.top - seen.top : 0;
+				gapBefore = gap;
+				gap = fromBelow ? frame : ms - seenAt;
+				seen = rect;
+				seenStart = startShown;
+				seenAt = ms;
 			}
-			else if (!show && shown)
+			if (startShown && start.onScreen && !closing && ms - seenAt > 100) rest = start.rect;
+			RECT place = rect;
+			if (show && step && ms - seenAt < 20)
 			{
-				ShowWindow(glass, SW_HIDE);
-				shown = false;
+				double lead{};
+				const auto perFrame = [&](LONG distance, double took) { return distance / (std::max)(1.0, std::round(took / frame)); };
+				if (stepBefore && (step > 0) == (stepBefore > 0))
+				{
+					const double latest = perFrame(step, gap), earlier = perFrame(stepBefore, gapBefore);
+					lead = latest * (std::min)(1.0, latest / earlier);
+				}
+				else if (fromBelow) lead = step * 0.42;
+				OffsetRect(&place, 0, static_cast<LONG>(std::lround(lead)));
 			}
-			// Both TAPs say the moment their flyout moves, which is also how an opening shows up; while the glass is out,
-			// cloaking and the foreground are checked every 8 ms.
-			HANDLE moved[2];
+			const auto sameSize = [](const RECT& one, const RECT& other) { return one.left == other.left && one.right == other.right && one.bottom - one.top == other.bottom - other.top; };
+			// Uneven gaps between frames made that guess overshoot past where Start rests.
+			if (startShown && !closing && !IsRectEmpty(&rest) && sameSize(place, rest) && place.top < rest.top && rect.top >= rest.top) OffsetRect(&place, 0, rest.top - place.top);
+			// The TAP sees the first frame of an opening a frame late, and up to 100 ms late when the cloak watcher was slow,
+			// so the glass came in 200 px behind. Now the opening's clock starts from the uncloak, which comes two frames
+			// before the slide. Until the TAP sees the menu, the glass goes no further than four frames into the slide.
+			const bool opening = startShown && !start.onScreen && !startWasUp && start.cloaked == 0 && met && flyoutFocused
+				&& !IsRectEmpty(&parked) && !IsRectEmpty(&rest) && sameSize(rest, parked) && rest.top < parked.top;
+			if (opening && !anchorAt) anchorAt = ms;
+			if (opening && ms - anchorAt < OpeningWait)
+			{
+				show = true;
+				const double share = (std::min)(OpenShare(ms + frame - anchorAt - UncloakEarly), OpenCurve[4]);
+				place = parked;
+				OffsetRect(&place, 0, -static_cast<LONG>(std::lround(share * (parked.top - rest.top))));
+			}
+			// The TAP misses frames of Start's opening while the compositor keeps sliding the menu, and the glass that went
+			// back to the last frame the TAP saw dropped 50 to 100 px behind. So the opening has its own clock. The uncloak
+			// starts it, and the first frame the TAP sees sets it right. The TAP is never early, so every later frame can only
+			// set the clock earlier. The glass goes where the next frame should put the menu, never back down, never above
+			// where it rests, never below the TAP.
+			const bool rising = startShown && start.onScreen && !closing && !IsRectEmpty(&rest) && !IsRectEmpty(&parked)
+				&& sameSize(rest, parked) && sameSize(rect, rest) && rest.top < parked.top;
+			if (!rising) openAt = 0, openSeen = false;
+			else
+			{
+				if (!openAt && anchorAt && ms - anchorAt < OpeningWait) openAt = anchorAt + UncloakEarly;
+				if (fresh && rect.top < parked.top && (openAt || fromBelow))
+				{
+					const double at = seenAt - OpenTime(static_cast<double>(parked.top - rect.top) / (parked.top - rest.top));
+					openAt = openSeen ? (std::min)(openAt, at) : at;
+					openSeen = true;
+				}
+			}
+			if (!opening) anchorAt = 0;
+			if (openAt)
+			{
+				LONG top = parked.top - std::lround(OpenShare(ms + frame - openAt) * (parked.top - rest.top));
+				top = (std::min)(top, rect.top);
+				if (sameSize(last, rest)) top = (std::min)(top, last.top);
+				top = (std::max)(top, rest.top);
+				place = rest;
+				OffsetRect(&place, 0, top - rest.top);
+				if (rect.top <= rest.top || ms - openAt > 1000) openAt = 0;
+			}
+			// Start slides its menu away the moment it loses the foreground, mostly while its UI thread is too busy for the
+			// TAP to see it, so the glass that went at once left the menu bare. Now the glass slides away on its own, the way
+			// Start's close goes, a frame ahead, and every frame the TAP does see sets its clock right.
+			if (closing && !wasClosing && shown && startShown && !IsRectEmpty(&parked) && sameSize(last, parked) && last.top < parked.top)
+			{
+				slideAt = ms + CloseDelay;
+				slideFrom = last;
+				slideSeen = start.rect.top;
+			}
+			if (slideAt)
+			{
+				const double travel = parked.top - slideFrom.top;
+				const double grows = std::exp(CloseLength / CloseEase) - 1;
+				if (start.onScreen && start.rect.top != slideSeen && start.rect.top > slideFrom.top && sameSize(start.rect, slideFrom))
+				{
+					slideSeen = start.rect.top;
+					slideAt = ms - CloseEase * std::log(1 + (slideSeen - slideFrom.top) / travel * grows);
+				}
+				const double progress = (std::exp((ms + frame - slideAt) / CloseEase) - 1) / grows;
+				if (now == start.window || start.cloaked || !start.onScreen || progress >= 1) slideAt = 0;
+				else
+				{
+					show = true;
+					place = slideFrom;
+					OffsetRect(&place, 0, static_cast<LONG>(std::lround(progress * travel)));
+					// A late frame of the TAP sets the clock back, but the glass never goes back up.
+					if (place.top < last.top) place = last;
+				}
+			}
+			// While cloaked, the glass waits where Start parks its menu, below the screen, so an opening only moves it.
+			if (!show) place = start.window && !start.onScreen && !IsRectEmpty(&start.rect) ? start.rect : last;
+			if (!IsRectEmpty(&place) && !EqualRect(&place, &last))
+			{
+				SetWindowPos(glass, HWND_TOPMOST, place.left, place.top, place.right - place.left, place.bottom - place.top, SWP_NOACTIVATE);
+				last = place;
+			}
+			// Below every screen the glass can stay uncloaked, so an opening only has to move it.
+			const bool wantOut = show || (!IsRectEmpty(&last) && !MonitorFromRect(&last, MONITOR_DEFAULTTONULL));
+			if (wantOut != out)
+			{
+				const BOOL cloak = !wantOut;
+				DwmSetWindowAttribute(glass, DWMWA_CLOAK, &cloak, sizeof(cloak));
+				out = wantOut;
+			}
+			if (show != shown)
+			{
+				// The TAPs read this to tell whether the glass shows, as the window itself always is out.
+				SetWindowLongPtrW(glass, GWLP_USERDATA, show);
+				shown = show;
+			}
+			// Both TAPs say the moment their flyout moves, and the cloak watcher the moment one uncloaks, which is how an
+			// opening shows up. While the glass is out, or Start or Search holds the foreground, the foreground is checked
+			// every 8 ms, and every 4 ms while the glass moves. Windows wakes a process only every 16 ms unless it asks for
+			// finer timing, so it asks then, and only then. Moving the glass up onto the screen asks for a paint each time,
+			// which woke the wait at once and spun it, so paints wait for the next turn.
+			const bool held = now && (now == start.window || now == search.window);
+			const bool hurry = shown || held || slideAt || anchorAt || openAt;
+			if (hurry != hurried)
+			{
+				if (hurry) timeBeginPeriod(1);
+				else timeEndPeriod(1);
+				hurried = hurry;
+				g_watchFast = hurry;
+			}
+			const bool moving = slideAt || anchorAt || openAt || ms - seenAt < 100;
+			HANDLE moved[3];
 			DWORD count{};
 			for (const auto& surface : surfaces) if (surface.moved) moved[count++] = surface.moved;
-			MsgWaitForMultipleObjects(count, moved, FALSE, shown ? 8 : 50, QS_ALLINPUT);
+			if (g_cloakChanged) moved[count++] = g_cloakChanged;
+			MsgWaitForMultipleObjects(count, moved, FALSE, !hurry ? 50 : moving ? 4 : 8, QS_ALLINPUT & ~QS_PAINT);
 		}
 	}
 }
