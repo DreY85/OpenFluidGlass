@@ -1,6 +1,8 @@
 ; Keep the product identity in one place. The outer doubled braces preserve
 ; the literal GUID braces after the preprocessor expands MyAppId.
-#define MyAppId "{D3D1BC7D-5E24-4B33-9383-7934271A3B05}"
+#define MyAppId "{923303B0-A0A8-4374-9F46-F2A657BFBFAE}"
+; OpenGlass, which this fork started from, installs under this one, and so did the first Fluid Glass builds.
+#define UpstreamAppId "{D3D1BC7D-5E24-4B33-9383-7934271A3B05}"
 #define MyAppName "Open Fluid Glass"
 #ifndef MyAppVersion
 #error MyAppVersion must be supplied by the packaging target
@@ -122,6 +124,7 @@ RestartExplorer=Restart Windows Explorer now to apply the glass effects (the scr
 StartTaskbar=Start the Fluid Glass taskbar now
 InstallingTaskbar=Registering the Fluid Glass taskbar...
 RemovingTaskbar=Removing the Fluid Glass taskbar...
+UpstreamInstalled=OpenGlass, or an early Open Fluid Glass build, is already installed on this PC. The two cannot run together. Uninstall it from Settings > Apps, restart, then run this setup again. To keep your settings, leave the uninstaller's delete options unticked.
 TaskbarTaskFailed=The Fluid Glass taskbar could not be set to start at sign-in. Everything else is installed. You can still start the taskbar from the Taskbar tab in OpenGlass. The setup log has the details.
 
 #if FileExists(CompilerPath + "Languages\\ChineseSimplified.isl")
@@ -340,6 +343,14 @@ function InitializeSetup(): Boolean;
 var
   Version: TWindowsVersion;
 begin
+  if RegKeyExists(HKLM64, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{#UpstreamAppId}_is1') or
+     RegKeyExists(HKLM32, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{#UpstreamAppId}_is1') then
+  begin
+    Log('OpenGlass or an early Fluid Glass build is installed under the upstream AppId; setup stops.');
+    SuppressibleMsgBox(CustomMessage('UpstreamInstalled'), mbError, MB_OK, IDOK);
+    Result := False;
+    Exit;
+  end;
   GetWindowsVersionEx(Version);
   ExplorerBlurMicaTurnedOff :=
     RegKeyExists(HKLM64, 'SOFTWARE\Classes\CLSID\{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}') and

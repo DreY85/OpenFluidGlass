@@ -1,70 +1,85 @@
-![header](assets/banner.png)
+# Open Fluid Glass
 
-# Experience the native Aero Glass interface on Windows 10+
+Open Fluid Glass adds real refraction to Windows. Glass bends what is behind it, like a lens, instead of only blurring it. It is a fork of [OpenGlass](https://github.com/ALTaleX531/OpenGlass) by [ALTaleX](https://github.com/ALTaleX531). All the glass in window frames comes from OpenGlass. This fork adds the refraction and extends it to the taskbar, Start, Search and File Explorer.
 
-OpenGlass restores the full glass effect to window frames, with control over blur, reflections, colorization, caption rendering, and theme integration.
+This is an independent project. It is not made, endorsed or supported by the OpenGlass author, by Microsoft or by Apple. Please report problems with this fork here, not to OpenGlass.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ALTaleX531/OpenGlass)
-[![CI](https://github.com/ALTaleX531/OpenGlass/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/ALTaleX531/OpenGlass/actions/workflows/build.yml)
+## What it adds to OpenGlass
+
+- **Fluid Glass.** A refraction pass in the Direct3D glass shader. You control the bezel, thickness, index of refraction, chromatic edge, clarity, softness, rim light, shine and light angle. Text readability has separate light and dark mode values. The tint of each window follows that window's own light or dark mode.
+- **Floating taskbar.** The Windows 11 taskbar becomes separate glass pills. You can set their height, padding, gap, icon size and corner radius, or join them into one bar.
+- **Start and Search.** Their acrylic is replaced with Fluid Glass that follows the open and close slides.
+- **File Explorer.** The content area turns to glass through the bundled [ExplorerBlurMica](https://github.com/Maplespe/ExplorerBlurMica). Hover, selection and tooltips get glass highlights. The same can be turned on for the Open and Save dialogs of other apps.
+- **A redesigned settings app** with a tab for each of the above and named presets.
 
 ## Supported Windows versions
 
 | Windows version (OS build) | Status |
 | --- | --- |
-| Windows 10 1809–22H2 (17763–19045) | Stable |
-| Windows 11 21H2–25H2 (22000–26200) | Stable |
-| Windows 11 26H2 (26300) | Stable |
-| Windows 11 26H1 (28000) | Experimental |
-| Windows Server 2022 (20348) | Supported |
+| Windows 11 25H2 (26200) | Tested |
+| Windows 11 26H2 (26300) | Tested |
+| Other builds that OpenGlass supports | Not tested |
 
-Only the General Availability releases listed above are supported. Insider builds and other unlisted versions are unsupported. Windows 11 26H1 remains experimental. See [Compatibility and DWM architectures](https://github.com/ALTaleX531/OpenGlass/wiki/Compatibility-and-DWM-architectures) for details.
+Fluid Glass needs the Legacy DWM architecture, which covers builds below 28000. On Windows 11 26H1 (28000) you get plain OpenGlass. The taskbar, Start and Search glass need Windows 11. Insider builds are not supported.
 
-## Quick start
+## Install
 
-1. Download `OpenGlassSetup.exe` from [Releases](https://github.com/ALTaleX531/OpenGlass/releases).
-2. Run the installer, which selects the matching DWM implementation, then open the GUI. It requests administrator rights.
-3. Adjust the appearance. Settings are written immediately; **Save** accepts the changes, while **Revert** or closing the GUI undoes pending changes.
+1. Download `OpenFluidGlassSetup.exe` from [Releases](../../releases).
+2. If OpenGlass is installed, uninstall it first. The two cannot run together, and the setup stops if it finds OpenGlass.
+3. Run the setup. It needs administrator rights. On the last page you can restart Explorer and start the taskbar.
+4. Open **Open Fluid Glass** from the Start menu to adjust the look. Sliders apply at once.
 
-To display changes made outside the GUI, hold <kbd>Shift</kbd> while opening **More**, then choose **Sync**. Save or Revert any pending changes first. Sync reloads settings, the preset library and diagnostics; it never saves or reverts implicitly.
-
-See the [configuration guide](https://github.com/ALTaleX531/OpenGlass/wiki/Configuration-and-registry-reference) and [preset library guide](https://github.com/ALTaleX531/OpenGlass/wiki/Preset-packages) for editing scopes, color options, presets and recovery behavior.
+The setup ships a tuned look as the machine default. Whatever you change in the settings app is saved for your own account and takes priority.
 
 > [!TIP]
-> **Emergency Exit:** Hold <kbd>Ctrl</kbd>+<kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>Q</kbd> to terminate DWM if the system becomes unresponsive.
+> **Emergency exit:** hold <kbd>Ctrl</kbd>+<kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>Q</kbd> to stop DWM if the screen stops responding. Windows starts it again on its own.
 
-OpenGlass is aimed at advanced users who are comfortable troubleshooting DWM. For a simpler alternative, consider [DWMBlurGlass](https://github.com/Maplespe/DWMBlurGlass).
+### Windows SmartScreen and antivirus
 
-## Windows theme integration for developers
+The files are not code signed yet. Windows SmartScreen may show "Windows protected your PC" and an unknown publisher. Choose **More info** and then **Run anyway** if you trust this build. You can also build it yourself from this source.
 
-The theme extension connects Windows theme application and the classic color panel to OpenGlass. It is intended for developers who build and customize it from source. The installer does not include or manage it. See [Windows theme integration](https://github.com/ALTaleX531/OpenGlass/wiki/Windows-theme-integration) for building, manual installation and behavior.
+Some antivirus products may flag the taskbar module. To draw glass behind the taskbar, Start and Search, Open Fluid Glass loads its own code into Explorer and the Start menu host. This is the same method that [TranslucentTB](https://github.com/TranslucentTB/TranslucentTB) uses.
 
-## Reporting issues
+## Privacy
 
-Report bugs in [GitHub Issues](https://github.com/ALTaleX531/OpenGlass/issues/new), with your exact Windows build, OpenGlass version and reproduction steps. For crashes or opaque glass, start with **Diagnostics** and the [troubleshooting guide](https://github.com/ALTaleX531/OpenGlass/wiki/Troubleshooting-and-crash-dumps).
+Open Fluid Glass has no telemetry, no analytics and no accounts. It does not write log files. It never records what you type. The only keys it checks are the emergency exit combination above, plus <kbd>Shift</kbd> when you open the **More** menu of the settings app. It looks at window positions and sizes only to place the glass.
+
+It connects to the internet for one thing only. It downloads public debug symbols for the Windows DWM files (such as `uDWM.dll`) from Microsoft's symbol server (`msdl.microsoft.com`). These tell OpenGlass where to hook into DWM on your Windows build. Nothing about you or your PC is sent, apart from what any download from Microsoft involves.
+
+What it changes on your PC:
+
+- A Windows service that loads the glass into DWM, as OpenGlass does.
+- Settings in `Software\Microsoft\Windows\DWM` and `Software\OpenGlass`, for the machine (`HKLM`) and for each user (`HKCU`).
+- A scheduled task, `FluidGlassTaskbar`, that starts the taskbar at sign-in.
+- A shell extension for ExplorerBlurMica and one for the File Explorer glass highlights.
+- Copies of the taskbar modules in `%LOCALAPPDATA%\OpenGlass\tap`, because Program Files is read-only for normal users.
+
+Uninstalling removes the service, the task and the shell extensions. It asks whether to delete your settings too.
 
 ## Building
 
 ```powershell
 msbuild OpenGlass.slnx /m /restore /p:Configuration=Release /p:Platform=x64
+OpenGlassTaskbar\build.cmd
 ```
 
-See [Building OpenGlass](https://github.com/ALTaleX531/OpenGlass/wiki/Building-OpenGlass) for prerequisites, tests and packaging, and the [Changelog](https://github.com/ALTaleX531/OpenGlass/wiki/Changelog) for technical version changes. CI artifacts are unsigned validation builds, not releases; the developer theme extension DLL and PDB are uploaded separately.
+`OpenGlassTaskbar\build.cmd` calls `vcvars64.bat` from a fixed Visual Studio Build Tools folder. Change that path to match your machine. Run `build.cmd logs` to get diagnostic logs in `%TEMP%`. Released builds never write them. The installer script is `Scripts\OpenGlass.iss` (Inno Setup 6), packed by `Scripts\OpenGlass.Packaging.proj`.
+
+For the OpenGlass core (prerequisites, tests, DWM offsets), see [Building OpenGlass](https://github.com/ALTaleX531/OpenGlass/wiki/Building-OpenGlass) and the rest of the [OpenGlass wiki](https://github.com/ALTaleX531/OpenGlass/wiki).
+
+## License
+
+Open Fluid Glass is released under the GNU General Public License v3, like OpenGlass. See [LICENSE.txt](LICENSE.txt).
+
+[ExplorerBlurMica](https://github.com/Maplespe/ExplorerBlurMica) by Maplespe is bundled unmodified, as a separate library, under the LGPL-3.0. See [ThirdParty/ExplorerBlurMica/NOTICE.txt](ThirdParty/ExplorerBlurMica/NOTICE.txt).
 
 ## Credits
 
-- GUI icon: adapted from Microsoft's [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons), Copyright (c) 2020 Microsoft Corporation, under the [MIT License](OpenGlassGUI/Assets/FluentIcons.LICENSE.txt). [Sources and modifications](OpenGlassGUI/Assets/README.md).
-- [Banner for OpenGlass](https://github.com/ALTaleX531/OpenGlass/discussions/11) by [@aubymori](https://github.com/aubymori), using [metalheart jawn #2](https://www.deviantart.com/kfh83/art/metalheart-jawn-2-1068250045) by [@kfh83](https://github.com/kfh83)
-- [[MS-RDPCR2]: Remote Desktop Protocol: Composited Remoting V2](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpcr2)
-- [KNSoft.SlimDetours](https://github.com/KNSoft/KNSoft.SlimDetours)
-- [VC-LTL](https://github.com/Chuyu-Team/VC-LTL5)
-- [Windows Implementation Libraries](https://github.com/Microsoft/wil)
-- [libvalinet](https://github.com/valinet/libvalinet), whose symbol download work inspired OpenGlass
-- [TranslucentTB](https://github.com/TranslucentTB/TranslucentTB), whose C++ project structure inspired OpenGlass
+- [OpenGlass](https://github.com/ALTaleX531/OpenGlass) by [ALTaleX](https://github.com/ALTaleX531), the base of this project. If you enjoy the glass, consider [supporting its author on Ko-fi](https://ko-fi.com/altalex531).
+- [ExplorerBlurMica](https://github.com/Maplespe/ExplorerBlurMica) by Maplespe, for the File Explorer content area.
+- [TranslucentTB](https://github.com/TranslucentTB/TranslucentTB), whose XAML diagnostics approach showed how to reach the Windows 11 taskbar.
+- [KNSoft.SlimDetours](https://github.com/KNSoft/KNSoft.SlimDetours), [VC-LTL](https://github.com/Chuyu-Team/VC-LTL5) and [Windows Implementation Libraries](https://github.com/Microsoft/wil).
+- [libvalinet](https://github.com/valinet/libvalinet), whose symbol download work inspired OpenGlass.
+- [[MS-RDPCR2]: Remote Desktop Protocol: Composited Remoting V2](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpcr2).
 
-## Support
-
-OpenGlass is developed in spare time and released under the GPLv3. DWM offers no official extension mechanism, so future Windows updates may break OpenGlass, and ongoing support cannot be guaranteed.
-
-If you find OpenGlass valuable, please consider supporting it on Ko-fi. Donations are voluntary, come with no expectation of anything in return, and must be made as a natural person.
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/altalex531)
+DWM has no official extension mechanism. A Windows update can break Open Fluid Glass at any time.
