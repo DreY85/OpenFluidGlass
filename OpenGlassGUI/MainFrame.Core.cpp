@@ -113,7 +113,11 @@ namespace OpenGlass
 		}
 		// The swatch list copies its parent's color only when created.
 		m_colorPresetList->SetBackgroundColour(ModernTheme::Get().card);
-		m_notebook->SetSelection(2);
+		// The app opens on Fluid Glass, the look it is about. Found by name, so the tab order can change.
+		for (size_t page = 0; page < m_notebook->GetPageCount(); ++page)
+		{
+			if (m_notebook->GetPageText(page) == L"Fluid Glass") m_notebook->SetSelection(page);
+		}
 		for (int index = 1; index < wxTheApp->argc; ++index)
 		{
 			long tab{};
