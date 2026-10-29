@@ -145,7 +145,7 @@ namespace OpenGlass
 		wxBoxSizer* btnSizer = new wxBoxSizer(wxHORIZONTAL);
 
 		auto* more = new MoreButton(this, wxID_ANY, L"More \u25B4");
-		more->SetToolTip(L"Merge configuration or restore defaults in the editing scope.");
+		more->SetToolTip(L"Merge configuration, restore defaults in the editing scope, or support the project.");
 		more->Bind(wxEVT_BUTTON, [this, more](wxCommandEvent&)
 		{
 			const bool allowed = m_editScope == Settings::Scope::User || m_isAdmin;
@@ -160,6 +160,8 @@ namespace OpenGlass
 				!allowed ? L"Requires administrator privileges to modify HKLM."
 					: L"Remove this scope's custom settings. Values from the other scope may still apply. Revert can undo this preview.");
 			restore->Enable(allowed);
+			menu.AppendSeparator();
+			auto* support = menu.Append(wxID_ANY, L"Support on Ko-fi...", L"Open ko-fi.com/drey85 in your browser.");
 			wxMenuItem* switchView{};
 			wxMenuItem* sync{};
 			if (wxGetKeyState(WXK_SHIFT))
@@ -176,6 +178,7 @@ namespace OpenGlass
 			const auto selected = more->GetPopupMenuSelectionFromUser(menu, wxPoint(0, 0));
 			if (selected == merge->GetId()) MergeConfiguration();
 			else if (selected == restore->GetId()) RestoreDefaults();
+			else if (selected == support->GetId()) wxLaunchDefaultBrowser(L"https://ko-fi.com/drey85");
 			else if (sync && selected == sync->GetId()) SyncExternalChanges();
 			else if (switchView && selected == switchView->GetId()) SwitchEditingScope();
 		});
