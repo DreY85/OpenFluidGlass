@@ -60,6 +60,10 @@ What it changes on your PC:
 
 Uninstalling removes the service, the task and the shell extensions. It asks whether to delete your settings too.
 
+## Support
+
+Open Fluid Glass is free. If you enjoy it, you can [buy me a coffee on Ko-fi](https://ko-fi.com/drey85). It helps me keep up with new Windows builds.
+
 ## Building
 
 ```powershell
