@@ -12,7 +12,13 @@
 #ifndef SetupName
 #define SetupName "OpenFluidGlassSetup"
 #endif
-#define MyAppSetupName SetupName
+; The dev setup carries the taskbar modules built with logs. It installs over the public one, same AppId.
+#ifdef DevBuild
+#define DevSuffix "-dev"
+#else
+#define DevSuffix ""
+#endif
+#define MyAppSetupName SetupName + DevSuffix
 #define MyProjPath ".."
 #ifndef BuildPath
 #define BuildPath MyProjPath + "\Build\x64\Release"
@@ -30,6 +36,9 @@
 #if !FileExists(SourcePath + "\" + TaskbarPath + "\pillhost.exe") || !FileExists(SourcePath + "\" + TaskbarPath + "\pilltap.dll") || !FileExists(SourcePath + "\" + TaskbarPath + "\starttap.dll") || !FileExists(SourcePath + "\" + TaskbarPath + "\itemglass.dll")
 #error The taskbar is not built. Run OpenGlassTaskbar\build.cmd first.
 #endif
+#if FileExists(SourcePath + "\" + TaskbarPath + "\logs.flag") && !Defined(DevBuild)
+#error The taskbar was built with logs. Run OpenGlassTaskbar\build.cmd without logs, or build the dev setup.
+#endif
 #if !FileExists(SourcePath + "\" + EbmPath + "\ExplorerBlurMica.dll")
 #error ThirdParty\ExplorerBlurMica\ExplorerBlurMica.dll is missing.
 #endif
@@ -38,8 +47,8 @@
 AppId={{#MyAppId}}
 AppName={#MyAppName}
 VersionInfoVersion={#MyAppVersion}
-AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} v{#MyAppVersion}
+AppVersion={#MyAppVersion}{#DevSuffix}
+AppVerName={#MyAppName} v{#MyAppVersion}{#DevSuffix}
 AppPublisher={#MyAppPublisher}
 AppendDefaultDirName=yes
 DefaultDirName={commonpf}\{#MyAppName}
@@ -69,7 +78,7 @@ RestartApplications=no
 CloseApplicationsFilter=OpenGlassGUI.exe,OpenGlassHost.exe,pillhost.exe
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile={#MyProjPath}\OpenGlassGUI\Assets\OpenGlass.ico
-UninstallDisplayName=Open Fluid Glass v{#MyAppVersion}
+UninstallDisplayName=Open Fluid Glass v{#MyAppVersion}{#DevSuffix}
 Uninstallable=yes
 UpdateUninstallLogAppName=yes
 UsePreviousLanguage=yes
@@ -170,6 +179,9 @@ Source: "{#EbmPath}\ExplorerBlurMica.dll"; DestDir: "{app}\ExplorerBlurMica"; Fl
 Source: "{#EbmPath}\config.ini"; DestDir: "{app}\ExplorerBlurMica"; Flags: onlyifdoesntexist
 Source: "{#EbmPath}\ReadMe.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
 Source: "{#EbmPath}\NOTICE.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
+Source: "{#EbmPath}\LICENSE-LGPL-3.0.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
+; The GPL v3 of Open Fluid Glass, which the LGPL above also builds on.
+Source: "{#MyProjPath}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [INI]
 ; The look is set in the Fluid Glass tab, so ExplorerBlurMica only clears File Explorer's background (the GUI keeps

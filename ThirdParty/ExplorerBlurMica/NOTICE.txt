@@ -8,8 +8,11 @@ published in the official Release_x64.zip of version 2.1.0.
   License:                  GNU Lesser General Public License, version 3 (LGPL-3.0)
   SHA-256 of the DLL:       36b44444fc8ae1c4fdc3a80cdc6b0c0a04cc843984189c17dadf964bcaa9f052
 
+The full LGPL-3.0 text is in LICENSE-LGPL-3.0.txt in this folder. It adds permissions to the GNU General
+Public License, version 3, whose text is LICENSE.txt in the Open Fluid Glass folder.
+
 It clears the background of the File Explorer content area (navigation pane and file list) so the glass
-behind the window shows through, which OpenGlass then turns into Liquid Glass. OpenGlass loads it as
+behind the window shows through, which Open Fluid Glass then turns into Fluid Glass. Open Fluid Glass loads it as
 a separate library (a shell extension registered by the installer) and does not link it into any of its
 own programs. You may replace ExplorerBlurMica.dll with your own build of the same source: stop
 Explorer, copy the file over, and start Explorer again.

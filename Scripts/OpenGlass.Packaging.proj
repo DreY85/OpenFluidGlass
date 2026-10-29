@@ -7,6 +7,7 @@
     <Platform>x64</Platform>
     <BuildDependencies Condition="'$(BuildDependencies)'==''">true</BuildDependencies>
     <OpenGlassIsccTool Condition="'$(OpenGlassIsccTool)'==''">ISCC.exe</OpenGlassIsccTool>
+    <OpenGlassIsccDefines Condition="'$(OpenGlassDevBuild)'=='true'">/DDevBuild</OpenGlassIsccDefines>
     <OpenGlassPython Condition="'$(OpenGlassPython)'==''">python</OpenGlassPython>
     <OpenGlassSignTool Condition="'$(OpenGlassSignTool)'==''">signtool.exe</OpenGlassSignTool>
     <OpenGlassRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</OpenGlassRoot>
@@ -70,11 +71,11 @@
 
   <Target Name="Package" DependsOnTargets="StageSignedFiles;StageUnsignedFiles;RemoveObsoletePackageOutputs">
     <Exec Condition="'$(Configuration)'=='Release'"
-          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
+          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) $(OpenGlassIsccDefines) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
     <Exec Condition="'$(Configuration)'=='ReleaseSigned'"
-          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(UnsignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
+          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) $(OpenGlassIsccDefines) /DBuildPath=&quot;$(UnsignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
     <Exec Condition="'$(Configuration)'=='ReleaseSigned'"
-          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup.Signed &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
+          Command="&quot;$(OpenGlassIsccTool)&quot; /DMyAppVersion=$(OpenGlassProductVersion) $(OpenGlassIsccDefines) /DBuildPath=&quot;$(SignedStage)&quot; /DOutputPath=&quot;$(InstallerOutput)&quot; /DSetupName=OpenFluidGlassSetup.Signed &quot;$(OpenGlassRoot)Scripts\OpenGlass.iss&quot;" />
     <Exec Condition="'$(Configuration)'=='ReleaseSigned' and '$(OpenGlassSignArgs)'!=''"
           Command="&quot;$(OpenGlassSignTool)&quot; $(OpenGlassSignArgs) &quot;$(InstallerOutput)OpenFluidGlassSetup.Signed.exe&quot;" />
     <Exec WorkingDirectory="$(OpenGlassRoot)"

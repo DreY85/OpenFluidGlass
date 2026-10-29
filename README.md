@@ -71,7 +71,7 @@ For the OpenGlass core (prerequisites, tests, DWM offsets), see [Building OpenGl
 
 Open Fluid Glass is released under the GNU General Public License v3, like OpenGlass. See [LICENSE.txt](LICENSE.txt).
 
-[ExplorerBlurMica](https://github.com/Maplespe/ExplorerBlurMica) by Maplespe is bundled unmodified, as a separate library, under the LGPL-3.0. See [ThirdParty/ExplorerBlurMica/NOTICE.txt](ThirdParty/ExplorerBlurMica/NOTICE.txt).
+[ExplorerBlurMica](https://github.com/Maplespe/ExplorerBlurMica) by Maplespe is bundled unmodified, as a separate library, under the LGPL-3.0. See [ThirdParty/ExplorerBlurMica/NOTICE.txt](ThirdParty/ExplorerBlurMica/NOTICE.txt) and the full [LGPL-3.0 text](ThirdParty/ExplorerBlurMica/LICENSE-LGPL-3.0.txt).
 
 ## Credits
 
