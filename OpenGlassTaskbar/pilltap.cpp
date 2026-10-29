@@ -270,7 +270,12 @@ namespace
 		{
 			// Hundredths of a pixel, like every Fluid Glass value; the default is more than any pill holds, so round ends.
 			DWORD radius = 100000, size = sizeof(radius);
-			RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassPillRadius", RRF_RT_REG_DWORD, nullptr, &radius, &size);
+			// The user's own value first, then the standard one the installer wrote for the machine.
+			if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassPillRadius", RRF_RT_REG_DWORD, nullptr, &radius, &size) != ERROR_SUCCESS)
+			{
+				size = sizeof(radius);
+				RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassPillRadius", RRF_RT_REG_DWORD, nullptr, &radius, &size);
+			}
 			return { ReadPillSetting(PillHeight), ReadPillSetting(PillPadding), ReadPillSetting(PillGap), ReadPillSetting(PillJoin), radius };
 		}
 

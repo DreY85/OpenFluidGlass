@@ -305,8 +305,13 @@ namespace
 
 	bool ReadSwitch(const wchar_t* name, DWORD fallback)
 	{
+		// The user's own value first, then the standard one the installer wrote for the machine.
 		DWORD value = fallback, size = sizeof(value);
-		RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size);
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS)
+		{
+			size = sizeof(value);
+			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size);
+		}
 		return value != 0;
 	}
 

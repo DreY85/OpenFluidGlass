@@ -187,6 +187,37 @@ Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\ExplorerBlurMica\ExplorerBlurMica.dll"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}\InProcServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"
 Root: HKLM; Subkey: "SOFTWARE\Classes\Drive\shellex\FolderExtensions\{{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; ValueType: dword; ValueName: "DriveMask"; ValueData: "255"; Flags: uninsdeletekey; Check: ShouldEnableExplorerBlurMica
+; The standard look, as machine values: DWM and the GUI read HKCU first, so whatever a user sets wins.
+; Existing machine values are kept, so an update never resets them.
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlass"; ValueData: "1"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassBezel"; ValueData: "10000"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassThickness"; ValueData: "4500"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassScale"; ValueData: "150"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassIor"; ValueData: "150"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassGap"; ValueData: "3500"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassRadius"; ValueData: "800"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassPillRadius"; ValueData: "1200"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassSoftness"; ValueData: "150"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassClarity"; ValueData: "10"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassChroma"; ValueData: "33"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassSaturation"; ValueData: "120"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassReadability"; ValueData: "35"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassReadabilityLight"; ValueData: "40"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassRim"; ValueData: "140"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassShine"; ValueData: "300"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassLight"; ValueData: "58500"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassProfile"; ValueData: "0"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassDialogs"; ValueData: "1"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "GlassOpacity"; ValueData: "31"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "ColorizationColorOverride"; ValueData: "$C4000000"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "ColorizationAfterglowOverride"; ValueData: "$C4000000"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "ColorizationColorBalanceOverride"; ValueData: "5"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "ColorizationAfterglowBalanceOverride"; ValueData: "32"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "ColorizationBlurBalanceOverride"; ValueData: "63"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "TextGlowMode"; ValueData: "3"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "CaptionTextBold"; ValueData: "1"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "GlassOverrideAccent"; ValueData: "1"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "UseDirect3DRendering"; ValueData: "1"; Flags: createvalueifdoesntexist
 
 [Dirs]
 ; Mutable application data and immutable preset deployments live outside the installation directory.
@@ -540,7 +571,7 @@ begin
     'ColorizationGlassReflectionParallaxIntensity', 'ColorizationGlassReflectionPolicy',
     'BlurDeviation', 'BlurOptimization', 'RoundRectRadius',
     'CustomThemeMaterial', 'MaterialOpacity', 'UseDirect3DRendering',
-    'CaptionButtons', 'CenterCaption', 'TextGlowMode', 'CustomThemeAtlas', 'DisableModernBorders',
+    'CaptionButtons', 'CenterCaption', 'CaptionTextBold', 'TextGlowMode', 'CustomThemeAtlas', 'DisableModernBorders',
     'DisableGlassOnBattery', 'DisabledHooks', 'GlassSafetyZoneMode',
     'MINMAXBUTTONGLOWid', 'CLOSEBUTTONGLOWid', 'TOOLCLOSEBUTTONGLOWid',
     'FluidGlass', 'FluidGlassIor', 'FluidGlassBezel', 'FluidGlassThickness', 'FluidGlassGap', 'FluidGlassScale',
