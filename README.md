@@ -2,7 +2,7 @@
 
 Open Fluid Glass adds real refraction to Windows. Glass bends what is behind it, like a lens, instead of only blurring it, with low resource consumption. It is a fork of [OpenGlass](https://github.com/ALTaleX531/OpenGlass) by [ALTaleX](https://github.com/ALTaleX531). OpenGlass hooks into DWM and draws the glass in window frames, and this fork adds the refraction to it. File Explorer turns to glass through the bundled [ExplorerBlurMica](https://github.com/Maplespe/ExplorerBlurMica) by Maplespe. The fork brings the refraction there too, and to the taskbar, Start and Search.
 
-This is an independent project. It is not made, endorsed or supported by the OpenGlass author, by Microsoft or by Apple. Please report problems with this fork here, not to OpenGlass.
+This is an independent project. It is not made, endorsed or supported by the OpenGlass author. Please report problems with this fork here, not to OpenGlass.
 
 | Dark mode | Light mode |
 | --- | --- |
