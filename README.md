@@ -4,6 +4,10 @@ Open Fluid Glass adds real refraction to Windows. Glass bends what is behind it,
 
 This is an independent project. It is not made, endorsed or supported by the OpenGlass author, by Microsoft or by Apple. Please report problems with this fork here, not to OpenGlass.
 
+| Dark mode | Light mode |
+| --- | --- |
+| ![File Explorer in dark mode with Fluid Glass, over a colorful wallpaper, and the floating glass taskbar](docs/screenshots/fluid-glass-dark.jpg) | ![The same File Explorer window in light mode with Fluid Glass](docs/screenshots/fluid-glass-light.jpg) |
+
 ## What it adds to OpenGlass
 
 - **Fluid Glass.** A refraction pass in the Direct3D glass shader. You control the bezel, thickness, index of refraction, chromatic edge, clarity, softness, rim light, shine and light angle. Text readability has separate light and dark mode values. The tint of each window follows that window's own light or dark mode.
