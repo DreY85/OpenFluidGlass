@@ -62,7 +62,9 @@ Uninstalling removes the service, the task and the shell extensions. It asks whe
 
 ## Support
 
-Open Fluid Glass is free. If you enjoy it, you can [buy me a coffee on Ko-fi](https://ko-fi.com/drey85). It helps me keep up with new Windows builds.
+Open Fluid Glass is free. If you enjoy it, you can buy me a coffee on Ko-fi. It helps me keep up with new Windows builds.
+
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/drey85)
 
 ## Building
 
