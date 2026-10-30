@@ -10,7 +10,7 @@ This is an independent project. It is not made, endorsed or supported by the Ope
 
 ## What it adds to OpenGlass
 
-- **Fluid Glass.** A refraction pass in the Direct3D glass shader. You control the bezel, thickness, index of refraction, chromatic edge, clarity, softness, rim light, shine and light angle. Text readability has separate light and dark mode values. The tint of each window follows that window's own light or dark mode.
+- **Fluid Glass.** A refraction pass in the Direct3D glass shader. You control the bezel, thickness, index of refraction, dispersion, clarity, softness, rim light, shine and light angle. Text readability has separate light and dark mode values. The tint of each window follows that window's own light or dark mode.
 - **Floating taskbar.** The Windows 11 taskbar becomes separate glass pills. You can set their height, padding, gap, icon size and corner radius, or join them into one bar.
 - **Start and Search.** Their acrylic is replaced with Fluid Glass that follows the open and close slides.
 - **File Explorer.** The content area turns to glass through the bundled [ExplorerBlurMica](https://github.com/Maplespe/ExplorerBlurMica). Hover, selection and tooltips get glass highlights. The same can be turned on for the Open and Save dialogs of other apps.
