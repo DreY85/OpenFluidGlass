@@ -750,13 +750,21 @@ namespace
 		return true;
 	}
 
-	// The first shown window above this one, or the expected one itself. Explorer keeps slipping hidden, empty windows
-	// in under the taskbar (ForegroundStaging as Start opens, an ATL helper), and putting a pill back above them
-	// cost a SetWindowPos every tick for as long as that lasted, for nothing on screen.
-	HWND ShownAbove(HWND window, HWND expected)
+	// The first window above this one that shows over its place, or the expected one itself. Explorer keeps slipping
+	// windows in under the taskbar that put nothing there: hidden ones (ForegroundStaging as Start opens, an ATL helper)
+	// and a cloaked 1x1 one in the screen corner (ThumbnailDeviceHelperWnd, from the taskbar previews). Putting a pill
+	// back above them cost a SetWindowPos every tick for as long as that lasted, once for 18 minutes.
+	HWND ShownAbove(HWND window, const RECT& place, HWND expected)
 	{
+		const auto inTheWay = [&place](HWND above)
+		{
+			RECT rect{}, overlap{};
+			DWORD cloaked{};
+			return IsWindowVisible(above) && GetWindowRect(above, &rect) && IntersectRect(&overlap, &rect, &place)
+				&& !(SUCCEEDED(DwmGetWindowAttribute(above, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked);
+		};
 		HWND above = GetWindow(window, GW_HWNDPREV);
-		for (int step = 0; above && above != expected && !IsWindowVisible(above) && step < 64; ++step)
+		for (int step = 0; above && above != expected && !inTheWay(above) && step < 64; ++step)
 			above = GetWindow(above, GW_HWNDPREV);
 		return above;
 	}
@@ -926,14 +934,14 @@ namespace
 #ifdef FLUIDGLASS_LOGS
 			if (!IsWindowVisible(pill)) ++g_wakeStats.placeHidden;
 			else if (!EqualRect(&current, &want)) ++g_wakeStats.placeMoved;
-			else if (const HWND between = ShownAbove(pill, above); between != above)
+			else if (const HWND between = ShownAbove(pill, want, above); between != above)
 			{
 				++g_wakeStats.placeOrder;
 				g_wakeStats.between = between;
 				g_wakeStats.betweenPill = index;
 			}
 #endif
-			if (!IsWindowVisible(pill) || !EqualRect(&current, &want) || ShownAbove(pill, above) != above)
+			if (!IsWindowVisible(pill) || !EqualRect(&current, &want) || ShownAbove(pill, want, above) != above)
 				SetWindowPos(pill, above, want.left, want.top, want.right - want.left, want.bottom - want.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 			above = pill;
 			placed = true;
