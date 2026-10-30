@@ -21,8 +21,10 @@ namespace StartGlass
 	// menu the glass leaves it bare, and behind it the glass only shows a little more of itself, so it errs late.
 	constexpr double CloseDelay = 24;
 
-	// While the glass moves with a flyout, the cloak watcher asks four times as often.
+	// While the glass moves with a flyout, the cloak watcher asks every 4 ms.
 	inline std::atomic<bool> g_watchFast{};
+	// Set as the glass starts to hurry, so the resting cloak watcher asks at once.
+	inline const HANDLE g_watchWake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 	// The cloak watcher sets this when a flyout cloaks or uncloaks, so the glass hears of an opening at once.
 	inline const HANDLE g_cloakChanged = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 
@@ -258,8 +260,14 @@ namespace StartGlass
 
 	// Asking DWM whether Start is cloaked sometimes blocks for two seconds while Start opens, and the glass waited with it.
 	// So a thread of its own asks, and the glass goes by its last answer, and by XAML, meanwhile.
+	// At rest it asked every 16 ms all the same, which woke it 32 times a second for nothing. Now it rests until a window
+	// cloaks or uncloaks, or the glass starts to hurry, and asks four times a second meanwhile. Start takes the foreground
+	// 80 to 100 ms before it uncloaks, which is what makes the glass hurry, so the watcher asks every 4 ms by then.
+	// Measured against a 2 ms poll, the cloak event came as fast, once 5 ms late, so while hurrying the asking still leads.
 	void WatchCloaks(Surface* surfaces, size_t count)
 	{
+		// The hook's message alone wakes the wait, so it does nothing itself.
+		SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, [](HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {}, 0, 0, WINEVENT_OUTOFCONTEXT);
 		for (;;)
 		{
 			for (size_t index = 0; index < count; ++index)
@@ -269,7 +277,9 @@ namespace StartGlass
 				if (window) DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
 				if (surfaces[index].cloakState.exchange(cloaked) != cloaked) SetEvent(g_cloakChanged);
 			}
-			Sleep(g_watchFast ? 4 : 16);
+			MsgWaitForMultipleObjects(1, &g_watchWake, FALSE, g_watchFast ? 4 : 250, QS_ALLINPUT);
+			MSG message;
+			while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
 		}
 	}
 
@@ -527,7 +537,8 @@ namespace StartGlass
 			// opening shows up. While the glass is out, or Start or Search holds the foreground, the foreground is checked
 			// every 8 ms, and every 4 ms while the glass moves. Windows wakes a process only every 16 ms unless it asks for
 			// finer timing, so it asks then, and only then. Moving the glass up onto the screen asks for a paint each time,
-			// which woke the wait at once and spun it, so paints wait for the next turn.
+			// which woke the wait at once and spun it, so paints wait for the next turn. At rest nothing needs the clock
+			// sooner than every half second (the setting, the TAPs' wake, a new Start), so the wait lasts 250 ms then.
 			const bool held = now && (now == start.window || now == search.window);
 			const bool hurry = shown || held || slideAt || anchorAt || openAt;
 			if (hurry != hurried)
@@ -536,13 +547,14 @@ namespace StartGlass
 				else timeEndPeriod(1);
 				hurried = hurry;
 				g_watchFast = hurry;
+				if (hurry) SetEvent(g_watchWake);
 			}
 			const bool moving = slideAt || anchorAt || openAt || ms - seenAt < 100;
 			HANDLE moved[3];
 			DWORD count{};
 			for (const auto& surface : surfaces) if (surface.moved) moved[count++] = surface.moved;
 			if (g_cloakChanged) moved[count++] = g_cloakChanged;
-			MsgWaitForMultipleObjects(count, moved, FALSE, !hurry ? 50 : moving ? 4 : 8, QS_ALLINPUT & ~QS_PAINT);
+			MsgWaitForMultipleObjects(count, moved, FALSE, !hurry ? 250 : moving ? 4 : 8, QS_ALLINPUT & ~QS_PAINT);
 		}
 	}
 }
