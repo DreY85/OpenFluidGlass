@@ -79,6 +79,10 @@ namespace
 		ULONGLONG since{};
 		ULONG64 threadAt{}, follow{}, part[6]{}, mark{};
 		int follows{}, timer{}, glide{}, changed{}, other{};
+		// Why a pill was placed again: it was hidden, it was elsewhere, or another window sat between it and the one it goes under.
+		int placeHidden{}, placeMoved{}, placeOrder{};
+		HWND between{};
+		UINT betweenPill{};
 		UINT otherIds[8]{};
 		int otherCounts[8]{};
 	};
@@ -123,6 +127,21 @@ namespace
 		for (int index = 0; index < 8 && s.otherCounts[index] && length > 0; ++index)
 			length += swprintf_s(line + length, std::size(line) - length, L" %04X:%d", s.otherIds[index], s.otherCounts[index]);
 		Log(line);
+		if (s.placeHidden || s.placeMoved || s.placeOrder)
+		{
+			wchar_t name[64]{}, title[64]{};
+			DWORD pid{};
+			if (s.between)
+			{
+				GetClassNameW(s.between, name, 64);
+				GetWindowTextW(s.between, title, 64);
+				GetWindowThreadProcessId(s.between, &pid);
+			}
+			swprintf_s(line, L"pills placed again: hidden %d, moved %d, out of order %d; last in between, above pill %u: %p class \"%s\" title \"%s\" pid %lu topmost %d",
+				s.placeHidden, s.placeMoved, s.placeOrder, s.betweenPill, s.between, name, title, pid,
+				s.between ? (GetWindowLongW(s.between, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0 : -1);
+			Log(line);
+		}
 		s = {};
 		s.since = now;
 		s.threadAt = ThreadCycles();
@@ -865,6 +884,16 @@ namespace
 			}
 			RECT current{};
 			GetWindowRect(pill, &current);
+#ifdef FLUIDGLASS_LOGS
+			if (!IsWindowVisible(pill)) ++g_wakeStats.placeHidden;
+			else if (!EqualRect(&current, &want)) ++g_wakeStats.placeMoved;
+			else if (const HWND between = GetWindow(pill, GW_HWNDPREV); between != above)
+			{
+				++g_wakeStats.placeOrder;
+				g_wakeStats.between = between;
+				g_wakeStats.betweenPill = index;
+			}
+#endif
 			if (!IsWindowVisible(pill) || !EqualRect(&current, &want) || GetWindow(pill, GW_HWNDPREV) != above)
 				SetWindowPos(pill, above, want.left, want.top, want.right - want.left, want.bottom - want.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 			above = pill;
