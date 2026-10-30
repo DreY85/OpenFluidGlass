@@ -45,7 +45,21 @@ namespace
 	Settings g_settings{};
 	int g_ticks{};
 
-	// Read twice a second, so the Taskbar tab's changes show while it is being tuned.
+	// Set by Windows when the settings key changes; it starts set, so the first tick reads them.
+	const HANDLE g_settingsChanged = CreateEventW(nullptr, FALSE, TRUE, nullptr);
+	HKEY g_settingsKey{};
+
+	// Asks Windows to set g_settingsChanged at the next change. False when the key cannot be watched.
+	bool WatchSettings()
+	{
+		if (!g_settingsKey && RegOpenKeyExW(HKEY_CURRENT_USER, PillSettingsKey, 0, KEY_NOTIFY, &g_settingsKey) != ERROR_SUCCESS) return false;
+		if (RegNotifyChangeKeyValue(g_settingsKey, FALSE, REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_THREAD_AGNOSTIC, g_settingsChanged, TRUE) == ERROR_SUCCESS) return true;
+		RegCloseKey(g_settingsKey);
+		g_settingsKey = nullptr;
+		return false;
+	}
+
+	// Read as soon as the key changes, so the Taskbar tab's changes show while it is being tuned.
 	// Turning the taskbar off there closes this host, which brings the normal taskbar back.
 	void LoadSettings()
 	{
@@ -736,15 +750,40 @@ namespace
 		return true;
 	}
 
+	// The first shown window above this one, or the expected one itself. Explorer keeps slipping hidden, empty windows
+	// in under the taskbar (ForegroundStaging as Start opens, an ATL helper), and putting a pill back above them
+	// cost a SetWindowPos every tick for as long as that lasted, for nothing on screen.
+	HWND ShownAbove(HWND window, HWND expected)
+	{
+		HWND above = GetWindow(window, GW_HWNDPREV);
+		for (int step = 0; above && above != expected && !IsWindowVisible(above) && step < 64; ++step)
+			above = GetWindow(above, GW_HWNDPREV);
+		return above;
+	}
+
 	// Places the pills right under the taskbar, in its band (topmost or not), following it as it moves.
 	void Follow()
 	{
 		FOLLOW_PART(-1);
-		if (++g_ticks % 15 == 1) LoadSettings();
+		// Six registry reads cost as much as the rest of a tick, so they wait for the key to change. Every 5 s
+		// they run anyway, and twice a second if Windows cannot watch the key.
+		static bool watching = false;
+		++g_ticks;
+		const bool changed = WaitForSingleObject(g_settingsChanged, 0) == WAIT_OBJECT_0;
+		if (changed || g_ticks % (watching ? 150 : 15) == 1)
+		{
+			// Watched again before reading, so a change made while reading still sets the event.
+			if (changed || !watching) watching = WatchSettings();
+			LoadSettings();
+		}
 		FOLLOW_PART(0);
 		if (!g_entranceDone) SignInShowing();
 		FOLLOW_PART(1);
-		const HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+		// Looking the taskbar up by class costs a hundred times what checking the handle does, so the handle is kept,
+		// and looked up again twice a second in case another taskbar window came first.
+		static HWND trayFound{};
+		if (g_ticks % 15 == 1 || !IsWindow(trayFound)) trayFound = FindWindowW(L"Shell_TrayWnd", nullptr);
+		const HWND tray = trayFound;
 		DWORD pid{};
 		if (tray) GetWindowThreadProcessId(tray, &pid);
 		else pid = StartingShell();
@@ -887,14 +926,14 @@ namespace
 #ifdef FLUIDGLASS_LOGS
 			if (!IsWindowVisible(pill)) ++g_wakeStats.placeHidden;
 			else if (!EqualRect(&current, &want)) ++g_wakeStats.placeMoved;
-			else if (const HWND between = GetWindow(pill, GW_HWNDPREV); between != above)
+			else if (const HWND between = ShownAbove(pill, above); between != above)
 			{
 				++g_wakeStats.placeOrder;
 				g_wakeStats.between = between;
 				g_wakeStats.betweenPill = index;
 			}
 #endif
-			if (!IsWindowVisible(pill) || !EqualRect(&current, &want) || GetWindow(pill, GW_HWNDPREV) != above)
+			if (!IsWindowVisible(pill) || !EqualRect(&current, &want) || ShownAbove(pill, above) != above)
 				SetWindowPos(pill, above, want.left, want.top, want.right - want.left, want.bottom - want.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 			above = pill;
 			placed = true;
@@ -918,12 +957,13 @@ namespace
 				g_entranceLogged = true;
 			}
 		}
+		static bool gliding = false;
 		if (animating) SetTimer(g_host, GlideTimer, 16, nullptr);
-		else KillTimer(g_host, GlideTimer);
+		else if (gliding) KillTimer(g_host, GlideTimer);
+		gliding = animating;
 		FOLLOW_PART(5);
 #ifdef FLUIDGLASS_LOGS
 		++g_wakeStats.follows;
-		for (int index = 0; index < 6; ++index) g_wakeStats.follow += 0;
 #endif
 	}
 
