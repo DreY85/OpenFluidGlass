@@ -134,14 +134,14 @@ float LgLateral(float2 N, float eta, float depth)
 float4 LgBlurAt(PS_INPUT input, float2 duv)
 {
 	float4 s = 0;
-	s += conv[0].x * texture0.Sample(sampler0, input.tex1.xy + duv);
-	s += conv[1].x * texture0.Sample(sampler0, input.tex1.zw + duv);
-	s += conv[2].x * texture0.Sample(sampler0, input.tex2.xy + duv);
-	s += conv[3].x * texture0.Sample(sampler0, input.tex2.zw + duv);
-	s += conv[4].x * texture0.Sample(sampler0, input.tex3.xy + duv);
-	s += conv[5].x * texture0.Sample(sampler0, input.tex3.zw + duv);
-	s += conv[6].x * texture0.Sample(sampler0, input.tex4.xy + duv);
-	s += conv[7].x * texture0.Sample(sampler0, input.tex4.zw + duv);
+	s += conv[0].x * texture0.SampleLevel(sampler0, input.tex1.xy + duv, 0.0f);
+	s += conv[1].x * texture0.SampleLevel(sampler0, input.tex1.zw + duv, 0.0f);
+	s += conv[2].x * texture0.SampleLevel(sampler0, input.tex2.xy + duv, 0.0f);
+	s += conv[3].x * texture0.SampleLevel(sampler0, input.tex2.zw + duv, 0.0f);
+	s += conv[4].x * texture0.SampleLevel(sampler0, input.tex3.xy + duv, 0.0f);
+	s += conv[5].x * texture0.SampleLevel(sampler0, input.tex3.zw + duv, 0.0f);
+	s += conv[6].x * texture0.SampleLevel(sampler0, input.tex4.xy + duv, 0.0f);
+	s += conv[7].x * texture0.SampleLevel(sampler0, input.tex4.zw + duv, 0.0f);
 	return s;
 }
 
@@ -149,7 +149,7 @@ float4 LgBlurAt(PS_INPUT input, float2 duv)
 // Twelve taps on a golden-angle spiral with Gaussian weights cover the disc evenly.
 float4 LgSharpAt(float2 uv)
 {
-	float4 center = texture1.Sample(sampler0, uv);
+	float4 center = texture1.SampleLevel(sampler0, uv, 0.0f);
 	float4 sum = center;
 	float weight = 1.0f;
 	[unroll] for (int i = 0; i < 12; ++i)
@@ -157,7 +157,7 @@ float4 LgSharpAt(float2 uv)
 		float r = sqrt((i + 0.5f) / 12.0f);
 		float a = i * 2.39996323f;
 		float w = exp(-2.0f * r * r);
-		sum += texture1.Sample(sampler0, uv + float2(cos(a), sin(a)) * r * fgFull.w * fgFull.xy) * w;
+		sum += texture1.SampleLevel(sampler0, uv + float2(cos(a), sin(a)) * r * fgFull.w * fgFull.xy, 0.0f) * w;
 		weight += w;
 	}
 	return fgFull.w < 0.05f ? center : sum / weight;
@@ -200,13 +200,24 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	pr = clamp(pr, -fgLimit.x, fgLimit.x);
 	pb = clamp(pb, -fgLimit.x, fgLimit.x);
 
-	float4 g = LgBlurAt(input, pg * fgTex.xy);
-	background = float4(LgBlurAt(input, pr * fgTex.xy).r, g.g, LgBlurAt(input, pb * fgTex.xy).b, g.a);
+	// The three channels bend alike on the flat top and without dispersion. There one set of taps serves them all.
+	// The taps use SampleLevel to stay legal inside the branch. The textures have a single mip, so they read the same.
+	bool split = any(pr != pg) || any(pb != pg);
+	background = LgBlurAt(input, pg * fgTex.xy);
+	[branch] if (split)
+	{
+		background.r = LgBlurAt(input, pr * fgTex.xy).r;
+		background.b = LgBlurAt(input, pb * fgTex.xy).b;
+	}
 	if (fgFull.z > 0.0f)
 	{
 		float2 uv = p * fgFull.xy;
-		float4 sg = LgSharpAt(uv + pg * fgFull.xy);
-		float3 sharp = float3(LgSharpAt(uv + pr * fgFull.xy).r, sg.g, LgSharpAt(uv + pb * fgFull.xy).b);
+		float3 sharp = LgSharpAt(uv + pg * fgFull.xy).rgb;
+		[branch] if (split)
+		{
+			sharp.r = LgSharpAt(uv + pr * fgFull.xy).r;
+			sharp.b = LgSharpAt(uv + pb * fgFull.xy).b;
+		}
 		background.rgb = lerp(background.rgb, sharp, fgFull.z);
 	}
 
