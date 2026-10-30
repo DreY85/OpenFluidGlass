@@ -72,6 +72,66 @@ namespace
 		fclose(file);
 	}
 
+#ifdef FLUIDGLASS_LOGS
+	// Log builds only: what wakes this thread at rest and what each part of Follow costs, in CPU cycles, every 10 s.
+	struct WakeStats
+	{
+		ULONGLONG since{};
+		ULONG64 threadAt{}, follow{}, part[6]{}, mark{};
+		int follows{}, timer{}, glide{}, changed{}, other{};
+		UINT otherIds[8]{};
+		int otherCounts[8]{};
+	};
+	WakeStats g_wakeStats;
+
+	ULONG64 ThreadCycles()
+	{
+		ULONG64 cycles{};
+		QueryThreadCycleTime(GetCurrentThread(), &cycles);
+		return cycles;
+	}
+
+	void MarkPart(int index)
+	{
+		const ULONG64 now = ThreadCycles();
+		if (index >= 0) g_wakeStats.part[index] += now - g_wakeStats.mark;
+		g_wakeStats.mark = now;
+	}
+
+	void CountWake(const MSG& message)
+	{
+		auto& s = g_wakeStats;
+		if (message.message == WM_TIMER && message.wParam == FollowTimer) ++s.timer;
+		else if (message.message == WM_TIMER && message.wParam == GlideTimer) ++s.glide;
+		else if (message.message == PillChanged) ++s.changed;
+		else
+		{
+			++s.other;
+			for (int index = 0; index < 8; ++index)
+				if (!s.otherCounts[index] || s.otherIds[index] == message.message) { s.otherIds[index] = message.message; ++s.otherCounts[index]; break; }
+		}
+		const ULONGLONG now = GetTickCount64();
+		if (!s.since) { s.since = now; s.threadAt = ThreadCycles(); return; }
+		if (now - s.since < 10000) return;
+		const double seconds = (now - s.since) / 1000.0;
+		const ULONG64 thread = ThreadCycles() - s.threadAt;
+		for (const ULONG64 part : s.part) s.follow += part;
+		wchar_t line[512];
+		int length = swprintf_s(line, L"host thread in %.1f s: %.2f Mcycles/s, Follow %d times %.2f Mcycles/s (settings %.0f, sign-in %.0f, taskbar %.0f, layout %.0f, pills %.0f, end %.0f kcycles/s); timer %d, glide %d, pill changed %d, other %d",
+			seconds, thread / seconds / 1e6, s.follows, s.follow / seconds / 1e6, s.part[0] / seconds / 1e3, s.part[1] / seconds / 1e3, s.part[2] / seconds / 1e3,
+			s.part[3] / seconds / 1e3, s.part[4] / seconds / 1e3, s.part[5] / seconds / 1e3, s.timer, s.glide, s.changed, s.other);
+		for (int index = 0; index < 8 && s.otherCounts[index] && length > 0; ++index)
+			length += swprintf_s(line + length, std::size(line) - length, L" %04X:%d", s.otherIds[index], s.otherCounts[index]);
+		Log(line);
+		s = {};
+		s.since = now;
+		s.threadAt = ThreadCycles();
+	}
+#define FOLLOW_PART(index) MarkPart(index)
+#else
+#define FOLLOW_PART(index)
+#endif
+
 	// Attaching to explorer. A freshly started explorer refuses the TAP until its taskbar's XAML starts,
 	// so the host loads the TAP into it once, as early as it can, and the TAP keeps trying from inside. The host waits
 	// for the TAP to say how that ended and, if it failed, tries again. Every attempt loads its own copy
@@ -660,8 +720,11 @@ namespace
 	// Places the pills right under the taskbar, in its band (topmost or not), following it as it moves.
 	void Follow()
 	{
+		FOLLOW_PART(-1);
 		if (++g_ticks % 15 == 1) LoadSettings();
+		FOLLOW_PART(0);
 		if (!g_entranceDone) SignInShowing();
+		FOLLOW_PART(1);
 		const HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
 		DWORD pid{};
 		if (tray) GetWindowThreadProcessId(tray, &pid);
@@ -685,6 +748,7 @@ namespace
 			g_trayShownLogged = true;
 		}
 		Attach(pid);
+		FOLLOW_PART(2);
 
 		RECT groups[PillCount]{}, pills[PillCount]{};
 		RECT bar{};
@@ -704,6 +768,7 @@ namespace
 		const double now = Seconds();
 		const double elapsed = g_lastStep > 0.0 ? std::clamp(now - g_lastStep, 0.0, 0.1) : 0.0;
 		g_lastStep = now;
+		FOLLOW_PART(3);
 		bool animating = false, entering = false, placed = false;
 		// Asked once a frame, and only once a pill is ready to enter.
 		int holdState = -1;
@@ -807,6 +872,7 @@ namespace
 		}
 		// The entrance plays once, when the pills first show after the host starts; an Explorer restart does not replay it.
 		// It counts as played only once a pill is up: until the TAP has reported, the taskbar shows with no pills at all.
+		FOLLOW_PART(4);
 		if (placed && !entering) g_entranceDone = true;
 		const bool entranceRunning = g_entranceStart > 0.0 && !g_entranceLogged;
 		if (holdState == 1 || entranceRunning) WatchDwm(entranceRunning);
@@ -825,6 +891,11 @@ namespace
 		}
 		if (animating) SetTimer(g_host, GlideTimer, 16, nullptr);
 		else KillTimer(g_host, GlideTimer);
+		FOLLOW_PART(5);
+#ifdef FLUIDGLASS_LOGS
+		++g_wakeStats.follows;
+		for (int index = 0; index < 6; ++index) g_wakeStats.follow += 0;
+#endif
 	}
 
 	LRESULT CALLBACK HostProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
@@ -914,7 +985,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 	std::thread(StartGlass::Run, instance).detach();
 
 	MSG message;
-	while (GetMessageW(&message, nullptr, 0, 0) > 0) DispatchMessageW(&message);
+	while (GetMessageW(&message, nullptr, 0, 0) > 0)
+	{
+#ifdef FLUIDGLASS_LOGS
+		CountWake(message);
+#endif
+		DispatchMessageW(&message);
+	}
 	EndNudge();
 	ReleaseTap();
 	Disconnect();
