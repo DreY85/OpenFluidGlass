@@ -44,7 +44,7 @@ namespace OpenGlass
 			} },
 			{ L"Blur", {
 				{ L"FluidGlassSoftness", L"Blur radius:", L"Blur of the backdrop seen through the glass. 0 is perfectly clear.", L"Softness", 0.f, 20.f, 0.5f, 1.5f, L"px" },
-				{ L"FluidGlassClarity", L"Blur mix:", L"1 uses the blur radius above. 0 falls back to the heavy OpenGlass blur.", L"Clarity", 0.f, 1.f, 0.01f, 0.75f, L"" },
+				{ L"FluidGlassClarity", L"Clarity:", L"How much clear view, softened by the radius above, shows over the heavy blur.", L"Clarity", 0.f, 1.f, 0.01f, 0.75f, L"" },
 			} },
 			{ L"Color", {
 				{ L"FluidGlassChroma", L"Dispersion:", L"Red and blue split at the edges, like a prism.", L"Chroma", 0.f, 0.5f, 0.01f, 0.03f, L"" },
