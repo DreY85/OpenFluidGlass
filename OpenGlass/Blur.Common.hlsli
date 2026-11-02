@@ -181,24 +181,30 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	float2 halfSize = (fgRect.zw - fgRect.xy) * 0.5f;
 	float bezel = clamp(fgOptics.y, 1.0f, max(min(halfSize.x, halfSize.y), 1.0f));
 	float d = -max(LgDepth(p), 0.0f);
-	// Edge normal, pointing out of the glass.
-	float2 e = float2(1.0f, 0.0f);
-	float2 n = normalize(float2(LgDepth(p - e.xy) - LgDepth(p + e.xy), LgDepth(p - e.yx) - LgDepth(p + e.yx)) + 1e-6f);
-
 	float u = saturate(-d / bezel);
-	float slope = u >= 1.0f ? 0.0f : fgOptics.z / bezel * (LgHeight(min(u + 0.002f, 1.0f)) - LgHeight(max(u - 0.002f, 0.0f))) / 0.004f;
-	// Cross-section through the edge: x points inward, y points up. The surface normal leans outward.
-	float2 N = normalize(float2(-slope, 1.0f));
-	float depth = fgOptics.z * LgHeight(u) + fgLook.w;
-	float ior = fgOptics.x;
-	// Sideways shift in pixels for each channel; dispersion bends red less and blue more.
-	float2 pg = -n * LgLateral(N, 1.0f / ior, depth) * fgOptics.w;
-	float2 pr = -n * LgLateral(N, 1.0f / max(ior - fgLook.x, 1.0001f), depth) * fgOptics.w;
-	float2 pb = -n * LgLateral(N, 1.0f / (ior + fgLook.x), depth) * fgOptics.w;
-	// Only the redrawn region plus the blur expansion holds current pixels, so the shift stays inside it.
-	pg = clamp(pg, -fgLimit.x, fgLimit.x);
-	pr = clamp(pr, -fgLimit.x, fgLimit.x);
-	pb = clamp(pb, -fgLimit.x, fgLimit.x);
+	// Past the bezel the glass is flat: the normal points straight up, nothing refracts and the rim catches no light.
+	// Those are the values the optics below produce there, so skipping them leaves every output bit unchanged.
+	float2 n = 0, N = float2(0.0f, 1.0f), pg = 0, pr = 0, pb = 0;
+	[branch] if (u < 1.0f)
+	{
+		// Edge normal, pointing out of the glass.
+		float2 e = float2(1.0f, 0.0f);
+		n = normalize(float2(LgDepth(p - e.xy) - LgDepth(p + e.xy), LgDepth(p - e.yx) - LgDepth(p + e.yx)) + 1e-6f);
+
+		float slope = fgOptics.z / bezel * (LgHeight(min(u + 0.002f, 1.0f)) - LgHeight(max(u - 0.002f, 0.0f))) / 0.004f;
+		// Cross-section through the edge: x points inward, y points up. The surface normal leans outward.
+		N = normalize(float2(-slope, 1.0f));
+		float depth = fgOptics.z * LgHeight(u) + fgLook.w;
+		float ior = fgOptics.x;
+		// Sideways shift in pixels for each channel; dispersion bends red less and blue more.
+		pg = -n * LgLateral(N, 1.0f / ior, depth) * fgOptics.w;
+		pr = -n * LgLateral(N, 1.0f / max(ior - fgLook.x, 1.0001f), depth) * fgOptics.w;
+		pb = -n * LgLateral(N, 1.0f / (ior + fgLook.x), depth) * fgOptics.w;
+		// Only the redrawn region plus the blur expansion holds current pixels, so the shift stays inside it.
+		pg = clamp(pg, -fgLimit.x, fgLimit.x);
+		pr = clamp(pr, -fgLimit.x, fgLimit.x);
+		pb = clamp(pb, -fgLimit.x, fgLimit.x);
+	}
 
 	// The three channels bend alike on the flat top and without dispersion. There one set of taps serves them all.
 	// The taps use SampleLevel to stay legal inside the branch. The textures have a single mip, so they read the same.
