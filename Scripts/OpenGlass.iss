@@ -85,45 +85,11 @@ UsePreviousLanguage=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
-Name: "armenian"; MessagesFile: "compiler:Languages\Armenian.isl"
-Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
-Name: "bulgarian"; MessagesFile: "compiler:Languages\Bulgarian.isl"
-Name: "catalan"; MessagesFile: "compiler:Languages\Catalan.isl"
-#if FileExists(CompilerPath + "Languages\\ChineseSimplified.isl")
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
-#endif
-#if FileExists(CompilerPath + "Languages\\ChineseTraditional.isl")
-Name: "chinesestraditional"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
-#endif
-Name: "corsican"; MessagesFile: "compiler:Languages\Corsican.isl"
-Name: "czech"; MessagesFile: "compiler:Languages\Czech.isl"
-Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl"
-Name: "dutch"; MessagesFile: "compiler:Languages\Dutch.isl"
-Name: "finnish"; MessagesFile: "compiler:Languages\Finnish.isl"
-Name: "french"; MessagesFile: "compiler:Languages\French.isl"
-Name: "german"; MessagesFile: "compiler:Languages\German.isl"
-Name: "hebrew"; MessagesFile: "compiler:Languages\Hebrew.isl"
-Name: "hungarian"; MessagesFile: "compiler:Languages\Hungarian.isl"
-Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
-Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
-Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
-Name: "norwegian"; MessagesFile: "compiler:Languages\Norwegian.isl"
-Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
-Name: "portuguese"; MessagesFile: "compiler:Languages\Portuguese.isl"
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
-Name: "slovak"; MessagesFile: "compiler:Languages\Slovak.isl"
-Name: "slovenian"; MessagesFile: "compiler:Languages\Slovenian.isl"
-Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
-Name: "swedish"; MessagesFile: "compiler:Languages\Swedish.isl"
-Name: "tamil"; MessagesFile: "compiler:Languages\Tamil.isl"
-Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
-Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
 
 [CustomMessages]
-LaunchOpenGlassGUI=Launch OpenGlass GUI
-UninstallOptionsTitle=OpenGlass uninstall options
-UninstallOptionsDescription=Choose the OpenGlass data to remove.
+LaunchOpenGlassGUI=Launch Fluid Glass
+UninstallOptionsTitle=Fluid Glass uninstall options
+UninstallOptionsDescription=Choose the Fluid Glass data to remove.
 UninstallDeleteCurrentAndMachineConfig=Delete current-user and machine configuration and its resources
 OtherUserConfigNotice=Settings in other Windows user profiles are preserved and must be removed manually while signed in as that user.
 UninstallDeletePresetPackages=Delete the preset library and retained legacy packages (keep current resources)
@@ -134,29 +100,7 @@ StartTaskbar=Start the Fluid Glass taskbar now
 InstallingTaskbar=Registering the Fluid Glass taskbar...
 RemovingTaskbar=Removing the Fluid Glass taskbar...
 UpstreamInstalled=OpenGlass, or an early Open Fluid Glass build, is already installed on this PC. The two cannot run together. Uninstall it from Settings > Apps, restart, then run this setup again. To keep your settings, leave the uninstaller's delete options unticked.
-TaskbarTaskFailed=The Fluid Glass taskbar could not be set to start at sign-in. Everything else is installed. You can still start the taskbar from the Taskbar tab in OpenGlass. The setup log has the details.
-
-#if FileExists(CompilerPath + "Languages\\ChineseSimplified.isl")
-chinesesimplified.LaunchOpenGlassGUI=启动 OpenGlass GUI
-chinesesimplified.UninstallOptionsTitle=OpenGlass 卸载选项
-chinesesimplified.UninstallOptionsDescription=选择要删除的 OpenGlass 数据。
-chinesesimplified.UninstallDeleteCurrentAndMachineConfig=删除当前用户和本机的配置及其资源
-chinesesimplified.OtherUserConfigNotice=其他 Windows 用户配置文件中的设置将被保留，需登录相应用户后手动删除。
-chinesesimplified.UninstallDeletePresetPackages=删除预设库及旧版包（保留当前配置资源）
-chinesesimplified.ContinueUninstall=卸载
-chinesesimplified.ServiceDescription=该服务会为您将 DLL 注入 DWM，并确保 OpenGlass 能正确加载用户配置。
-#endif
-
-#if FileExists(CompilerPath + "Languages\\ChineseTraditional.isl")
-chinesestraditional.LaunchOpenGlassGUI=啟動 OpenGlass GUI
-chinesestraditional.UninstallOptionsTitle=OpenGlass 卸載選項
-chinesestraditional.UninstallOptionsDescription=選擇要刪除的 OpenGlass 資料。
-chinesestraditional.UninstallDeleteCurrentAndMachineConfig=刪除目前使用者與本機的設定及其資源
-chinesestraditional.OtherUserConfigNotice=其他 Windows 使用者設定檔中的設定會予以保留；需登入該使用者後手動刪除。
-chinesestraditional.UninstallDeletePresetPackages=刪除預設庫與舊版套件（保留目前設定資源）
-chinesestraditional.ContinueUninstall=卸載
-chinesestraditional.ServiceDescription=該服務負責為您將 DLL 注入 DWM，並確保 OpenGlass 能正確載入使用者設定。
-#endif
+TaskbarTaskFailed=The Fluid Glass taskbar could not be set to start at sign-in. Everything else is installed. You can still start the taskbar from the Taskbar tab in Fluid Glass. The setup log has the details.
 
 [Files]
 Source: "{#MyAppBuildPath}\legacy\OpenGlass.dll"; DestDir: "{app}"; DestName: "OpenGlass.dll"; Flags: ignoreversion restartreplace; Check: ShouldInstallLegacyDll
