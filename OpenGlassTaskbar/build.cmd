@@ -4,7 +4,17 @@ setlocal
 rem "build.cmd logs" writes the diagnostic logs to %TEMP%. Released builds leave them out.
 set logs=
 if /i "%~1"=="logs" set logs=/DFLUIDGLASS_LOGS
-call D:\BuildTools\VC\Auxiliary\Build\vcvars64.bat >nul 2>nul || exit /b 1
+rem Visual Studio or its Build Tools, with the C++ tools, found by vswhere. A shell that already has cl skips this.
+where cl >nul 2>nul && goto tools
+set "vswhere=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+set vs=
+if exist "%vswhere%" for /f "usebackq delims=" %%p in (`"%vswhere%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "vs=%%p"
+if not defined vs (
+	echo Visual Studio with the C++ tools was not found. Run this from a Developer Command Prompt.
+	exit /b 1
+)
+call "%vs%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>nul || exit /b 1
+:tools
 set out=%~dp0..\Build\taskbar
 if not exist "%out%\obj" mkdir "%out%\obj"
 rem A log build leaves logs.flag next to the modules. Only the dev setup accepts them.

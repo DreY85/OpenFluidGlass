@@ -73,7 +73,7 @@ msbuild OpenGlass.slnx /m /restore /p:Configuration=Release /p:Platform=x64
 OpenGlassTaskbar\build.cmd
 ```
 
-`OpenGlassTaskbar\build.cmd` calls `vcvars64.bat` from a fixed Visual Studio Build Tools folder. Change that path to match your machine. Run `build.cmd logs` to get diagnostic logs in `%TEMP%`. Released builds never write them. The installer script is `Scripts\OpenGlass.iss` (Inno Setup 6), packed by `Scripts\OpenGlass.Packaging.proj`.
+`OpenGlassTaskbar\build.cmd` finds Visual Studio or its Build Tools, with the C++ tools, through `vswhere`. From a Developer Command Prompt it uses the tools already set up. Run `build.cmd logs` to get diagnostic logs in `%TEMP%`. Released builds never write them. The installer script is `Scripts\OpenGlass.iss` (Inno Setup 6), packed by `Scripts\OpenGlass.Packaging.proj`.
 
 For the OpenGlass core (prerequisites, tests, DWM offsets), see [Building OpenGlass](https://github.com/ALTaleX531/OpenGlass/wiki/Building-OpenGlass) and the rest of the [OpenGlass wiki](https://github.com/ALTaleX531/OpenGlass/wiki).
 
