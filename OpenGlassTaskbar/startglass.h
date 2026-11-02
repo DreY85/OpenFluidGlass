@@ -412,9 +412,17 @@ namespace StartGlass
 			// the flyout is closing, and the glass goes, or for Start slides away with it (see below).
 			const RECT& rect = startShown ? start.rect : search.rect;
 			const bool wasClosing = closing;
+			// A right click on the taskbar gives it the foreground while Start stays up under the taskbar's menu, and the
+			// glass that went then left the menu bare for as long as that menu showed. So the taskbar holding the foreground
+			// is not yet a close: a Start that does close from there hides Search 7 to 12 ms in, which the check below catches.
+			const auto taskbarHolds = [now]
+			{
+				wchar_t name[32]{};
+				return GetClassNameW(now, name, ARRAYSIZE(name)) && (!wcscmp(name, L"Shell_TrayWnd") || !wcscmp(name, L"Shell_SecondaryTrayWnd"));
+			};
 			if (!open) focused = closing = false;
 			else if (flyoutFocused) focused = true;
-			else if (focused) closing = true;
+			else if (focused && !closing && !taskbarHolds()) closing = true;
 			// Closed with the Windows key or the Start button, Start leaves the foreground with Search, so only Search's
 			// cloak tells it is going, about 200 ms before Start's own, and the glass stood still while the menu slid down.
 			if (open && startShown && (startWasUp || start.unparked) && start.onScreen && searchWasOut && search.cloaked) closing = true;
