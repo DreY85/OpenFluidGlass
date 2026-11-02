@@ -6,7 +6,9 @@
 
 constexpr ULONGLONG LogLimit = 256 * 1024;	// bytes; a log past this starts over, so it never grows for good
 
-// Opens the named log for appending, or empties it first once it has passed LogLimit. Null if it cannot be opened, and always null without FLUIDGLASS_LOGS.
+// Opens the named log for appending. Once it has passed LogLimit it moves to name.old, so the minutes before stay
+// readable (a 256 KB start over once lost the Start opening being looked for). Null if it cannot be opened, and always
+// null without FLUIDGLASS_LOGS.
 inline FILE* OpenLog([[maybe_unused]] const wchar_t* name)
 {
 #ifdef FLUIDGLASS_LOGS
@@ -16,6 +18,12 @@ inline FILE* OpenLog([[maybe_unused]] const wchar_t* name)
 	WIN32_FILE_ATTRIBUTE_DATA data{};
 	const bool full = GetFileAttributesExW(path, GetFileExInfoStandard, &data)
 		&& ((static_cast<ULONGLONG>(data.nFileSizeHigh) << 32) | data.nFileSizeLow) > LogLimit;
+	if (full)
+	{
+		wchar_t old[MAX_PATH];
+		swprintf_s(old, L"%s.old", path);
+		MoveFileExW(path, old, MOVEFILE_REPLACE_EXISTING);
+	}
 	FILE* file{};
 	return _wfopen_s(&file, path, full ? L"w, ccs=UTF-8" : L"a, ccs=UTF-8") ? nullptr : file;
 #else

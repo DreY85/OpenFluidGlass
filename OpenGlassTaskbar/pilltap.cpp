@@ -23,6 +23,7 @@
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include "pilllog.h"
 #include "pillshare.h"
+#include "fillboost.h"
 
 namespace wux = winrt::Windows::UI::Xaml;
 
@@ -240,6 +241,7 @@ namespace
 			wux::DependencyProperty property{ nullptr };
 			winrt::Windows::Foundation::IInspectable original, originalTransform;
 			void* key{};
+			int64_t fillToken{ -1 };	// watches the fill of a hover background
 		};
 
 		static constexpr float HoverInset = 2;	// DIPs between a hover background and the edge of its pill
@@ -290,13 +292,38 @@ namespace
 				if (property)
 				{
 					void* const key = winrt::get_abi(child);
+					const bool empty = wux::Media::VisualTreeHelper::GetChildrenCount(child) == 0;
 					if (m_roundedNodes.insert(key).second)
-						m_rounded.push_back({ winrt::make_weak(child), property, child.ReadLocalValue(property), child.ReadLocalValue(wux::UIElement::RenderTransformProperty()), key });
+						m_rounded.push_back({ winrt::make_weak(child), property, child.ReadLocalValue(property), child.ReadLocalValue(wux::UIElement::RenderTransformProperty()), key, WatchFill(child, empty) });
 					const auto& rounded = *std::find_if(m_rounded.begin(), m_rounded.end(), [key](const Rounded& r) { return r.key == key; });
-					FitHover(element, property, rounded, wux::Media::VisualTreeHelper::GetChildrenCount(child) == 0, pills, pillRadius);
+					FitHover(element, property, rounded, empty, pills, pillRadius);
 				}
 				if (depth > 0) RoundTray(child, depth - 1, pills, pillRadius, minHeight);
 			}
+		}
+
+		// A hover background takes another theme fill with each state of its button (hover, pressed, the active app),
+		// so every fill it takes is made stronger while the pills show.
+		int64_t WatchFill(const wux::DependencyObject& node, bool empty)
+		{
+			const auto border = empty ? node.try_as<wux::Controls::Border>() : nullptr;
+			if (!border) return -1;
+			BoostFill(border);
+			return border.RegisterPropertyChangedCallback(wux::Controls::Border::BackgroundProperty(),
+				[this](const wux::DependencyObject& sender, const wux::DependencyProperty&) { BoostFill(sender.as<wux::Controls::Border>()); });
+		}
+
+		void BoostFill(const wux::Controls::Border& border)
+		{
+			try
+			{
+				if (!m_boost.Add(border.Background())) return;
+				const auto color = m_boost.Last();
+				wchar_t line[160];
+				swprintf_s(line, L"fill %02X%02X%02X%02X of '%s' made stronger", color.A, color.R, color.G, color.B, border.Name().c_str());
+				Log(line);
+			}
+			catch (...) {}
 		}
 
 		// pillRadius is the corner radius of the pills in DIPs. A hover inside keeps the same distance to the pill edge
@@ -349,6 +376,7 @@ namespace
 				if (!node) continue;
 				Restore(node, rounded.property, rounded.original);
 				Restore(node, wux::UIElement::RenderTransformProperty(), rounded.originalTransform);
+				if (rounded.fillToken >= 0) node.UnregisterPropertyChangedCallback(wux::Controls::Border::BackgroundProperty(), rounded.fillToken);
 			}
 			m_rounded.clear();
 			m_roundedNodes.clear();
@@ -433,6 +461,7 @@ namespace
 				Hide(m_fill, host != nullptr);
 				Hide(m_stroke, host != nullptr);
 				SizeIcons(host ? m_iconSize : DefaultIconSize);
+				m_boost.Show(host && m_share);
 				if (!host || !m_share)
 				{
 					if (!m_rounded.empty()) UnroundTray();
@@ -524,6 +553,7 @@ namespace
 		RECT m_last[PillCount]{};
 		std::vector<Rounded> m_rounded;
 		std::set<void*> m_roundedNodes;
+		FillBoost m_boost;
 		bool m_trayDumped{};
 		PillStyle m_style{};
 	};

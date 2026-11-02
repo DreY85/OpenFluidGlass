@@ -32,6 +32,7 @@ namespace
 	{
 		Kind kind{};
 		HWND window{};
+		bool darkText{};	// a tooltip whose theme writes dark text, like the desktop's, which stays light in dark mode
 	};
 
 	std::mutex g_lock;
@@ -47,6 +48,7 @@ namespace
 	decltype(&CloseThemeData) g_closeThemeData = CloseThemeData;
 	decltype(&DrawThemeBackground) g_drawThemeBackground = DrawThemeBackground;
 	decltype(&DrawThemeBackgroundEx) g_drawThemeBackgroundEx = DrawThemeBackgroundEx;
+	HMODULE g_module{};
 
 	void Log(const wchar_t* line)
 	{
@@ -59,17 +61,203 @@ namespace
 		}
 	}
 
+#ifdef FLUIDGLASS_LOGS
+	// Dev trace of a folder window's first seconds, for the dark flash on the first open after a reboot: when its
+	// parts are created and shown, which backdrop and frame it asks DWM for, and what its class erases with.
+	std::atomic<LONGLONG> g_traceStart{};
+	decltype(&DwmSetWindowAttribute) g_dwmSetWindowAttribute = DwmSetWindowAttribute;
+	decltype(&DwmExtendFrameIntoClientArea) g_dwmExtendFrame = DwmExtendFrameIntoClientArea;
+
+	decltype(&FillRect) g_fillRect = FillRect;
+	decltype(&BufferedPaintSetAlpha) g_bufferedPaintSetAlpha = BufferedPaintSetAlpha;
+	decltype(&EndBufferedPaint) g_endBufferedPaint = EndBufferedPaint;
+	std::map<HTHEME, std::wstring> g_themeNames;
+
+	// Milliseconds since the last folder window started, or -1 past its first five seconds or outside it. A null
+	// window is a memory DC, kept on the chance that it draws for the folder window.
+	long long TraceTime(HWND window)
+	{
+		wchar_t name[32]{};
+		LARGE_INTEGER now{}, frequency{};
+		QueryPerformanceCounter(&now);
+		QueryPerformanceFrequency(&frequency);
+		const long long ms = (now.QuadPart - g_traceStart) * 1000 / frequency.QuadPart;
+		if (!g_traceStart || ms > 5000 || (window && (!GetClassNameW(GetAncestor(window, GA_ROOT), name, ARRAYSIZE(name)) || wcscmp(name, L"CabinetWClass")))) return -1;
+		return ms;
+	}
+
+	void Trace(HWND window, const wchar_t* what)
+	{
+		const long long ms = TraceTime(window);
+		if (ms < 0) return;
+		wchar_t name[64]{}, line[320];
+		if (window) GetClassNameW(window, name, ARRAYSIZE(name));
+		swprintf_s(line, L"trace +%lldms t%lu %s %p %s visible=%d", ms, GetCurrentThreadId(), what, window, name, window && IsWindowVisible(window));
+		Log(line);
+	}
+
+	bool Big(const RECT* rect) { return rect && rect->right - rect->left >= 100 && rect->bottom - rect->top >= 100; }
+
+	int WINAPI FillRectHook(HDC dc, const RECT* rect, HBRUSH brush)
+	{
+		if (g_traceStart && Big(rect) && TraceTime(nullptr) >= 0)
+		{
+			LOGBRUSH look{};
+			wchar_t what[128];
+			if (reinterpret_cast<ULONG_PTR>(brush) < 64) look.lbColor = GetSysColor(static_cast<int>(reinterpret_cast<ULONG_PTR>(brush)) - 1);
+			else GetObjectW(brush, sizeof(look), &look);
+			swprintf_s(what, L"FillRect %ldx%ld color %06lX", rect->right - rect->left, rect->bottom - rect->top, static_cast<unsigned long>(look.lbColor));
+			Trace(WindowFromDC(dc), what);
+		}
+		return g_fillRect(dc, rect, brush);
+	}
+
+	HRESULT WINAPI BufferedPaintSetAlphaHook(HPAINTBUFFER buffer, const RECT* rect, BYTE alpha)
+	{
+		if (g_traceStart && TraceTime(nullptr) >= 0)
+		{
+			wchar_t what[96];
+			swprintf_s(what, L"BufferedPaintSetAlpha %u %s", alpha, rect ? L"rect" : L"all");
+			Trace(WindowFromDC(GetBufferedPaintTargetDC(buffer)), what);
+		}
+		return g_bufferedPaintSetAlpha(buffer, rect, alpha);
+	}
+
+	HRESULT WINAPI EndBufferedPaintHook(HPAINTBUFFER buffer, BOOL update)
+	{
+		if (g_traceStart && update && TraceTime(nullptr) >= 0)
+		{
+			RECT rect{};
+			GetBufferedPaintTargetRect(buffer, &rect);
+			if (Big(&rect))
+			{
+				wchar_t what[96];
+				swprintf_s(what, L"EndBufferedPaint %ldx%ld", rect.right - rect.left, rect.bottom - rect.top);
+				Trace(WindowFromDC(GetBufferedPaintTargetDC(buffer)), what);
+			}
+		}
+		return g_endBufferedPaint(buffer, update);
+	}
+
+	void TraceTheme(HTHEME theme, HWND window, LPCWSTR classList)
+	{
+		if (!theme || !classList) return;
+		{
+			std::lock_guard guard{ g_lock };
+			g_themeNames[theme] = classList;
+		}
+		wchar_t what[96];
+		swprintf_s(what, L"OpenThemeData %.60s", classList);
+		Trace(window, what);
+	}
+
+	void TraceDraw(HTHEME theme, HDC dc, int part, int state, const RECT* rect)
+	{
+		if (!g_traceStart || !Big(rect) || TraceTime(nullptr) < 0) return;
+		std::wstring name;
+		{
+			std::lock_guard guard{ g_lock };
+			if (const auto found = g_themeNames.find(theme); found != g_themeNames.end()) name = found->second;
+		}
+		wchar_t what[128];
+		swprintf_s(what, L"DrawThemeBackground %.60s part %d state %d %ldx%ld", name.c_str(), part, state, rect->right - rect->left, rect->bottom - rect->top);
+		Trace(WindowFromDC(dc), what);
+	}
+
+	void CALLBACK TraceEvent(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG, DWORD, DWORD)
+	{
+		if (object != OBJID_WINDOW || !window) return;
+		wchar_t name[32]{};
+		// Parts made while it handles WM_CREATE come before the window itself, so the first of them starts the trace.
+		if (event == EVENT_OBJECT_CREATE && TraceTime(nullptr) < 0 && GetClassNameW(GetAncestor(window, GA_ROOT), name, ARRAYSIZE(name)) && !wcscmp(name, L"CabinetWClass"))
+		{
+			LARGE_INTEGER now{};
+			QueryPerformanceCounter(&now);
+			g_traceStart = now.QuadPart;
+		}
+		if (event == EVENT_OBJECT_CREATE && GetClassNameW(window, name, ARRAYSIZE(name)) && !wcscmp(name, L"CabinetWClass"))
+		{
+			LOGBRUSH brush{};
+			const auto handle = reinterpret_cast<HBRUSH>(GetClassLongPtrW(window, GCLP_HBRBACKGROUND));
+			wchar_t line[128];
+			if (reinterpret_cast<ULONG_PTR>(handle) < 64) swprintf_s(line, L"trace folder class brush is system color %Iu", reinterpret_cast<ULONG_PTR>(handle) - 1);
+			else if (GetObjectW(handle, sizeof(brush), &brush)) swprintf_s(line, L"trace folder class brush style %u color %06lX", brush.lbStyle, static_cast<unsigned long>(brush.lbColor));
+			else swprintf_s(line, L"trace folder class brush %p unreadable", handle);
+			Log(line);
+		}
+		Trace(window, event == EVENT_OBJECT_CREATE ? L"create" : event == EVENT_OBJECT_SHOW ? L"show" : event == EVENT_OBJECT_HIDE ? L"hide" : L"destroy");
+	}
+
+	HRESULT WINAPI DwmSetWindowAttributeHook(HWND window, DWORD attribute, LPCVOID value, DWORD size)
+	{
+		const HRESULT hr = g_dwmSetWindowAttribute(window, attribute, value, size);
+		wchar_t what[64];
+		swprintf_s(what, L"DwmSetWindowAttribute %lu = %ld hr %08lX", attribute, value && size >= sizeof(LONG) ? *static_cast<const LONG*>(value) : 0L, static_cast<unsigned long>(hr));
+		Trace(window, what);
+		return hr;
+	}
+
+	HRESULT WINAPI DwmExtendFrameHook(HWND window, const MARGINS* margins)
+	{
+		const HRESULT hr = g_dwmExtendFrame(window, margins);
+		wchar_t what[80];
+		if (!margins) return hr;
+		swprintf_s(what, L"DwmExtendFrameIntoClientArea %d %d %d %d", margins->cxLeftWidth, margins->cxRightWidth, margins->cyTopHeight, margins->cyBottomHeight);
+		Trace(window, what);
+		return hr;
+	}
+#endif
+
+	// A folder window shows long before it asks DWM for its backdrop: about 0.6 s on the first open after a reboot.
+	// Until then it is a plain window, erased grey with a black band on top, and the glass only takes over after.
+	// Asking for the backdrop as soon as its first part exists makes it glass from its first frame. Black paints as
+	// clear glass and grey as a lighter haze, so the class erases black.
+	void CALLBACK FolderEvent(HWINEVENTHOOK hook, DWORD event, HWND window, LONG object, LONG child, DWORD thread, DWORD time)
+	{
+#ifdef FLUIDGLASS_LOGS
+		TraceEvent(hook, event, window, object, child, thread, time);
+#endif
+		if (event != EVENT_OBJECT_CREATE || object != OBJID_WINDOW || !window) return;
+		const HWND root = GetAncestor(window, GA_ROOT);
+		wchar_t name[32]{};
+		if (!root || !GetClassNameW(root, name, ARRAYSIZE(name)) || wcscmp(name, L"CabinetWClass")) return;
+		DWM_SYSTEMBACKDROP_TYPE backdrop{};
+		if (SUCCEEDED(DwmGetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop))) && backdrop >= DWMSBT_MAINWINDOW) return;
+		backdrop = DWMSBT_MAINWINDOW;
+		DwmSetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+		const MARGINS sheet{ -1, -1, -1, -1 };
+		DwmExtendFrameIntoClientArea(root, &sheet);
+		// Explorer can register the class again later, with its grey brush, so this is checked for every window.
+		const auto black = reinterpret_cast<LONG_PTR>(GetStockObject(BLACK_BRUSH));
+		if (GetClassLongPtrW(root, GCLP_HBRBACKGROUND) != black) SetClassLongPtrW(root, GCLP_HBRBACKGROUND, black);
+	}
+
 	HTHEME Remember(HTHEME theme, HWND window, LPCWSTR classList)
 	{
 		if (!theme || !classList) return theme;
+#ifdef FLUIDGLASS_LOGS
+		TraceTheme(theme, window, classList);
+#endif
 		Kind kind = Kind::Other;
 		if (!_wcsicmp(classList, L"ItemsView::ListView")) kind = Kind::Items;
 		else if (!_wcsicmp(classList, L"ItemsView")) kind = Kind::Focus;
 		else if (!_wcsicmp(classList, L"TreeView") || !_wcsicmp(classList, L"Explorer::TreeView")) kind = Kind::Tree;
 		else if (!_wcsicmp(classList, L"Tooltip")) kind = Kind::Tooltip;
+		// Our dark base under the desktop's dark tooltip text left it grey on black. Such a tooltip keeps its own face.
+		bool darkText = false;
+		COLORREF text{};
+		if (kind == Kind::Tooltip && SUCCEEDED(GetThemeColor(theme, TTP_STANDARD, TTSS_NORMAL, TMT_TEXTCOLOR, &text)))
+		{
+			darkText = GetRValue(text) * 299 + GetGValue(text) * 587 + GetBValue(text) * 114 < 128 * 1000;
+#ifdef FLUIDGLASS_LOGS
+			wchar_t line[96];
+			swprintf_s(line, L"tooltip theme text %06lX, %s", static_cast<unsigned long>(text), darkText ? L"dark" : L"light");
+			Log(line);
+#endif
+		}
 		std::lock_guard guard{ g_lock };
 		if (kind == Kind::Other) g_themes.erase(theme);
-		else g_themes[theme] = { kind, window };
+		else g_themes[theme] = { kind, window, darkText };
 		return theme;
 	}
 
@@ -243,6 +431,7 @@ namespace
 			if (found == g_themes.end()) return false;
 			known = found->second;
 		}
+		if (known.darkText && !g_light) return false;
 		Look look{};
 		if (!LookFor(known.kind, part, state, look)) return false;
 		if (known.kind == Kind::Tooltip) PrepareTooltip(dc, *rect, clip, known.window);
@@ -251,12 +440,18 @@ namespace
 
 	HRESULT WINAPI DrawThemeBackgroundHook(HTHEME theme, HDC dc, int part, int state, LPCRECT rect, LPCRECT clip)
 	{
+#ifdef FLUIDGLASS_LOGS
+		TraceDraw(theme, dc, part, state, rect);
+#endif
 		if (Replace(theme, dc, part, state, rect, clip)) return S_OK;
 		return g_drawThemeBackground(theme, dc, part, state, rect, clip);
 	}
 
 	HRESULT WINAPI DrawThemeBackgroundExHook(HTHEME theme, HDC dc, int part, int state, LPCRECT rect, const DTBGOPTS* options)
 	{
+#ifdef FLUIDGLASS_LOGS
+		TraceDraw(theme, dc, part, state, rect);
+#endif
 		const RECT* clip = options && (options->dwFlags & DTBG_CLIPRECT) ? &options->rcClip : nullptr;
 		if (Replace(theme, dc, part, state, rect, clip)) return S_OK;
 		return g_drawThemeBackgroundEx(theme, dc, part, state, rect, options);
@@ -272,6 +467,16 @@ namespace
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_closeThemeData), CloseThemeDataHook);
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeBackground), DrawThemeBackgroundHook);
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeBackgroundEx), DrawThemeBackgroundExHook);
+#ifdef FLUIDGLASS_LOGS
+		if (g_inExplorer)
+		{
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_dwmSetWindowAttribute), DwmSetWindowAttributeHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_dwmExtendFrame), DwmExtendFrameHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_fillRect), FillRectHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_bufferedPaintSetAlpha), BufferedPaintSetAlphaHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_endBufferedPaint), EndBufferedPaintHook);
+		}
+#endif
 		return SlimDetoursTransactionCommit();
 	}
 
@@ -397,6 +602,14 @@ namespace
 		}
 		swprintf_s(line, L"hooks installed in %s", file);
 		Log(line);
+		// In context, so a new folder window is seen while it is created, before it shows. The dev trace also wants
+		// its parts shown and hidden.
+#ifdef FLUIDGLASS_LOGS
+		constexpr DWORD lastEvent = EVENT_OBJECT_HIDE;
+#else
+		constexpr DWORD lastEvent = EVENT_OBJECT_CREATE;
+#endif
+		if (g_inExplorer && !SetWinEventHook(EVENT_OBJECT_CREATE, lastEvent, g_module, FolderEvent, GetCurrentProcessId(), 0, WINEVENT_INCONTEXT)) Log(L"folder hook failed");
 		EnumWindows(RefreshFolder, TRUE);
 		// A dialog loads its folder extensions while it builds the view, so its window may not be complete yet.
 		if (!g_inExplorer)
@@ -509,6 +722,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, void*)
 	HMODULE pinned{};
 	GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&DllMain), &pinned);
 	DisableThreadLibraryCalls(module);
+	g_module = module;
 	if (const HANDLE thread = CreateThread(nullptr, 0, Run, nullptr, 0, nullptr)) CloseHandle(thread);
 	return TRUE;
 }

@@ -20,6 +20,7 @@ namespace StartGlass
 	// Filmed, the glass that started 35 ms after Start lost the foreground ran 5 to 20 ms behind its close. Ahead of the
 	// menu the glass leaves it bare, and behind it the glass only shows a little more of itself, so it errs late.
 	constexpr double CloseDelay = 24;
+	constexpr ULONGLONG UnparkedWait = 100;	// how long, in ms, an uncloaked Start may still park the menu it laid out
 
 	// While the glass moves with a flyout, the cloak watcher asks every 4 ms.
 	inline std::atomic<bool> g_watchFast{};
@@ -66,7 +67,9 @@ namespace StartGlass
 		DWORD cloaked = 1;
 		HWND window{};
 		RECT rect{};
-		bool onScreen{}, visible{};
+		bool onScreen{}, visible{}, unparked{};
+		RECT laidOut{};	// where a fresh Start laid its menu out, while unparked
+		ULONGLONG uncloakedAt{};	// when an unparked Start uncloaked
 	};
 
 	DWORD FindProcess(const wchar_t* exe)
@@ -254,6 +257,20 @@ namespace StartGlass
 		surface.cloaked = surface.window ? surface.cloakState.load() : 1;
 		MONITORINFO monitor{ sizeof(monitor) };
 		GetMonitorInfoW(MonitorFromRect(&copy.menu, MONITOR_DEFAULTTONEAREST), &monitor);
+		// A menu Start has never parked counts, while cloaked, as parked where Start parks it (y 1104 on a 1080 screen).
+		// Most first openings still park it, 70 to 90 ms after the uncloak, and the glass that went up from the uncloak
+		// ran ahead of the menu and flashed where Search was. So it counts as parked for UnparkedWait after the uncloak too.
+		surface.unparked = copy.unparked != 0;
+		surface.laidOut = surface.unparked ? copy.menu : RECT{};
+		const ULONGLONG tick = GetTickCount64();
+		if (!surface.unparked || surface.cloaked) surface.uncloakedAt = 0;
+		else if (!surface.uncloakedAt) surface.uncloakedAt = tick;
+		if (surface.unparked && (surface.cloaked || tick - surface.uncloakedAt < UnparkedWait))
+		{
+			const UINT dpi = GetDpiForWindow(surface.window);
+			OffsetRect(&surface.rect, 0, monitor.rcMonitor.bottom + MulDiv(24, dpi ? dpi : 96, 96) - copy.menu.top);
+			copy.menu = surface.rect;
+		}
 		surface.onScreen = !IsRectEmpty(&copy.menu) && copy.menu.top < monitor.rcWork.bottom;
 		surface.visible = !surface.cloaked && surface.onScreen;
 	}
@@ -321,7 +338,7 @@ namespace StartGlass
 		std::thread(WatchCloaks, surfaces, std::size(surfaces)).detach();
 
 		HWND glass{};
-		bool shown{}, focused{}, closing{}, met{}, startWasUp{}, hurried{};
+		bool shown{}, focused{}, closing{}, met{}, startWasUp{}, hurried{}, searchWasOut{};
 		DWORD startPid{}, searchPid{};
 		RECT last{}, seen{}, parked{}, rest{}, slideFrom{};
 		LONG step{}, stepBefore{}, slideSeen{};
@@ -388,7 +405,7 @@ namespace StartGlass
 			// Going over to Search, Start parks its menu a few frames before DWM reports it cloaked, and in that gap
 			// the glass went away and came back. A Start that was up and has parked again has handed over to Search.
 			if (!startShown) startWasUp = false;
-			else if (start.onScreen) startWasUp = true;
+			else if (start.onScreen && !start.unparked) startWasUp = true;
 			else if (startWasUp && search.visible) startShown = false;
 			const bool open = startShown ? start.onScreen : search.visible;
 			// Focus moves between Start and Search, and through no window at all, on the way. Once another window has it,
@@ -398,6 +415,10 @@ namespace StartGlass
 			if (!open) focused = closing = false;
 			else if (flyoutFocused) focused = true;
 			else if (focused) closing = true;
+			// Closed with the Windows key or the Start button, Start leaves the foreground with Search, so only Search's
+			// cloak tells it is going, about 200 ms before Start's own, and the glass stood still while the menu slid down.
+			if (open && startShown && (startWasUp || start.unparked) && start.onScreen && searchWasOut && search.cloaked) closing = true;
+			searchWasOut = search.cloaked == 0;
 			bool show = open && met && !closing;
 			LARGE_INTEGER counter, frequency;
 			QueryPerformanceFrequency(&frequency);
@@ -425,6 +446,8 @@ namespace StartGlass
 				seenAt = ms;
 			}
 			if (startShown && start.onScreen && !closing && ms - seenAt > 100) rest = start.rect;
+			// A fresh Start rests its menu where it laid it out, so its first opening goes by the uncloak like every other.
+			if (start.unparked && IsRectEmpty(&rest)) rest = start.laidOut;
 			RECT place = rect;
 			if (show && step && ms - seenAt < 20)
 			{
@@ -462,6 +485,11 @@ namespace StartGlass
 			const bool rising = startShown && start.onScreen && !closing && !IsRectEmpty(&rest) && !IsRectEmpty(&parked)
 				&& sameSize(rest, parked) && sameSize(rect, rest) && rest.top < parked.top;
 			if (!rising) openAt = 0, openSeen = false;
+			// A menu Start never parked slides up where the TAP cannot see it, so the glass goes by the uncloak alone.
+			else if (start.unparked)
+			{
+				if (!openSeen) openAt = (anchorAt ? anchorAt : ms) + UncloakEarly, openSeen = true;
+			}
 			else
 			{
 				if (!openAt && anchorAt && ms - anchorAt < OpeningWait) openAt = anchorAt + UncloakEarly;
@@ -476,12 +504,12 @@ namespace StartGlass
 			if (openAt)
 			{
 				LONG top = parked.top - std::lround(OpenShare(ms + frame - openAt) * (parked.top - rest.top));
-				top = (std::min)(top, rect.top);
+				if (!start.unparked) top = (std::min)(top, rect.top);
 				if (sameSize(last, rest)) top = (std::min)(top, last.top);
 				top = (std::max)(top, rest.top);
 				place = rest;
 				OffsetRect(&place, 0, top - rest.top);
-				if (rect.top <= rest.top || ms - openAt > 1000) openAt = 0;
+				if ((rect.top <= rest.top && !start.unparked) || ms - openAt > 1000) openAt = 0;
 			}
 			// Start slides its menu away the moment it loses the foreground, mostly while its UI thread is too busy for the
 			// TAP to see it, so the glass that went at once left the menu bare. Now the glass slides away on its own, the way
@@ -533,6 +561,35 @@ namespace StartGlass
 				SetWindowLongPtrW(glass, GWLP_USERDATA, show);
 				shown = show;
 			}
+#ifdef FLUIDGLASS_LOGS
+			// Log builds only: each change in what the glass goes by, with where it is and who holds the foreground.
+			{
+				static wchar_t lastState[320];
+				wchar_t holder[64] = L"nobody";
+				if (now == start.window) wcscpy_s(holder, L"Start");
+				else if (now == search.window) wcscpy_s(holder, L"Search");
+				else if (now)
+				{
+					wchar_t name[40]{};
+					GetClassNameW(now, name, ARRAYSIZE(name));
+					DWORD pid{};
+					GetWindowThreadProcessId(now, &pid);
+					swprintf_s(holder, L"\"%s\" pid %lu", name, pid);
+				}
+				wchar_t state[320];
+				swprintf_s(state, L"show %d open %d start %d (cloaked %lu, on %d, was up %d) search cloaked %lu on %d, focused %d closing %d met %d, fg %s",
+					show, open, startShown, start.cloaked, start.onScreen, startWasUp, search.cloaked, search.onScreen, focused, closing, met, holder);
+				if (wcscmp(state, lastState))
+				{
+					wcscpy_s(lastState, state);
+					wchar_t line[480];
+					swprintf_s(line, L"start glass: %s; start %ld,%ld %ldx%ld, search %ld,%ld %ldx%ld", state,
+						start.rect.left, start.rect.top, start.rect.right - start.rect.left, start.rect.bottom - start.rect.top,
+						search.rect.left, search.rect.top, search.rect.right - search.rect.left, search.rect.bottom - search.rect.top);
+					Log(line);
+				}
+			}
+#endif
 			// Both TAPs say the moment their flyout moves, and the cloak watcher the moment one uncloaks, which is how an
 			// opening shows up. While the glass is out, or Start or Search holds the foreground, the foreground is checked
 			// every 8 ms, and every 4 ms while the glass moves. Windows wakes a process only every 16 ms unless it asks for

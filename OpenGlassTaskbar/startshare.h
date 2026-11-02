@@ -19,4 +19,5 @@ struct StartShare
 	volatile LONG sequence;	// odd while the TAP is writing
 	UINT64 window;	// the flyout's CoreWindow, so the host can tell whether DWM shows it
 	RECT menu;	// the flyout's outline, physical pixels on screen; empty until known
+	LONG unparked;	// Start's menu is where a fresh Start laid it out and has never been below the screen
 };

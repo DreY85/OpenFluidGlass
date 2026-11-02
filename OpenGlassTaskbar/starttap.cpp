@@ -12,19 +12,24 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
+#include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.Xaml.Input.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.h>
 #include "pilllog.h"
 #include "startshare.h"
+#include "fillboost.h"
 
 namespace wux = winrt::Windows::UI::Xaml;
 
@@ -114,6 +119,27 @@ namespace
 				const bool outline = name == (g_search ? L"AppBorder" : L"MainMenu");
 				if (fill || outline) Take(element.Handle, name, fill, outline);
 			}
+			if (mutation == Add && element.Type && m_diagnostics)
+			{
+				const std::wstring_view type(element.Type);
+				// A list item draws its own hover and pressed fills. The first few items tell which brushes those are.
+				if (m_itemsTaken < 16 && (type == L"Windows.UI.Xaml.Controls.Primitives.ListViewItemPresenter" || type == L"Windows.UI.Xaml.Controls.Primitives.GridViewItemPresenter"))
+				{
+					++m_itemsTaken;
+					TakeItem(element.Handle);
+				}
+				// The All list's category cards have a faint fill of their own, somewhere in their template.
+				else if (m_cardsTaken < 2 && type == L"StartMenu.CategoryControl")
+				{
+					++m_cardsTaken;
+					TakeCard(element.Handle);
+				}
+				// Pinned tiles and category cards are no list items. Their hover fill only shows up once hovered.
+				if (type == L"StartMenu.PinnedListTile" || type == L"StartMenu.CategoryControl") WatchHover(element.Handle);
+#ifdef FLUIDGLASS_LOGS
+				if (m_types.insert(std::wstring(type)).second) Log(L"type " + std::wstring(type));
+#endif
+			}
 			// The tree changes as a flyout opens, which may come before the host notices.
 			if (m_publishing) Wake(L"tree");
 			SysFreeString(element.Type);
@@ -141,8 +167,11 @@ namespace
 						known = std::prev(m_restyled.end());
 						Log(std::wstring(name) + L" found");
 					}
-					m_glass = GlassShown();
+					m_glass = m_glassSeen && GlassShown();
 					border.Background(m_glass ? known->ours : known->original);
+					// Restyle is skipped when the glass is already there, so the stronger fills are shown from here too.
+					if (m_glass) BoostThemeFills();
+					m_boost.Show(m_glass);
 				}
 				if (outline)
 				{
@@ -151,6 +180,175 @@ namespace
 				}
 			}
 			catch (...) { Log(L"take threw for " + std::wstring(name)); }
+		}
+
+		void TakeItem(InstanceHandle handle)
+		{
+			try
+			{
+				winrt::Windows::Foundation::IInspectable object;
+				if (FAILED(m_diagnostics->GetIInspectableFromHandle(handle, reinterpret_cast<::IInspectable**>(winrt::put_abi(object)))) || !object) return;
+				namespace primitives = wux::Controls::Primitives;
+				if (const auto list = object.try_as<primitives::ListViewItemPresenter>())
+					Boost({ list.PointerOverBackground(), list.PressedBackground() }, L"list item");
+				else if (const auto grid = object.try_as<primitives::GridViewItemPresenter>())
+					Boost({ grid.PointerOverBackground() }, L"grid item");
+			}
+			catch (...) {}
+		}
+
+		void TakeCard(InstanceHandle handle)
+		{
+			try
+			{
+				winrt::Windows::Foundation::IInspectable object;
+				if (FAILED(m_diagnostics->GetIInspectableFromHandle(handle, reinterpret_cast<::IInspectable**>(winrt::put_abi(object)))) || !object) return;
+				const auto card = object.as<wux::Controls::Control>();
+				Boost({ card.Background() }, L"category card");
+				// Its template is only there once it is loaded.
+				card.Loaded([this](const winrt::Windows::Foundation::IInspectable& sender, auto&&)
+				{
+					try { BoostTree(sender.as<wux::DependencyObject>(), 4, L"category card"); }
+					catch (...) {}
+				});
+			}
+			catch (...) {}
+		}
+
+		// The hover and pressed fills are set as the state changes, so the tree is searched just after it has.
+		void WatchHover(InstanceHandle handle)
+		{
+			try
+			{
+				winrt::Windows::Foundation::IInspectable object;
+				if (FAILED(m_diagnostics->GetIInspectableFromHandle(handle, reinterpret_cast<::IInspectable**>(winrt::put_abi(object)))) || !object) return;
+				const auto element = object.as<wux::UIElement>();
+				const wux::Input::PointerEventHandler look = [this](const winrt::Windows::Foundation::IInspectable& sender, const wux::Input::PointerRoutedEventArgs&)
+				{
+					try
+					{
+						const auto node = sender.as<wux::DependencyObject>();
+						node.Dispatcher().RunAsync(winrt::Windows::UI::Core::CoreDispatcherPriority::Low, [this, node]
+						{
+							try { BoostTree(node, 6, L"hover"); }
+							catch (...) {}
+						});
+					}
+					catch (...) {}
+				};
+				// The clear fill a hover starts from is taken once the tile is laid out, before its first hover fades.
+				element.as<wux::FrameworkElement>().Loaded([this](const winrt::Windows::Foundation::IInspectable& sender, auto&&)
+				{
+					try { BoostTree(sender.as<wux::DependencyObject>(), 6, L"tile"); }
+					catch (...) {}
+				});
+				element.PointerEntered(look);
+				element.AddHandler(wux::UIElement::PointerPressedEvent(), winrt::box_value(look), true);
+			}
+			catch (...) {}
+		}
+
+		void WatchFill(const wux::Controls::Border& border, const std::wstring& from)
+		{
+			// Once per border. A border that went away leaves a dead entry, and a new one at its address is watched anew.
+			auto& known = m_watched[winrt::get_abi(border)];
+			if (known.get() == border) return;
+			known = winrt::make_weak(border);
+			Log(L"watching " + from);
+			border.RegisterPropertyChangedCallback(wux::Controls::Border::BackgroundProperty(), [this](const wux::DependencyObject& sender, const wux::DependencyProperty&)
+			{
+				try
+				{
+					const auto fill = sender.as<wux::Controls::Border>().Background();
+					Boost({ fill }, L"faded fill");
+					Clear(fill, L"faded fill");
+				}
+				catch (...) {}
+			});
+		}
+
+		void BoostTree(const wux::DependencyObject& node, int depth, std::wstring_view what)
+		{
+			const int count = wux::Media::VisualTreeHelper::GetChildrenCount(node);
+			for (int index = 0; index < count; ++index)
+			{
+				const auto child = wux::Media::VisualTreeHelper::GetChild(node, index);
+				const auto element = child.try_as<wux::FrameworkElement>();
+				const std::wstring from = std::wstring(what) + L" " + std::wstring(winrt::get_class_name(child)) + L" '" + std::wstring(element ? element.Name() : L"") + L"'";
+				wux::Media::Brush fill{ nullptr };
+				if (const auto border = child.try_as<wux::Controls::Border>()) fill = border.Background();
+				else if (const auto panel = child.try_as<wux::Controls::Panel>()) fill = panel.Background();
+				else if (const auto control = child.try_as<wux::Controls::Control>()) fill = control.Background();
+				else if (const auto presenter = child.try_as<wux::Controls::ContentPresenter>()) fill = presenter.Background();
+#ifdef FLUIDGLASS_LOGS
+				// Every fill a hover shows, once, faint or not, so the log tells which one Start really uses.
+				if (fill)
+				{
+					std::wstring seen = std::wstring(winrt::get_class_name(fill));
+					if (const auto solid = fill.try_as<wux::Media::SolidColorBrush>())
+					{
+						const auto color = solid.Color();
+						wchar_t argb[16];
+						swprintf_s(argb, L" %02X%02X%02X%02X", color.A, color.R, color.G, color.B);
+						seen += argb;
+					}
+					seen = L"seen " + seen + L" on " + from;
+					if (m_types.insert(seen).second) Log(seen);
+				}
+#endif
+				// A border that fades between its fills is a tile's hover. Start sets its hover fill a moment after the pointer
+				// comes in, mostly after the search above, so the border tells us each time its fill changes.
+				if (const auto border = child.try_as<wux::Controls::Border>(); border && border.BackgroundTransition()) WatchFill(border, from);
+				Boost({ fill }, from);
+				Clear(fill, from);
+				if (depth > 0) BoostTree(child, depth - 1, what);
+			}
+		}
+
+		// The theme's hover and pressed fills, wherever a part of the flyout takes them from. Looked up again at every
+		// opening, as a theme change brings other brushes.
+		static constexpr const wchar_t* HoverKeys[]
+		{
+			L"SubtleFillColorSecondaryBrush", L"SubtleFillColorTertiaryBrush",
+			L"ListViewItemBackgroundPointerOver", L"ListViewItemBackgroundPressed",
+			L"GridViewItemBackgroundPointerOver", L"GridViewItemBackgroundPressed",
+			L"ItemContainerPointerOverBackground", L"ItemContainerPressedBackground",
+			L"CardBackgroundFillColorDefaultBrush", L"CardBackgroundFillColorSecondaryBrush",
+		};
+
+		void BoostThemeFills()
+		{
+			try
+			{
+				const auto resources = wux::Application::Current().Resources();
+				for (const wchar_t* key : HoverKeys)
+				{
+					const auto value = resources.TryLookup(winrt::box_value(key));
+					if (!value && !m_keysLogged) Log(std::wstring(L"no ") + key);
+					Boost({ value ? value.try_as<wux::Media::Brush>() : nullptr }, key);
+				}
+				if (const auto clear = resources.TryLookup(winrt::box_value(L"SubtleFillColorTransparentBrush")))
+					Clear(clear.try_as<wux::Media::Brush>(), L"SubtleFillColorTransparentBrush");
+			}
+			catch (...) { if (!m_keysLogged) Log(L"no app resources"); }
+			m_keysLogged = true;
+		}
+
+		void Clear(const wux::Media::Brush& brush, std::wstring_view from)
+		{
+			if (m_boost.AddClear(brush)) Log(L"clear fill from " + std::wstring(from) + L" made black");
+		}
+
+		void Boost(std::initializer_list<wux::Media::Brush> brushes, std::wstring_view from)
+		{
+			for (const auto& brush : brushes)
+			{
+				if (!m_boost.Add(brush)) continue;
+				const auto color = m_boost.Last();
+				wchar_t line[64];
+				swprintf_s(line, L"fill %02X%02X%02X%02X from ", color.A, color.R, color.G, color.B);
+				Log(line + std::wstring(from) + L" made stronger");
+			}
 		}
 
 		// pillhost keeps this window while the setting is on. FindWindow works from inside the app container too.
@@ -162,6 +360,8 @@ namespace
 			if (glass == m_glass) return;
 			m_glass = glass;
 			Log(glass ? L"glass is back, clear fills" : L"glass is gone, original acrylic");
+			if (glass) BoostThemeFills();
+			m_boost.Show(glass);
 			for (const auto& item : m_restyled)
 			{
 				try { item.border.Background(glass ? item.ours : item.original); }
@@ -223,14 +423,18 @@ namespace
 		void Publish()
 		{
 			const ULONGLONG now = GetTickCount64();
-			if (now - m_glassChecked >= 250)
+			// Until the glass has shown once, the flyout keeps its own acrylic, looked at on every frame. A Start opened
+			// just after we got in does not park its menu, so the glass does not follow it, and with clear fills it showed
+			// nothing at all.
+			if (now - m_glassChecked >= 250 || !m_glassSeen)
 			{
 				m_glassChecked = now;
 				const HWND glass = FindWindowW(StartGlassClass, nullptr);
-				Restyle(glass != nullptr);
 				// The host keeps the glass out and cloaks it while unneeded, so it says in the window's user data
 				// whether the glass shows.
 				m_glassVisible = glass && GetWindowLongPtrW(glass, GWLP_USERDATA) != 0;
+				if (m_glassVisible) m_glassSeen = true;
+				Restyle(glass && m_glassSeen);
 			}
 			RECT menu{};
 			try
@@ -253,10 +457,13 @@ namespace
 				// Once per opening: a menu top still below the screen means we woke before the slide.
 				Log(std::wstring(L"awake by ") + m_wokeBy + L", menu top " + std::to_wstring(menu.top));
 				m_wokeBy = nullptr;
+				if (m_glass) BoostThemeFills();
 			}
 			// A fresh Start keeps its menu where it laid it out, on screen, until its first opening is under way, then
-			// drops it below the screen and slides it up from there. Followed before that, the glass came out at the top
-			// before the menu did, so Start's outline counts only once its menu has been seen parked.
+			// mostly drops it below the screen and slides it up from there. Followed before that, the glass came out at the
+			// top before the menu did. Opened soon after sign-in, it sometimes slides the menu up without ever moving it
+			// in XAML, so the outline goes out marked, and the host slides the glass up on its own.
+			bool unparked = false;
 			if (!g_search && !m_parked)
 			{
 				MONITORINFO monitor{ sizeof(monitor) };
@@ -265,18 +472,20 @@ namespace
 					m_parked = true;
 					Log(L"menu parked, the glass follows it from here");
 				}
-				else menu = {};
+				else unparked = !IsRectEmpty(&menu);
 			}
-			if (EqualRect(&menu, &m_last) || !m_share)
+			if ((EqualRect(&menu, &m_last) && unparked == m_lastUnparked) || !m_share)
 			{
 				if (now - m_movedAt >= 1000 && !m_glassVisible) Rest();
 				return;
 			}
 			m_movedAt = now;
 			m_last = menu;
+			m_lastUnparked = unparked;
 			InterlockedIncrement(&m_share->sequence);
 			m_share->window = reinterpret_cast<UINT64>(m_window);
 			m_share->menu = menu;
+			m_share->unparked = unparked;
 			InterlockedIncrement(&m_share->sequence);
 			if (m_moved) SetEvent(m_moved);
 		}
@@ -285,6 +494,13 @@ namespace
 		IUnknown* m_site{};
 		IXamlDiagnostics* m_diagnostics{};
 		std::vector<Restyled> m_restyled;
+		FillBoost m_boost;
+		int m_itemsTaken{}, m_cardsTaken{};
+		bool m_keysLogged{};
+		std::map<void*, winrt::weak_ref<wux::Controls::Border>> m_watched;
+#ifdef FLUIDGLASS_LOGS
+		std::set<std::wstring> m_types;
+#endif
 		bool m_glass{};
 		ULONGLONG m_glassChecked{};
 		wux::FrameworkElement m_outline{ nullptr };
@@ -296,8 +512,10 @@ namespace
 		winrt::event_token m_rendering{};	// set while we ask for every frame
 		ULONGLONG m_movedAt{};	// last move or wake
 		bool m_glassVisible{};
+		bool m_glassSeen{};	// the glass has shown since we got in
 		const wchar_t* m_wokeBy{};
 		bool m_parked{};	// Start's menu has been below the screen once
+		bool m_lastUnparked{};
 	};
 
 	class Factory : public IClassFactory

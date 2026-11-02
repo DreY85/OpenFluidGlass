@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cmath>
 #include <iterator>
+#include <string>
 #include <thread>
 #include "pilllog.h"
 #include "pillshare.h"
@@ -75,15 +76,50 @@ namespace
 		g_settings.animate = ReadPillSetting(PillAnimate) != 0;
 	}
 
-	// Rare events (attach attempts, nudges) to %TEMP%\pillhost.txt, timestamped like the TAP's log.
-	void Log(const wchar_t* line)
+	// Rare events (attach attempts, nudges) to %TEMP%\pillhost.txt, timestamped like the TAP's log. A line is only queued
+	// here, and a thread of its own writes it: opening and closing the file took 2 ms and more a line, and up to half a
+	// second while the antivirus was busy after sign-in, which held the Start glass still while Start slid up without it.
+#ifdef FLUIDGLASS_LOGS
+	SRWLOCK g_logQueueLock = SRWLOCK_INIT, g_logFileLock = SRWLOCK_INIT;
+	std::wstring g_logQueue;
+	HANDLE g_logQueued{};
+
+	// Writes what is queued; the writer thread and the end of the host both do.
+	void WriteLog()
 	{
-		FILE* file = OpenLog(L"pillhost.txt");
-		if (!file) return;
+		AcquireSRWLockExclusive(&g_logFileLock);
+		std::wstring lines;
+		AcquireSRWLockExclusive(&g_logQueueLock);
+		lines.swap(g_logQueue);
+		ReleaseSRWLockExclusive(&g_logQueueLock);
+		if (!lines.empty())
+			if (FILE* file = OpenLog(L"pillhost.txt"))
+			{
+				fputws(lines.c_str(), file);
+				fclose(file);
+			}
+		ReleaseSRWLockExclusive(&g_logFileLock);
+	}
+#endif
+
+	void Log([[maybe_unused]] const wchar_t* line)
+	{
+#ifdef FLUIDGLASS_LOGS
 		SYSTEMTIME now{};
 		GetLocalTime(&now);
-		fwprintf(file, L"%02u:%02u:%02u.%03u %s\n", now.wHour, now.wMinute, now.wSecond, now.wMilliseconds, line);
-		fclose(file);
+		wchar_t stamp[16];
+		swprintf_s(stamp, L"%02u:%02u:%02u.%03u ", now.wHour, now.wMinute, now.wSecond, now.wMilliseconds);
+		[[maybe_unused]] static const bool writing = []
+		{
+			g_logQueued = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+			std::thread([] { for (;;) { WaitForSingleObject(g_logQueued, INFINITE); WriteLog(); } }).detach();
+			return true;
+		}();
+		AcquireSRWLockExclusive(&g_logQueueLock);
+		g_logQueue.append(stamp).append(line).push_back(L'\n');
+		ReleaseSRWLockExclusive(&g_logQueueLock);
+		SetEvent(g_logQueued);
+#endif
 	}
 
 #ifdef FLUIDGLASS_LOGS
@@ -408,6 +444,29 @@ namespace
 		return false;
 	}
 
+	// Closing an app on a centered taskbar, the TAP reports the apps group in steps that are off its middle: one side
+	// drew in a whole icon while the other had not moved yet, then grew back half an icon 0.56 s later, and the pill
+	// following it drew in over the next icon and out again. The icons themselves stay centered, so while a change is
+	// under way the group is taken as wide as its farther side from the middle, which holds the pill until both sides
+	// have come in. Once the group has stood still a second, it counts as reported.
+	constexpr ULONGLONG AppsSettle = 1000;	// ms
+	RECT g_reportedApps{}, g_steadyApps{};
+	ULONGLONG g_appsChangedAt{};
+	void KeepCentered(RECT& apps, LONG barLength, bool vertical, double scale)
+	{
+		const ULONGLONG now = GetTickCount64();
+		if (!EqualRect(&apps, &g_reportedApps)) { g_reportedApps = apps; g_appsChangedAt = now; }
+		LONG& low = vertical ? apps.top : apps.left;
+		LONG& high = vertical ? apps.bottom : apps.right;
+		if (now - g_appsChangedAt >= AppsSettle || IsRectEmpty(&g_steadyApps) || high <= low) { g_steadyApps = apps; return; }
+		const double middle = vertical ? (g_steadyApps.top + g_steadyApps.bottom) / 2.0 : (g_steadyApps.left + g_steadyApps.right) / 2.0;
+		// Only for a group centered on the taskbar, and a step less than an icon off its middle.
+		if (std::abs(middle - barLength / 2.0) > 2.0 || std::abs((low + high) / 2.0 - middle) > 32.0 * scale) return;
+		const double half = (std::max)(middle - low, high - middle);
+		low = std::lround(middle - half);
+		high = std::lround(middle + half);
+	}
+
 	RECT Transposed(const RECT& r)
 	{
 		return { r.top, r.left, r.bottom, r.right };
@@ -598,6 +657,13 @@ namespace
 		bool valid;
 	};
 	Motion g_motion[PillCount]{};
+#ifdef FLUIDGLASS_LOGS
+	RECT g_tracedTarget{};	// the apps pill's goal last logged
+#endif
+	// Explorer can leave the taskbar in Start's band once Start closes, out of a pill's reach: putting the pill under it
+	// again held for no tick, 213 SetWindowPos calls in 10 s at 15 times the host's usual cost. A pill whose order
+	// did not hold waits a second before the next try.
+	ULONGLONG g_orderRetryAt[PillCount]{};
 	RECT g_lastBar{};
 	double g_lastStep{};	// s, from Seconds; 0 before the first placement
 	bool g_entranceDone{};
@@ -825,7 +891,12 @@ namespace
 		// The saved layout shows as soon as the taskbar does: waiting for the TAP to attach kept the pills away 6.4 s after
 		// the taskbar showed at one sign-in, and how long that takes depends on the machine.
 		else if (visible) shown = SavedLayout(groups, bar, dpi);
-		if (shown) Layout(groups, bar.right - bar.left, bar.bottom - bar.top, dpi / 96.0, pills);
+		if (shown)
+		{
+			const bool tall = bar.bottom - bar.top > bar.right - bar.left;
+			KeepCentered(groups[0], tall ? bar.bottom - bar.top : bar.right - bar.left, tall, dpi / 96.0);
+			Layout(groups, bar.right - bar.left, bar.bottom - bar.top, dpi / 96.0, pills);
+		}
 		const bool topmost = tray && (GetWindowLongW(tray, GWL_EXSTYLE) & WS_EX_TOPMOST);
 		// A pill that shows again, or a taskbar moved to another side or screen, jumps straight to its place.
 		const bool barMoved = !EqualRect(&bar, &g_lastBar);
@@ -923,6 +994,17 @@ namespace
 			}
 			bool moving = false;
 			const RECT want = StepMotion(motion, target, vertical, elapsed, moving);
+#ifdef FLUIDGLASS_LOGS
+			// Log builds only: the apps pill's goal and where it goes, each frame it moves, to see an app closing.
+			if (index == 0 && g_entranceDone && (moving || !EqualRect(&target, &g_tracedTarget)))
+			{
+				g_tracedTarget = target;
+				wchar_t line[192];
+				swprintf_s(line, L"apps pill: goal %ld..%ld, placed %ld..%ld, group %ld..%ld, reported %ld..%ld", target.left, target.right, want.left, want.right,
+					groups[0].left, groups[0].right, g_reportedApps.left, g_reportedApps.right);
+				Log(line);
+			}
+#endif
 			if (moving) animating = true;
 			else
 			{
@@ -931,18 +1013,23 @@ namespace
 			}
 			RECT current{};
 			GetWindowRect(pill, &current);
+			const bool hidden = !IsWindowVisible(pill), moved = !EqualRect(&current, &want);
+			const HWND between = hidden || moved || GetTickCount64() < g_orderRetryAt[index] ? above : ShownAbove(pill, want, above);
 #ifdef FLUIDGLASS_LOGS
-			if (!IsWindowVisible(pill)) ++g_wakeStats.placeHidden;
-			else if (!EqualRect(&current, &want)) ++g_wakeStats.placeMoved;
-			else if (const HWND between = ShownAbove(pill, want, above); between != above)
+			if (hidden) ++g_wakeStats.placeHidden;
+			else if (moved) ++g_wakeStats.placeMoved;
+			else if (between != above)
 			{
 				++g_wakeStats.placeOrder;
 				g_wakeStats.between = between;
 				g_wakeStats.betweenPill = index;
 			}
 #endif
-			if (!IsWindowVisible(pill) || !EqualRect(&current, &want) || ShownAbove(pill, want, above) != above)
+			if (hidden || moved || between != above)
+			{
 				SetWindowPos(pill, above, want.left, want.top, want.right - want.left, want.bottom - want.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+				if (between != above && ShownAbove(pill, want, above) != above) g_orderRetryAt[index] = GetTickCount64() + 1000;
+			}
 			above = pill;
 			placed = true;
 		}
@@ -1072,5 +1159,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 	EndNudge();
 	ReleaseTap();
 	Disconnect();
+#ifdef FLUIDGLASS_LOGS
+	WriteLog();
+#endif
 	return 0;
 }
