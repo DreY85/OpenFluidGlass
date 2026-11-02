@@ -338,7 +338,7 @@ namespace StartGlass
 		std::thread(WatchCloaks, surfaces, std::size(surfaces)).detach();
 
 		HWND glass{};
-		bool shown{}, focused{}, closing{}, met{}, startWasUp{}, hurried{}, searchWasOut{};
+		bool shown{}, focused{}, closing{}, met{}, startWasUp{}, hurried{}, searchWasOut{}, taskbarHeld{};
 		DWORD startPid{}, searchPid{};
 		RECT last{}, seen{}, parked{}, rest{}, slideFrom{};
 		LONG step{}, stepBefore{}, slideSeen{};
@@ -415,14 +415,20 @@ namespace StartGlass
 			// A right click on the taskbar gives it the foreground while Start stays up under the taskbar's menu, and the
 			// glass that went then left the menu bare for as long as that menu showed. So the taskbar holding the foreground
 			// is not yet a close: a Start that does close from there hides Search 7 to 12 ms in, which the check below catches.
+			// Nor is what follows: an item picked from that menu takes the foreground while Start stays up another 400 to
+			// 600 ms, so once the taskbar has held it, only Search's cloak closes the glass, until Start has it back.
 			const auto taskbarHolds = [now]
 			{
 				wchar_t name[32]{};
 				return GetClassNameW(now, name, ARRAYSIZE(name)) && (!wcscmp(name, L"Shell_TrayWnd") || !wcscmp(name, L"Shell_SecondaryTrayWnd"));
 			};
-			if (!open) focused = closing = false;
-			else if (flyoutFocused) focused = true;
-			else if (focused && !closing && !taskbarHolds()) closing = true;
+			if (!open) focused = closing = taskbarHeld = false;
+			else if (flyoutFocused) focused = true, taskbarHeld = false;
+			else if (focused && !closing)
+			{
+				if (taskbarHolds()) taskbarHeld = true;
+				else if (!taskbarHeld) closing = true;
+			}
 			// Closed with the Windows key or the Start button, Start leaves the foreground with Search, so only Search's
 			// cloak tells it is going, about 200 ms before Start's own, and the glass stood still while the menu slid down.
 			if (open && startShown && (startWasUp || start.unparked) && start.onScreen && searchWasOut && search.cloaked) closing = true;
