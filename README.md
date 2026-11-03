@@ -8,6 +8,8 @@ This is an independent project. It is not made, endorsed or supported by the Ope
 | --- | --- |
 | ![File Explorer in dark mode with Fluid Glass, over a colorful wallpaper, and the floating glass taskbar](docs/screenshots/fluid-glass-dark.jpg) | ![The same File Explorer window in light mode with Fluid Glass](docs/screenshots/fluid-glass-light.jpg) |
 
+![The Start menu with Fluid Glass over the same wallpaper](docs/screenshots/fluid-glass-start.jpg)
+
 ## What it adds to OpenGlass
 
 - **Fluid Glass.** A refraction pass in the Direct3D glass shader. You control the bezel, thickness, index of refraction, dispersion, clarity, softness, rim light, shine and light angle. Text readability has separate light and dark mode values. The tint of each window follows that window's own light or dark mode.
