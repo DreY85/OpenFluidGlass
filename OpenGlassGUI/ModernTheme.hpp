@@ -21,8 +21,11 @@ namespace OpenGlass::ModernTheme
 		wxColour hover;
 	};
 
-	// Chosen once from the app appearance, which follows the Windows light or dark mode.
+	// Chosen at startup from the Windows light or dark mode for apps.
 	const Palette& Get();
+	// Switches the palette and the system colors to the current Windows mode. Returns false if it already
+	// matches. Windows made before a switch keep their old colors, so the caller rebuilds them.
+	bool FollowAppMode();
 
 	wxFont IconFont(const wxWindow* window, double pointSize);
 	// Segoe Fluent Icons glyph for a tab or card title, or an empty string.

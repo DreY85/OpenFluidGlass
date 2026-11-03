@@ -2,6 +2,7 @@
 #include "MainFrame.hpp"
 #include "ColorPresetList.hpp"
 #include "EffectiveConfiguration.hpp"
+#include "ModernTheme.hpp"
 
 namespace OpenGlass
 {
@@ -114,6 +115,13 @@ namespace OpenGlass
 		if (message == WM_SETTINGCHANGE && wParam == 0 && lParam
 			&& std::wstring_view(reinterpret_cast<const wchar_t*>(lParam)) == L"ImmersiveColorSet")
 		{
+			// Light or dark may have changed. The next idle time checks it.
+			m_appModeChangePending = true;
+			if (!m_frozenForAppMode && !IsBeingDeleted() && IsEnabled() && CanSwitchEditingScope()
+				&& wxSystemSettings::GetAppearance().AreAppsDark() != ModernTheme::Get().dark)
+			{
+				HoldPicture(true);
+			}
 			QueueColorizationRefresh();
 			if (IsBeingDeleted() || m_systemColorChangePending) return 0;
 			// wxWidgets 3.3.3 still refreshes synchronously on every accent broadcast.

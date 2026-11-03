@@ -28,7 +28,12 @@ namespace OpenGlass
 
 	bool OpenGlassApp::OnInit()
 	{
-		MSWEnableDarkMode(wxApp::DarkMode_Auto);
+		// Dark is forced, so the system text colors can't follow a Windows switch on their own and end up
+		// dark on the dark palette. The main window rebuilds itself in the new colors instead.
+		if (wxSystemSettings::GetAppearance().AreAppsDark())
+		{
+			MSWEnableDarkMode(wxApp::DarkMode_Always);
+		}
 		ModernTheme::Install();
 		if (!wxApp::OnInit())
 			return false;

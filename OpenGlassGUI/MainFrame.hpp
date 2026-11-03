@@ -35,6 +35,16 @@ namespace OpenGlass
 		void CreateBottomControls(wxSizer* parentSizer);
 		bool CanSwitchEditingScope() const;
 		void SwitchEditingScope();
+		// Rebuilds the window in the new colors after Windows switches between light and dark.
+		void FollowAppMode();
+		// Replaces this window with a new one for the scope, at the same place and tab.
+		void Reopen(Settings::Scope scope, const wchar_t* failure, const wchar_t* caption);
+		bool m_appModeChangePending{};
+		// Holds the last picture while the window is rebuilt, so the system colors don't flip first.
+		bool m_frozenForAppMode{};
+		// Stops or restarts painting of the whole window. Unlike Freeze, the controls inside stay visible
+		// to Windows, so the frame doesn't paint its background over them.
+		void HoldPicture(bool hold);
 
 		void BindEvents();
 		void LoadSettings();

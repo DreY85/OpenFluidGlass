@@ -13,6 +13,9 @@
 #include "Elevation.hpp"
 #include "resource.h"
 #include <wx/iconbndl.h>
+#include <dwmapi.h>
+
+#pragma comment(lib, "dwmapi.lib")
 
 namespace OpenGlass
 {
@@ -227,6 +230,38 @@ namespace OpenGlass
 
 	void MainFrame::SwitchEditingScope()
 	{
+		Reopen(m_editScope == Settings::Scope::User ? Settings::Scope::Machine : Settings::Scope::User,
+			L"The other editing view could not be opened", L"Switch editing scope");
+	}
+
+	void MainFrame::FollowAppMode()
+	{
+		m_appModeChangePending = false;
+		// Reopen thaws before it closes this window. Every other way out shows this window again.
+		auto thaw = wil::scope_exit([this] { HoldPicture(false); });
+		if (IsBeingDeleted() || wxSystemSettings::GetAppearance().AreAppsDark() == ModernTheme::Get().dark) return;
+		// A dialog or unsaved changes keep this window. Idle time tries again once they are gone.
+		if (!IsEnabled() || !CanSwitchEditingScope())
+		{
+			m_appModeChangePending = true;
+			return;
+		}
+		ModernTheme::FollowAppMode();
+		Reopen(m_editScope, L"The window could not be redrawn in the new Windows mode", L"Light and dark mode");
+	}
+
+	void MainFrame::HoldPicture(bool hold)
+	{
+		if (hold == m_frozenForAppMode) return;
+		m_frozenForAppMode = hold;
+		const auto window = reinterpret_cast<HWND>(GetHandle());
+		// Windows keeps showing the last picture of a window that doesn't redraw.
+		SendMessageW(window, WM_SETREDRAW, !hold, 0);
+		if (!hold) RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+	}
+
+	void MainFrame::Reopen(Settings::Scope scope, const wchar_t* failure, const wchar_t* caption)
+	{
 		if (!CanSwitchEditingScope()) return;
 		Enable(false);
 		auto enableOnFailure = wil::scope_exit([this] { Enable(); });
@@ -234,7 +269,6 @@ namespace OpenGlass
 		try
 		{
 			// Keep the verified original user and the app's single-instance lock.
-			const auto scope = m_editScope == Settings::Scope::User ? Settings::Scope::Machine : Settings::Scope::User;
 			WINDOWPLACEMENT placement{ sizeof(WINDOWPLACEMENT) };
 			THROW_IF_WIN32_BOOL_FALSE(GetWindowPlacement(reinterpret_cast<HWND>(GetHandle()), &placement));
 			replacement = new MainFrame(m_targetUserSid.ToStdWstring(), scope, m_systemTransparency);
@@ -247,19 +281,63 @@ namespace OpenGlass
 		catch (...)
 		{
 			if (replacement) replacement->Destroy();
-			ModernTheme::ShowMessage(wxString::Format(L"The other editing view could not be opened (HRESULT 0x%08lX).",
-				static_cast<unsigned long>(wil::ResultFromCaughtException())), L"Switch editing scope", wxOK | wxICON_ERROR, this);
+			HoldPicture(false);
+			ModernTheme::ShowMessage(wxString::Format(L"%s (HRESULT 0x%08lX).", failure,
+				static_cast<unsigned long>(wil::ResultFromCaughtException())), caption, wxOK | wxICON_ERROR, this);
 			return;
 		}
 		wxTheApp->SetTopWindow(replacement);
-		if (!CanSwitchEditingScope() || !Close())
+		if (!CanSwitchEditingScope())
 		{
 			wxTheApp->SetTopWindow(this);
 			replacement->Destroy();
 			return;
 		}
-		enableOnFailure.release();
+
+		// The new window fades in over this one without the Windows open and close animations,
+		// so the switch reads as one change instead of a window closing and another one opening.
+		const auto oldWindow = reinterpret_cast<HWND>(GetHandle());
+		const auto newWindow = reinterpret_cast<HWND>(replacement->GetHandle());
+		const auto setTransitions = [](HWND window, bool enabled)
+		{
+			const BOOL disabled = !enabled;
+			DwmSetWindowAttribute(window, DWMWA_TRANSITIONS_FORCEDISABLED, &disabled, sizeof(disabled));
+		};
+		setTransitions(oldWindow, false);
+		setTransitions(newWindow, false);
+		const LONG_PTR exStyle = GetWindowLongPtrW(newWindow, GWL_EXSTYLE);
+		bool fade = false;
+		if (!(exStyle & WS_EX_LAYERED))
+		{
+			SetWindowLongPtrW(newWindow, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+			fade = SetLayeredWindowAttributes(newWindow, 0, 0, LWA_ALPHA) != FALSE;
+			if (!fade) SetWindowLongPtrW(newWindow, GWL_EXSTYLE, exStyle);
+		}
 		replacement->Show();
+		if (fade)
+		{
+			RedrawWindow(newWindow, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+			constexpr int steps = 8;
+			for (int step = 1; step <= steps; ++step)
+			{
+				SetLayeredWindowAttributes(newWindow, 0, static_cast<BYTE>(255 * step / steps), LWA_ALPHA);
+				DwmFlush();
+			}
+			SetWindowLongPtrW(newWindow, GWL_EXSTYLE, exStyle);
+			RedrawWindow(newWindow, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW | RDW_ALLCHILDREN);
+		}
+
+		// This window is covered now, so it may repaint and go without being seen.
+		HoldPicture(false);
+		if (!Close())
+		{
+			setTransitions(oldWindow, true);
+			wxTheApp->SetTopWindow(this);
+			replacement->Destroy();
+			return;
+		}
+		setTransitions(newWindow, true);
+		enableOnFailure.release();
 	}
 
 	void MainFrame::NotifySettingsChange(Settings::UpdateType impact)
@@ -1141,6 +1219,11 @@ namespace OpenGlass
 	void MainFrame::BindEvents()
 	{
 		Bind(wxEVT_CLOSE_WINDOW, &MainFrame::OnClose, this);
+		Bind(wxEVT_IDLE, [this](wxIdleEvent& event)
+		{
+			if (m_appModeChangePending) FollowAppMode();
+			event.Skip();
+		});
 		Bind(wxEVT_ACTIVATE, [this](wxActivateEvent& event)
 		{
 			if (event.GetActive()) QueueColorizationRefresh();

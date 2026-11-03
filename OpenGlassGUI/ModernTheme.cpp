@@ -8,9 +8,9 @@ namespace OpenGlass::ModernTheme
 {
 	namespace
 	{
-		Palette CreatePalette()
+		Palette CreatePalette(bool dark)
 		{
-			if (wxSystemSettings::GetAppearance().IsDark())
+			if (dark)
 			{
 				return {
 					true,
@@ -651,10 +651,31 @@ namespace OpenGlass::ModernTheme
 		return window->GetBackgroundColour();
 	}
 
+	namespace
+	{
+		Palette& Current()
+		{
+			static Palette palette = CreatePalette(wxSystemSettings::GetAppearance().IsDark());
+			return palette;
+		}
+	}
+
 	const Palette& Get()
 	{
-		static const Palette palette = CreatePalette();
-		return palette;
+		return Current();
+	}
+
+	bool FollowAppMode()
+	{
+		const bool dark = wxSystemSettings::GetAppearance().AreAppsDark();
+		if (dark == Get().dark)
+		{
+			return false;
+		}
+		// Dark is forced so it stays put. Light can only go back to following Windows, which is light now.
+		wxTheApp->MSWEnableDarkMode(dark ? wxApp::DarkMode_Always : wxApp::DarkMode_Auto);
+		Current() = CreatePalette(dark);
+		return true;
 	}
 
 	wxFont IconFont([[maybe_unused]] const wxWindow* window, double pointSize)
