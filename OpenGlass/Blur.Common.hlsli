@@ -238,7 +238,16 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	}
 	else
 	{
-		background.rgb = 1.0f - (1.0f - background.rgb) * lerp(1.0f, min(1.0f, 0.22f / max(1.0f - luminance, 1e-3f)), -fgLook.z);
+		// Only the luminance rises, up to a floor that grows with the setting, so mid tones keep their contrast.
+		// The hue and as much of the color as fits stay, so the glass brightens instead of turning milky.
+		float floorLuminance = 0.78f * -fgLook.z;
+		float knee = 0.25f * floorLuminance;
+		float lifted = min(0.5f * (luminance + floorLuminance + sqrt((luminance - floorLuminance) * (luminance - floorLuminance) + knee * knee)), 1.0f);
+		float3 chroma = background.rgb - luminance;
+		float peak = max(max(chroma.r, chroma.g), chroma.b);
+		// Never above white, nor above a channel that was already brighter.
+		float fit = min(1.0f, (max(1.0f, luminance + peak) - lifted) / max(peak, 1e-4f));
+		background.rgb = max(lifted + chroma * fit, 0.0f);
 	}
 
 	// Rim light: how steep the bezel is and how much it faces the light.
