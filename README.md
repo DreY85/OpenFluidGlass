@@ -33,7 +33,7 @@ Fluid Glass needs the Legacy DWM architecture, which covers builds below 28000. 
 1. Download `OpenFluidGlassSetup.exe` from [Releases](../../releases).
 2. If OpenGlass is installed, uninstall it first. The two cannot run together, and the setup stops if it finds OpenGlass.
 3. Run the setup. It needs administrator rights. On the last page you can restart Explorer and start the taskbar.
-4. Open **Open Fluid Glass** from the Start menu to adjust the look. Sliders apply at once.
+4. Open **Open Fluid Glass** to adjust the look. Sliders apply at once.
 
 The setup ships a tuned look as the machine default. Whatever you change in the settings app is saved for your own account and takes priority.
 
