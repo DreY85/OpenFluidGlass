@@ -161,7 +161,7 @@ Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueNam
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassChroma"; ValueData: "33"; Flags: createvalueifdoesntexist
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassSaturation"; ValueData: "120"; Flags: createvalueifdoesntexist
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassReadability"; ValueData: "35"; Flags: createvalueifdoesntexist
-Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassReadabilityLight"; ValueData: "40"; Flags: createvalueifdoesntexist
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassReadabilityLight"; ValueData: "80"; Flags: createvalueifdoesntexist
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassRim"; ValueData: "140"; Flags: createvalueifdoesntexist
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassShine"; ValueData: "300"; Flags: createvalueifdoesntexist
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\DWM"; ValueType: dword; ValueName: "FluidGlassLight"; ValueData: "58500"; Flags: createvalueifdoesntexist
