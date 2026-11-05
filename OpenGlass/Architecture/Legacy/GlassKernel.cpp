@@ -602,6 +602,7 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		Shared::g_colorInactive = Color::FromArgb(GlassEngine::GetDwordFromRegistry(L"ColorizationColorInactive", value));
 		// The Windows theme switch sends ImmersiveColorSet, which rereads this.
 		Shared::g_appsUseLightTheme = GlassEngine::AppsUseLightTheme();
+		Shared::g_systemUsesLightTheme = GlassEngine::SystemUsesLightTheme();
 
 		value = GlassEngine::GetDwordFromRegistry(L"ColorizationOpaqueBlendPriority", 0xFFFFFFFF);
 		Shared::g_opaqueBlend = static_cast<int>(GlassEngine::GetDwordFromRegistry(L"ColorizationOpaqueBlend"));

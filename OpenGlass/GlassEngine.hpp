@@ -33,6 +33,13 @@ namespace OpenGlass::GlassEngine
 		return personalize && RegGetValueW(personalize, nullptr, L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size) == ERROR_SUCCESS && light;
 	}
 
+	inline bool SystemUsesLightTheme() noexcept
+	{
+		DWORD light{}, size{ sizeof(light) };
+		const HKEY personalize = GetPersonalizeKey();
+		return personalize && RegGetValueW(personalize, nullptr, L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size) == ERROR_SUCCESS && light;
+	}
+
 	// Light windows draw dark text and icons, which a dark tint would hide. Behind them the tint keeps its hue but is
 	// lifted most of the way to white.
 	inline D2D1_COLOR_F ForLightWindow(D2D1_COLOR_F color) noexcept

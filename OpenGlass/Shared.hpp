@@ -48,6 +48,8 @@ namespace OpenGlass::Shared
 	inline D2D1_COLOR_F g_colorInactive{};
 	// Apps in light mode: glass behind a window that did not ask for dark mode turns light (GlassKernel::IsLightWindow).
 	inline bool g_appsUseLightTheme{ false };
+	// Windows in light mode: the taskbar and Start draw dark text by this one, not by the apps' mode.
+	inline bool g_systemUsesLightTheme{ false };
 
 	// vista: 1.f
 	// w7: 1.f

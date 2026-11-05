@@ -47,6 +47,9 @@ namespace OpenGlass::AccentOverrider
 	// Our own flag, unused by Windows: the window asks for its glass to be a pill, cut to an
 	// outline rounded by half its height. It is removed before the policy reaches uDWM's own accent code.
 	constexpr DWORD AccentFlagPill{ 0x80000000 };
+	// Our own flag too: the glass sits behind the taskbar or Start, which draw their text by the Windows mode,
+	// not by the apps' mode. Removed with the pill flag.
+	constexpr DWORD AccentFlagShell{ 0x40000000 };
 
 	// Apps that keep their own accent blur while the override is on. Their UI is drawn over a tinted
 	// acrylic, and over clear Fluid Glass it can't be read (ESET's egui.exe). GlassOverrideAccentExclusions
@@ -129,7 +132,7 @@ HRESULT AccentOverrider::MyCAccent_UpdateAccentPolicy(
 	auto accentPolicy = *policy;
 	accentPolicy.AccentState = 1;
 	accentPolicy.dwGradientColor = 0;
-	accentPolicy.AccentFlags &= ~AccentFlagPill;
+	accentPolicy.AccentFlags &= ~(AccentFlagPill | AccentFlagShell);
 	if (const auto it = g_accentClipRegions.find(This); it != g_accentClipRegions.end() && it->second.clipRegion)
 	{
 		// remove accent border atlas
@@ -216,7 +219,7 @@ HRESULT AccentOverrider::MyCAccent__UpdateSolidFill(
 					effectBrush.put()
 				)
 			);
-			const bool light = GlassKernel::IsLightWindow(data);
+			const bool light = (data->GetAccentPolicy()->AccentFlags & AccentFlagShell) ? Shared::g_systemUsesLightTheme : GlassKernel::IsLightWindow(data);
 			auto glassColor = Color::sRGBToscRGB(
 				GlassKernel::RealizeWindowColorization(
 					GlassKernel::GetBaseColor(Shared::IsTransparencyDisabled(), maximized),

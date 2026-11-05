@@ -304,7 +304,8 @@ namespace StartGlass
 	{
 		const HWND glass = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, StartGlassClass, L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
 		const auto setAttribute = reinterpret_cast<SetWindowCompositionAttribute_t>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
-		ACCENT_POLICY accent{ 3, 0, 0, 0 };
+		// OpenGlass: light or dark by the Windows mode, like Start itself.
+		ACCENT_POLICY accent{ 3, 0x40000000, 0, 0 };
 		WINDOWCOMPOSITIONATTRIBDATA data{ 19, &accent, sizeof(accent) };
 		if (setAttribute) setAttribute(glass, &data);
 		const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;

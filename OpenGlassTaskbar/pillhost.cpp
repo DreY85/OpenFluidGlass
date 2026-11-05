@@ -28,6 +28,7 @@ using SetWindowCompositionAttribute_t = BOOL(WINAPI*)(HWND, WINDOWCOMPOSITIONATT
 namespace
 {
 	constexpr DWORD AccentFlagPill = 0x80000000;	// OpenGlass: cut the glass to a fully rounded outline
+	constexpr DWORD AccentFlagShell = 0x40000000;	// OpenGlass: light or dark by the Windows mode, like the taskbar
 	constexpr UINT_PTR FollowTimer = 1;
 	constexpr UINT_PTR GlideTimer = 2;	// a faster tick while a pill glides
 
@@ -1087,7 +1088,7 @@ namespace
 		const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"FluidGlassTaskbarPill", L"", WS_POPUP,
 			0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
 		const auto setAttribute = reinterpret_cast<SetWindowCompositionAttribute_t>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
-		ACCENT_POLICY accent{ 3, AccentFlagPill, 0, 0 };
+		ACCENT_POLICY accent{ 3, AccentFlagPill | AccentFlagShell, 0, 0 };
 		WINDOWCOMPOSITIONATTRIBDATA data{ 19, &accent, sizeof(accent) };
 		if (setAttribute) setAttribute(window, &data);
 		// Peek (hovering a taskbar thumbnail, or the corner) fades every window but the one shown and the taskbar;
