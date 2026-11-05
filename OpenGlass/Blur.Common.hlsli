@@ -256,7 +256,14 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	// A rounded corner is the only place whose normal can face a diagonal light head-on, which made it a
 	// hot spot. Cap the facing at what the best lit straight side gets, so the corner matches the sides.
 	float sideFacing = max(abs(L.x), abs(L.y));
-	float facing = pow(clamp(dot(n, L), 0.0f, sideFacing), fgRim.y) + 0.4f * pow(clamp(dot(n, -L), 0.0f, sideFacing), fgRim.y);
+	// On the two corners side-on to the light the normal turns from the lit face to the far face. A low focus
+	// (an exponent near 0.1) makes both terms jump there, so the corner showed a hard diagonal line. Near that
+	// turn the lit and the far reflection now blend smoothly. Past it, both read what they did before.
+	const float turn = 0.25f;
+	float toLight = dot(n, L);
+	float litFace = pow(clamp(max(toLight, turn), 0.0f, sideFacing), fgRim.y);
+	float farFace = 0.4f * pow(clamp(max(-toLight, turn), 0.0f, sideFacing), fgRim.y);
+	float facing = lerp(farFace, litFace, smoothstep(-turn, turn, toLight));
 	rimLight = ((1.0f - N.y) * facing * fgRim.x).xxx;
 }
 
