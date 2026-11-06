@@ -114,12 +114,14 @@ Source: "{#MyAppBuildPath}\OpenGlassGUI.exe"; DestDir: "{app}"; Flags: ignorever
 Source: "{#TaskbarPath}\pillhost.exe"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#TaskbarPath}\pilltap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
 Source: "{#TaskbarPath}\starttap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
-Source: "{#TaskbarPath}\itemglass.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; Check: IsWindows11
+; itemglass.dll and ExplorerBlurMica.dll are folder extensions, so every File Explorer window loads them from here.
+; MoveAsideInUse renames the loaded copy first, so an update needs an Explorer restart, not a Windows restart.
+Source: "{#TaskbarPath}\itemglass.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; BeforeInstall: MoveAsideInUse; Check: IsWindows11
 Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
 Source: "{#MyProjPath}\Scripts\Restart-Explorer.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ExplorerBlurMica (LGPL-3.0), unmodified. Registered below; its settings file sits beside the DLL.
-Source: "{#EbmPath}\ExplorerBlurMica.dll"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion restartreplace uninsrestartdelete
+Source: "{#EbmPath}\ExplorerBlurMica.dll"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion restartreplace uninsrestartdelete; BeforeInstall: MoveAsideInUse
 Source: "{#EbmPath}\config.ini"; DestDir: "{app}\ExplorerBlurMica"; Flags: onlyifdoesntexist
 Source: "{#EbmPath}\ReadMe.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
 Source: "{#EbmPath}\NOTICE.txt"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion
@@ -193,6 +195,9 @@ Type: filesandordirs; Name: "{commonappdata}\OpenGlass\dumps"
 ; Clean the defaults used by older installers without touching any user-selected custom path.
 Type: filesandordirs; Name: "{app}\symbols"
 Type: filesandordirs; Name: "{app}\dumps"
+; Copies an update moved aside while File Explorer still had them loaded (see MoveAsideInUse).
+Type: files; Name: "{app}\taskbar\itemglass.dll.old*"
+Type: files; Name: "{app}\ExplorerBlurMica\ExplorerBlurMica.dll.old*"
 
 [InstallDelete]
 ; Shortcuts left by an OpenGlass setup from before the rename; they point at the same GUI.
@@ -279,6 +284,48 @@ end;
 function ShouldEnableExplorerBlurMica(): Boolean;
 begin
   Result := not ExplorerBlurMicaTurnedOff;
+end;
+
+const
+  MOVEFILE_DELAY_UNTIL_REBOOT = 4;
+
+function MoveFileExNoTarget(lpExistingFileName: String; lpNewFileName: Cardinal; dwFlags: Cardinal): Boolean;
+  external 'MoveFileExW@kernel32.dll stdcall';
+
+// File Explorer keeps itemglass.dll and ExplorerBlurMica.dll loaded, so they cannot be overwritten. A loaded DLL can
+// still be renamed: the running Explorer keeps using the renamed file, the new one is copied in its place, and the
+// next Explorer start loads it. Old copies are deleted here once nothing has them loaded, or at the next restart.
+// If the rename fails, restartreplace still replaces the file at the next restart, as before.
+procedure MoveAsideInUse();
+var
+  FilePath, Target: String;
+  Index: Integer;
+begin
+  FilePath := ExpandConstant(CurrentFileName);
+  if not FileExists(FilePath) then
+    Exit;
+  for Index := 0 to 9 do
+    if FileExists(FilePath + '.old' + IntToStr(Index)) then
+      DeleteFile(FilePath + '.old' + IntToStr(Index));
+  if DeleteFile(FilePath) then
+    Exit;
+  Target := '';
+  for Index := 0 to 9 do
+    if (Target = '') and not FileExists(FilePath + '.old' + IntToStr(Index)) then
+      Target := FilePath + '.old' + IntToStr(Index);
+  if Target = '' then
+  begin
+    Log(Format('No free name to move %s aside; it is replaced at the next restart.', [FilePath]));
+    Exit;
+  end;
+  if RenameFile(FilePath, Target) then
+  begin
+    Log(Format('Moved the loaded %s aside to %s.', [FilePath, Target]));
+    if not MoveFileExNoTarget(Target, 0, MOVEFILE_DELAY_UNTIL_REBOOT) then
+      Log(Format('Could not schedule %s for deletion at restart.', [Target]));
+  end
+  else
+    Log(Format('Could not move %s aside; it is replaced at the next restart.', [FilePath]));
 end;
 
 // The logon task is what starts the taskbar at sign-in, and a [Run] entry cannot tell whether registering it worked.
