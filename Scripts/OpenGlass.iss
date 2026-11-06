@@ -821,6 +821,23 @@ begin
       Log(Format('Deleted %s.', [MovedOutFiles[Index]]));
 end;
 
+// The uninstaller removes the install folder last, and a process that still has it open can make that fail, which
+// left an empty folder behind. A hidden helper retries for 15 seconds after the uninstaller is gone. rd without /s
+// removes only an empty folder, so a reinstall in the meantime is safe. The restart is the last fallback.
+procedure RemoveInstallFolderWhenEmpty;
+var
+  AppDir: String;
+  ResultCode: Integer;
+begin
+  AppDir := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
+  if not Exec(ExpandConstant('{cmd}'),
+    '/c for /L %i in (1,1,15) do @if exist "' + AppDir + '\" (ping -n 2 127.0.0.1 >nul & rd "' + AppDir + '" 2>nul)',
+    ExpandConstant('{sys}'), SW_HIDE, ewNoWait, ResultCode) then
+    Log(Format('Could not start the folder cleanup: %s', [SysErrorMessage(ResultCode)]));
+  if not MoveFileExNoTarget(AppDir, 0, MOVEFILE_DELAY_UNTIL_REBOOT) then
+    Log(Format('Could not schedule %s for removal at restart.', [AppDir]));
+end;
+
 procedure CurUninstallStepChanged(
   CurUninstallStep: TUninstallStep);
 begin
@@ -857,5 +874,6 @@ begin
     // Last, so the new Explorer finds no folder extension left to load.
     if RestartExplorerOnUninstall then
       RestartExplorerAfterUninstall;
+    RemoveInstallFolderWhenEmpty;
   end;
 end;
