@@ -96,6 +96,7 @@ UninstallDeletePresetPackages=Delete the preset library and retained legacy pack
 ContinueUninstall=Uninstall
 ServiceDescription=This service injects DLL into DWM for you and also maintains that user settings are correctly loaded.
 RestartExplorer=Restart Windows Explorer now to apply the glass effects (the screen flickers for a moment)
+UninstallRestartExplorer=Restart Windows Explorer to remove the glass effects now (the screen flickers)
 StartTaskbar=Start the Fluid Glass taskbar now
 InstallingTaskbar=Registering the Fluid Glass taskbar...
 RemovingTaskbar=Removing the Fluid Glass taskbar...
@@ -119,6 +120,7 @@ Source: "{#TaskbarPath}\starttap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreve
 Source: "{#TaskbarPath}\itemglass.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; BeforeInstall: MoveAsideInUse; Check: IsWindows11
 Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
 Source: "{#MyProjPath}\Scripts\Restart-Explorer.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyProjPath}\Scripts\Restart-ExplorerAsUser.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ExplorerBlurMica (LGPL-3.0), unmodified. Registered below; its settings file sits beside the DLL.
 Source: "{#EbmPath}\ExplorerBlurMica.dll"; DestDir: "{app}\ExplorerBlurMica"; Flags: ignoreversion restartreplace uninsrestartdelete; BeforeInstall: MoveAsideInUse
@@ -434,6 +436,9 @@ external 'GetUserColorPreference@uxtheme.dll stdcall';
 var
   DeleteCurrentAndMachineConfigOnUninstall: Boolean;
   DeletePresetsOnUninstall: Boolean;
+  RestartExplorerOnUninstall: Boolean;
+  MovedOutFiles: TArrayOfString;
+  RestartExplorerScript: String;
 
 procedure DeleteConfigValues(const RootKey: Integer; const SubKey: String; const OpenGlassKeys: TArrayOfString);
 var
@@ -617,6 +622,7 @@ var
   DeleteCurrentAndMachineConfigCheck: TNewCheckBox;
   OtherUserConfigNotice: TNewStaticText;
   DeletePresetsCheck: TNewCheckBox;
+  RestartExplorerCheck: TNewCheckBox;
   ContinueButton: TNewButton;
   OriginalPageName: String;
   OriginalPageDescription: String;
@@ -668,6 +674,15 @@ begin
     CustomMessage('UninstallDeletePresetPackages');
   DeletePresetsCheck.Checked := DeletePresetsOnUninstall;
 
+  RestartExplorerCheck := TNewCheckBox.Create(UninstallProgressForm);
+  RestartExplorerCheck.Parent := OptionsPage;
+  RestartExplorerCheck.Left := DeleteCurrentAndMachineConfigCheck.Left;
+  RestartExplorerCheck.Top := DeletePresetsCheck.Top + ScaleY(32);
+  RestartExplorerCheck.Width := DeleteCurrentAndMachineConfigCheck.Width;
+  RestartExplorerCheck.Height := ScaleY(20);
+  RestartExplorerCheck.Caption := CustomMessage('UninstallRestartExplorer');
+  RestartExplorerCheck.Checked := True;
+
   ContinueButton := TNewButton.Create(UninstallProgressForm);
   ContinueButton.Parent := UninstallProgressForm;
   ContinueButton.Caption := CustomMessage('ContinueUninstall');
@@ -704,6 +719,7 @@ begin
     DeleteCurrentAndMachineConfigOnUninstall :=
       DeleteCurrentAndMachineConfigCheck.Checked;
     DeletePresetsOnUninstall := DeletePresetsCheck.Checked;
+    RestartExplorerOnUninstall := RestartExplorerCheck.Checked;
   end;
 
   ContinueButton.Visible := False;
@@ -728,12 +744,98 @@ begin
   DeleteCurrentAndMachineConfigOnUninstall :=
     Pos('/nodeleteconfig', CmdTail) = 0;
   DeletePresetsOnUninstall := Pos('/deletepresets', CmdTail) > 0;
+  // The options page ticks it. A silent uninstall leaves Explorer alone, as a silent install does.
+  RestartExplorerOnUninstall := False;
   Result := True;
+end;
+
+// File Explorer has itemglass.dll and ExplorerBlurMica.dll loaded, and the taskbar host may still be running, so
+// deleting these would need a Windows restart. Each one that cannot be deleted yet is moved to the temp folder on
+// the same drive instead (a loaded file can be moved, not deleted), so the install folder goes now. The moved copy
+// is deleted once Explorer has restarted, or else at the next Windows restart.
+// If the move fails (the temp folder is on another drive), uninsrestartdelete deletes the file at the restart, as before.
+procedure MoveOutLoadedFile(const FilePath: String);
+var
+  Target: String;
+  Index, Count: Integer;
+begin
+  if not FileExists(FilePath) then
+    Exit;
+  if DeleteFile(FilePath) then
+    Exit;
+  Target := '';
+  for Index := 0 to 99 do
+    if (Target = '') and
+       not FileExists(AddBackslash(GetTempDir) + 'OpenFluidGlass-' + IntToStr(Index) + '-' + ExtractFileName(FilePath)) then
+      Target := AddBackslash(GetTempDir) + 'OpenFluidGlass-' + IntToStr(Index) + '-' + ExtractFileName(FilePath);
+  if (Target <> '') and RenameFile(FilePath, Target) then
+  begin
+    Log(Format('Moved the loaded %s out to %s.', [FilePath, Target]));
+    if not MoveFileExNoTarget(Target, 0, MOVEFILE_DELAY_UNTIL_REBOOT) then
+      Log(Format('Could not schedule %s for deletion at restart.', [Target]));
+    Count := GetArrayLength(MovedOutFiles);
+    SetArrayLength(MovedOutFiles, Count + 1);
+    MovedOutFiles[Count] := Target;
+  end
+  else
+    Log(Format('Could not move %s out; it is deleted at the next restart.', [FilePath]));
+end;
+
+procedure MoveOutLoadedFiles;
+var
+  Dir: String;
+  Index: Integer;
+begin
+  Dir := ExpandConstant('{app}');
+  MoveOutLoadedFile(Dir + '\taskbar\pillhost.exe');
+  MoveOutLoadedFile(Dir + '\taskbar\pilltap.dll');
+  MoveOutLoadedFile(Dir + '\taskbar\starttap.dll');
+  MoveOutLoadedFile(Dir + '\taskbar\itemglass.dll');
+  MoveOutLoadedFile(Dir + '\ExplorerBlurMica\ExplorerBlurMica.dll');
+  // Copies an update moved aside (see MoveAsideInUse) while File Explorer still had them loaded.
+  for Index := 0 to 9 do
+  begin
+    MoveOutLoadedFile(Dir + '\taskbar\itemglass.dll.old' + IntToStr(Index));
+    MoveOutLoadedFile(Dir + '\ExplorerBlurMica\ExplorerBlurMica.dll.old' + IntToStr(Index));
+  end;
+end;
+
+// Runs Restart-ExplorerAsUser.ps1, which restarts File Explorer for the signed-in users with normal rights, then
+// deletes the moved copies that the old Explorer no longer holds.
+procedure RestartExplorerAfterUninstall;
+var
+  ResultCode, Index: Integer;
+begin
+  if (RestartExplorerScript <> '') and FileExists(RestartExplorerScript) then
+  begin
+    if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + RestartExplorerScript + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Log(Format('Explorer restart finished with code %d.', [ResultCode]))
+    else
+      Log(Format('Could not run the Explorer restart: %s', [SysErrorMessage(ResultCode)]));
+    DeleteFile(RestartExplorerScript);
+  end;
+  for Index := 0 to GetArrayLength(MovedOutFiles) - 1 do
+    if DeleteFile(MovedOutFiles[Index]) then
+      Log(Format('Deleted %s.', [MovedOutFiles[Index]]));
 end;
 
 procedure CurUninstallStepChanged(
   CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // The script is deleted with the install folder, so a copy runs from the temp folder at the end.
+    if RestartExplorerOnUninstall then
+    begin
+      RestartExplorerScript := AddBackslash(GetTempDir) + 'OpenFluidGlass-Restart-ExplorerAsUser.ps1';
+      if not FileCopy(ExpandConstant('{app}\Restart-ExplorerAsUser.ps1'), RestartExplorerScript, False) then
+        RestartExplorerScript := '';
+    end;
+    MoveOutLoadedFiles;
+  end;
+
   if CurUninstallStep = usPostUninstall then
   begin
     // Not always in the uninstall log: the GUI can turn ExplorerBlurMica on after an install that left it off.
@@ -751,5 +853,9 @@ begin
 
     // Remove the shared root only when no preserved package or undeleted runtime data remains.
     RemoveDir(ExpandConstant('{commonappdata}\OpenGlass'));
+
+    // Last, so the new Explorer finds no folder extension left to load.
+    if RestartExplorerOnUninstall then
+      RestartExplorerAfterUninstall;
   end;
 end;
