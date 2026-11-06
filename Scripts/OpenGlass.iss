@@ -140,8 +140,9 @@ Filename: "{app}\ExplorerBlurMica\config.ini"; Section: "config"; Key: "effect";
 
 [Registry]
 ; What "regsvr32 ExplorerBlurMica.dll" registers: a folder extension that explorer loads into every File Explorer window.
-; The item glass is also a folder extension, so Open and Save dialogs load it. It stays only when the user turns
-; FluidGlassDialogs on in the settings, and explorer refuses the second copy beside the one pillhost loads.
+; The item glass is also a folder extension, so every app that uses shell folders loads it, Open and Save dialogs
+; among them. It stays only while FluidGlassDialogs is on (written on below), and outside explorer it hooks nothing
+; until the app shows a folder view. Explorer refuses the second copy beside the one pillhost loads.
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{31DCA04E-200A-45C4-8969-9FEA9673B3D9}"; ValueType: string; ValueName: ""; ValueData: "Open Fluid Glass item glass"; Flags: uninsdeletekey; Check: IsWindows11
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{31DCA04E-200A-45C4-8969-9FEA9673B3D9}\InProcServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\taskbar\itemglass.dll"; Flags: uninsdeletekey; Check: IsWindows11
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{{31DCA04E-200A-45C4-8969-9FEA9673B3D9}\InProcServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Check: IsWindows11

@@ -5,7 +5,8 @@
 // target it cannot draw into, keeps the theme's own drawing.
 // FluidGlassItems (HKCU DWM key, default on) turns it off and on while it runs. It loads once per explorer and stays.
 // It is also a shell folder extension, so the Open and Save dialogs of other apps load it with their folder view.
-// There it only stays when FluidGlassDialogs (default off) is set: our hooks then live in someone else's process.
+// There it only stays when FluidGlassDialogs is set (off when the value is missing, but the installer writes it on),
+// and it installs its hooks only once that process shows a folder view (see WaitForView).
 #define NOMINMAX
 #include <windows.h>
 #include <commctrl.h>
