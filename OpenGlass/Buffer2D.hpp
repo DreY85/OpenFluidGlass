@@ -162,6 +162,9 @@ namespace OpenGlass
 					m_bitmap.put()
 				)
 			);
+			// Remember what the bitmap was made with, or the check above never matches
+			// and the bitmap is created again on every call.
+			m_properties = properties;
 			return S_OK;
 		}
 	};

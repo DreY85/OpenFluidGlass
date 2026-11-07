@@ -150,6 +150,12 @@ float4 LgBlurAt(PS_INPUT input, float2 duv)
 float4 LgSharpAt(float2 uv)
 {
 	float4 center = texture1.SampleLevel(sampler0, uv, 0.0f);
+	// Below the threshold only the center is used. Branch before the 12 taps so they are not
+	// fetched and thrown away, which the compiler did with the old select at the end.
+	[branch] if (fgFull.w < 0.05f)
+	{
+		return center;
+	}
 	float4 sum = center;
 	float weight = 1.0f;
 	[unroll] for (int i = 0; i < 12; ++i)
@@ -160,7 +166,7 @@ float4 LgSharpAt(float2 uv)
 		sum += texture1.SampleLevel(sampler0, uv + float2(cos(a), sin(a)) * r * fgFull.w * fgFull.xy, 0.0f) * w;
 		weight += w;
 	}
-	return fgFull.w < 0.05f ? center : sum / weight;
+	return sum / weight;
 }
 
 // The blurred background seen through the glass, plus the light caught by the rim.
