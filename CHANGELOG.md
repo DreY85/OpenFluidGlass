@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.2
+
+### Updates and uninstall
+
+- Updating no longer asks for a Windows restart. File Explorer keeps two folder extensions loaded, so setup now moves the loaded copies aside and puts the new ones in place. The Explorer restart offered at the end loads the new ones.
+- Uninstalling no longer asks for a Windows restart either. A new option on the uninstall page, ticked by default, restarts File Explorer so the glass goes away at once.
+- The empty install folder is removed after an uninstall.
+
+### Light and dark mode
+
+- The app follows the Windows light and dark mode live. Titles no longer stay dark on a dark window after Windows switches to Light.
+- The taskbar and Start glass follow the Windows mode, the same one their text follows. With Windows in light mode and apps in dark mode, their glass is no longer darkened behind black text.
+- Light mode readability now lifts only the brightness and keeps the color. A dark wallpaper no longer turns into a milky gray veil, and mid tones keep their contrast.
+- Light mode readability starts at 0.80, the same value the app resets to. The installer used to write 0.40.
+
+### Glass
+
+- At a low highlight focus, two corners no longer show a hard diagonal line where the rim light turns away from the light.
+
+### App
+
+- The app icon shows the refraction through the glass rim more clearly.
+
 ## 1.0.1
 
 ### Faster glass
