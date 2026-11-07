@@ -1,6 +1,6 @@
 # Open Fluid Glass icon
 
-The application icon is the **Optic Corner** artwork made for Open Fluid Glass: a clear glass corner, like the edge of a window frame, laid over a blue rounded tile. The tile shows through the thick glass rim bent and brightened, the way the app refracts along its edges.
+The application icon is the **Optic Corner** artwork made for Open Fluid Glass: a clear glass corner, like the edge of a window frame, laid over a blue rounded tile. The tile shows through the thick glass rim clearly bent and brightened, the way the app refracts along its edges.
 
 ## Files
 
