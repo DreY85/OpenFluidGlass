@@ -23,6 +23,7 @@
 #include <new>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <intrin.h>
 #include <KNSoft/SlimDetours/SlimDetours.h>
 #include "pilllog.h"
@@ -51,7 +52,9 @@ namespace
 	decltype(&CloseThemeData) g_closeThemeData = CloseThemeData;
 	decltype(&DrawThemeBackground) g_drawThemeBackground = DrawThemeBackground;
 	decltype(&DrawThemeBackgroundEx) g_drawThemeBackgroundEx = DrawThemeBackgroundEx;
+	decltype(&DrawThemeTextEx) g_drawThemeTextEx = DrawThemeTextEx;
 	HMODULE g_module{};
+	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey item text in light mode
 
 	void Log(const wchar_t* line)
 	{
@@ -216,7 +219,6 @@ namespace
 	decltype(&GetThemeColor) g_getThemeColor = GetThemeColor;
 	decltype(&GetThemeSysColor) g_getThemeSysColor = GetThemeSysColor;
 	decltype(&DrawThemeText) g_drawThemeText = DrawThemeText;
-	decltype(&DrawThemeTextEx) g_drawThemeTextEx = DrawThemeTextEx;
 	decltype(&DrawTextW) g_drawTextW = DrawTextW;
 	decltype(&DrawTextExW) g_drawTextExW = DrawTextExW;
 	decltype(&ExtTextOutW) g_extTextOutW = ExtTextOutW;
@@ -393,10 +395,9 @@ namespace
 		return g_drawThemeText(theme, dc, part, state, text, count, flags, flags2, rect);
 	}
 
-	HRESULT WINAPI DrawThemeTextExHook(HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
+	// Logs one DrawThemeTextEx call. The hook itself sits with the grey-text backdrop, outside the logs block.
+	void ProbeDrawThemeTextEx(void* caller, HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
 	{
-		ProbeScope scope;
-		if (scope.outer)
 		{
 			COLORREF themed = 0xFFFFFFFF;
 			g_getThemeColor(theme, part, state, TMT_TEXTCOLOR, &themed);
@@ -405,9 +406,8 @@ namespace
 			wchar_t extra[128];
 			swprintf_s(extra, L"dtt %lx themeText %06lx glow %d composited %d", static_cast<unsigned long>(dtt), static_cast<unsigned long>(themed),
 				options && dtt & DTT_GLOWSIZE ? options->iGlowSize : -1, dtt & DTT_COMPOSITED ? 1 : 0);
-			ProbeText(L"DrawThemeTextEx", _ReturnAddress(), theme, dc, part, state, color, flags, extra, text, count, rect);
+			ProbeText(L"DrawThemeTextEx", caller, theme, dc, part, state, color, flags, extra, text, count, rect);
 		}
-		return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
 	}
 
 	int WINAPI DrawTextWHook(HDC dc, LPCWSTR text, int count, LPRECT rect, UINT format)
@@ -475,6 +475,159 @@ namespace
 		return g_setTextColor(dc, color);
 	}
 #endif
+
+	// Grey item text (type, size, status) on glass in light mode. Its colour is fixed by the theme while the glass shows
+	// whatever lies behind the window, so on a dark wallpaper it nearly vanishes. Instead of a darker grey, which fails
+	// the same way, the text gets local contrast: a soft white halo around its letters, or a frosted patch behind it.
+	// Only DUI70's own DrawThemeTextEx calls (the folder view) with a neutral grey colour are touched.
+	HMODULE g_dui{};
+
+	bool IsGrey(COLORREF color)
+	{
+		const int r = GetRValue(color), g = GetGValue(color), b = GetBValue(color);
+		return r == g && g == b && r >= 0x50 && r <= 0xA0;
+	}
+
+	// Premultiplied white with the given coverage, AlphaBlended onto the DC at the rect's place.
+	void BlendWhite(HDC dc, const RECT& place, const std::vector<BYTE>& alpha, int width, int height)
+	{
+		BITMAPINFO info{};
+		info.bmiHeader = { sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB };
+		void* bits{};
+		HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+		if (!bitmap) return;
+		auto* pixels = static_cast<DWORD*>(bits);
+		for (size_t i = 0; i < alpha.size(); ++i)
+		{
+			const DWORD a = alpha[i];
+			pixels[i] = (a << 24) | (a << 16) | (a << 8) | a;
+		}
+		if (HDC memory = CreateCompatibleDC(dc))
+		{
+			const HGDIOBJ old = SelectObject(memory, bitmap);
+			const BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+			GdiAlphaBlend(dc, place.left, place.top, width, height, memory, 0, 0, width, height, blend);
+			SelectObject(memory, old);
+			DeleteDC(memory);
+		}
+		DeleteObject(bitmap);
+	}
+
+	// Box blur of one channel in place, radius r, horizontal then vertical.
+	void Blur(std::vector<BYTE>& map, int width, int height, int r)
+	{
+		std::vector<BYTE> temp(map.size());
+		for (int y = 0; y < height; ++y)
+			for (int x = 0; x < width; ++x)
+			{
+				int sum = 0;
+				for (int k = -r; k <= r; ++k) sum += map[y * width + std::clamp(x + k, 0, width - 1)];
+				temp[y * width + x] = static_cast<BYTE>(sum / (2 * r + 1));
+			}
+		for (int y = 0; y < height; ++y)
+			for (int x = 0; x < width; ++x)
+			{
+				int sum = 0;
+				for (int k = -r; k <= r; ++k) sum += temp[std::clamp(y + k, 0, height - 1) * width + x];
+				map[y * width + x] = static_cast<BYTE>(sum / (2 * r + 1));
+			}
+	}
+
+	void DrawGreyBackdrop(int mode, HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect)
+	{
+		constexpr int Pad = 4;
+		const int width = rect.right - rect.left + 2 * Pad, height = rect.bottom - rect.top + 2 * Pad;
+		if (width <= 2 * Pad || height <= 2 * Pad || width > 4096 || height > 512) return;
+
+		// The text once, white, into a clear bitmap: its alpha is the exact shape and place of the letters.
+		BITMAPINFO info{};
+		info.bmiHeader = { sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB };
+		void* bits{};
+		HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+		if (!bitmap) return;
+		HDC memory = CreateCompatibleDC(dc);
+		if (!memory) { DeleteObject(bitmap); return; }
+		const HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
+		const HGDIOBJ oldFont = SelectObject(memory, GetCurrentObject(dc, OBJ_FONT));
+		RECT local{ Pad, Pad, width - Pad, height - Pad };
+		DTTOPTS options{ sizeof(options) };
+		options.dwFlags = DTT_TEXTCOLOR | DTT_COMPOSITED;
+		options.crText = RGB(255, 255, 255);
+		g_drawThemeTextEx(theme, memory, part, state, text, count, flags & ~(DT_CALCRECT | DT_MODIFYSTRING), &local, &options);
+		GdiFlush();
+		std::vector<BYTE> alpha(static_cast<size_t>(width) * height);
+		const auto* pixels = static_cast<const DWORD*>(bits);
+		int left = width, top = height, right = -1, bottom = -1;
+		for (int y = 0; y < height; ++y)
+			for (int x = 0; x < width; ++x)
+			{
+				const DWORD p = pixels[y * width + x];
+				const BYTE a = static_cast<BYTE>(std::max({ p >> 24, (p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF }));
+				alpha[y * width + x] = a;
+				if (a > 16) { left = std::min(left, x); right = std::max(right, x); top = std::min(top, y); bottom = std::max(bottom, y); }
+			}
+		SelectObject(memory, oldFont);
+		SelectObject(memory, oldBitmap);
+		DeleteDC(memory);
+		DeleteObject(bitmap);
+		if (right < 0) return;
+
+		if (mode == 1)
+		{
+			// Halo: the letters grown by one pixel, softened over two more, about 85 % white at its core.
+			std::vector<BYTE> grown(alpha.size());
+			for (int y = 0; y < height; ++y)
+				for (int x = 0; x < width; ++x)
+				{
+					BYTE m = 0;
+					for (int dy = -1; dy <= 1; ++dy)
+						for (int dx = -1; dx <= 1; ++dx)
+							m = std::max(m, alpha[std::clamp(y + dy, 0, height - 1) * width + std::clamp(x + dx, 0, width - 1)]);
+					grown[y * width + x] = m;
+				}
+			Blur(grown, width, height, 1);
+			Blur(grown, width, height, 1);
+			for (BYTE& a : grown) a = static_cast<BYTE>(std::min(255, a * 2) * 217 / 255);
+			alpha.swap(grown);
+		}
+		else
+		{
+			// Frosted patch: a rounded rectangle around the text, 60 % white, with a one pixel soft edge.
+			const float x0 = left - 3.0f, x1 = right + 4.0f, y0 = top - 1.0f, y1 = bottom + 2.0f, radius = 4.0f;
+			for (int y = 0; y < height; ++y)
+				for (int x = 0; x < width; ++x)
+				{
+					const float px = x + 0.5f, py = y + 0.5f;
+					const float qx = std::max(std::max(x0 + radius - px, px - (x1 - radius)), 0.0f);
+					const float qy = std::max(std::max(y0 + radius - py, py - (y1 - radius)), 0.0f);
+					const float outside = std::sqrt(qx * qx + qy * qy) - radius;
+					const float cover = std::clamp(0.5f - outside, 0.0f, 1.0f);
+					alpha[y * width + x] = static_cast<BYTE>(std::lround(cover * 153));
+				}
+		}
+		const RECT place{ rect.left - Pad, rect.top - Pad, rect.right + Pad, rect.bottom + Pad };
+		BlendWhite(dc, place, alpha, width, height);
+		static std::atomic<int> s_logged{};
+		if (s_logged.exchange(mode) != mode) Log(mode == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
+	}
+
+	HRESULT WINAPI DrawThemeTextExHook(HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
+	{
+		void* caller = _ReturnAddress();
+#ifdef FLUIDGLASS_LOGS
+		ProbeScope scope;	// held across the drawing below, so the calls it makes inside uxtheme are not logged again
+		if (scope.outer) ProbeDrawThemeTextEx(caller, theme, dc, part, state, text, count, flags, rect, options);
+#endif
+		const int mode = g_grayText;
+		if (mode && g_enabled && g_light && rect && dc && text && !(flags & DT_CALCRECT) && options && (options->dwFlags & DTT_TEXTCOLOR) && IsGrey(options->crText))
+		{
+			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
+			PVOID base{};
+			RtlPcToFileHeader(caller, &base);
+			if (g_dui && base == g_dui) DrawGreyBackdrop(mode, theme, dc, part, state, text, count, flags, *rect);
+		}
+		return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
+	}
 
 	// A folder window shows long before it asks DWM for its backdrop: about 0.6 s on the first open after a reboot.
 	// Until then it is a plain window, erased grey with a black band on top, and the glass only takes over after.
@@ -736,6 +889,7 @@ namespace
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_closeThemeData), CloseThemeDataHook);
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeBackground), DrawThemeBackgroundHook);
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeBackgroundEx), DrawThemeBackgroundExHook);
+		if (g_inExplorer) SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeTextEx), DrawThemeTextExHook);
 #ifdef FLUIDGLASS_LOGS
 		if (g_inExplorer)
 		{
@@ -747,7 +901,6 @@ namespace
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_getThemeColor), GetThemeColorHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_getThemeSysColor), GetThemeSysColorHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeText), DrawThemeTextHook);
-			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeTextEx), DrawThemeTextExHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawTextW), DrawTextWHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawTextExW), DrawTextExWHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_extTextOutW), ExtTextOutWHook);
@@ -806,12 +959,26 @@ namespace
 		RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &lightTheme, &size);
 		const bool light = lightTheme != 0;
 		const bool lightChanged = g_light.exchange(light) != light;
+		DWORD grayText = 1, grayTextSize = sizeof(grayText);
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayText", RRF_RT_REG_DWORD, nullptr, &grayText, &grayTextSize) != ERROR_SUCCESS)
+		{
+			grayTextSize = sizeof(grayText);
+			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayText", RRF_RT_REG_DWORD, nullptr, &grayText, &grayTextSize);
+		}
+		grayText = std::min<DWORD>(grayText, 2);
+		const bool grayTextChanged = g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText);
+		if (grayTextChanged)
+		{
+			wchar_t line[48];
+			swprintf_s(line, L"grey text mode %lu", grayText);
+			Log(line);
+		}
 		if (g_enabled.exchange(enabled) != enabled)
 		{
 			Log(enabled ? L"turned on" : L"turned off");
 			EnumWindows(RefreshFolder, FALSE);
 		}
-		else if (lightChanged)
+		else if (lightChanged || grayTextChanged)
 		{
 			EnumWindows(RefreshFolder, FALSE);
 		}
