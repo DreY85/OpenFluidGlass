@@ -22,6 +22,8 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <string_view>
+#include <intrin.h>
 #include <KNSoft/SlimDetours/SlimDetours.h>
 #include "pilllog.h"
 
@@ -207,6 +209,271 @@ namespace
 		Trace(window, what);
 		return hr;
 	}
+
+	// Grey-text probe, log only: which API and colour Explorer uses for each kind of item text (name, type, size),
+	// so a later build can darken or glow only the secondary text in light mode. It changes nothing on screen.
+	// Every unique combination of API, calling module, theme class, part, state and colour is logged once.
+	decltype(&GetThemeColor) g_getThemeColor = GetThemeColor;
+	decltype(&GetThemeSysColor) g_getThemeSysColor = GetThemeSysColor;
+	decltype(&DrawThemeText) g_drawThemeText = DrawThemeText;
+	decltype(&DrawThemeTextEx) g_drawThemeTextEx = DrawThemeTextEx;
+	decltype(&DrawTextW) g_drawTextW = DrawTextW;
+	decltype(&DrawTextExW) g_drawTextExW = DrawTextExW;
+	decltype(&ExtTextOutW) g_extTextOutW = ExtTextOutW;
+	decltype(&GetSysColor) g_getSysColor = GetSysColor;
+	decltype(&SetTextColor) g_setTextColor = SetTextColor;
+
+	std::mutex g_probeLock;	// own lock: the probe can run while the code above holds g_lock
+	std::map<HTHEME, std::wstring> g_probeNames;
+	std::map<unsigned long long, bool> g_probeSeen;
+	std::atomic<bool> g_probeFull{};
+	constexpr size_t ProbeLimit = 400;
+	thread_local bool t_probing{};	// the APIs call each other, so only the outermost call is logged
+
+	struct ProbeScope
+	{
+		bool outer;
+		ProbeScope() : outer(!t_probing) { t_probing = true; }
+		~ProbeScope() { if (outer) t_probing = false; }
+	};
+
+	void ProbeName(HTHEME theme, LPCWSTR classList)
+	{
+		std::lock_guard guard{ g_probeLock };
+		g_probeNames[theme] = classList;
+	}
+
+	unsigned long long ProbeMix(unsigned long long hash, unsigned long long value)
+	{
+		hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+		return hash;
+	}
+
+	// True the first time this key is seen. Fills the theme class name for the log line.
+	bool ProbeFirst(unsigned long long key, HTHEME theme, std::wstring& name)
+	{
+		if (g_probeFull) return false;
+		std::lock_guard guard{ g_probeLock };
+		if (theme)
+		{
+			if (const auto found = g_probeNames.find(theme); found != g_probeNames.end()) name = found->second;
+			else name = L"?";
+		}
+		if (g_probeSeen.count(key)) return false;
+		g_probeSeen[key] = true;
+		if (g_probeSeen.size() >= ProbeLimit)
+		{
+			g_probeFull = true;
+			Log(L"probe: limit reached, logging stops");
+		}
+		return true;
+	}
+
+	unsigned long long ProbeClassHash(HTHEME theme)
+	{
+		if (!theme) return 0;
+		std::lock_guard guard{ g_probeLock };
+		const auto found = g_probeNames.find(theme);
+		return found == g_probeNames.end() ? 1 : std::hash<std::wstring>{}(found->second);
+	}
+
+	// Calling module as "name+offset", so a later hook can tell Explorer's own text from the ribbon's or a dialog's.
+	void ProbeCaller(void* address, wchar_t* out, size_t size)
+	{
+		PVOID base{};
+		RtlPcToFileHeader(address, &base);
+		wchar_t path[MAX_PATH]{};
+		if (!base || !GetModuleFileNameW(static_cast<HMODULE>(base), path, MAX_PATH))
+		{
+			swprintf_s(out, size, L"?");
+			return;
+		}
+		const wchar_t* file = wcsrchr(path, L'\\');
+		swprintf_s(out, size, L"%s+%llx", file ? file + 1 : path, static_cast<unsigned long long>(static_cast<BYTE*>(address) - static_cast<BYTE*>(base)));
+	}
+
+	unsigned long long ProbeBase(void* address)
+	{
+		PVOID base{};
+		RtlPcToFileHeader(address, &base);
+		return reinterpret_cast<unsigned long long>(base);
+	}
+
+	void ProbeSample(LPCWSTR text, int count, wchar_t* out, size_t size)
+	{
+		size_t n = 0;
+		if (text)
+		{
+			for (int i = 0; (count < 0 ? text[i] != 0 : i < count) && n + 1 < size && n < 24; ++i)
+				out[n++] = text[i] < 32 ? L' ' : text[i];
+		}
+		out[n] = 0;
+	}
+
+	// Font face and height of the DC, plus the text colour, for the text calls.
+	void ProbeFont(HDC dc, wchar_t* out, size_t size)
+	{
+		TEXTMETRICW metrics{};
+		wchar_t face[40]{};
+		if (dc) { GetTextMetricsW(dc, &metrics); GetTextFaceW(dc, 40, face); }
+		swprintf_s(out, size, L"font '%s' h %ld w %ld", face, metrics.tmHeight, metrics.tmWeight);
+	}
+
+	void ProbeText(const wchar_t* api, void* caller, HTHEME theme, HDC dc, int part, int state, COLORREF color, DWORD flags, const wchar_t* extra, LPCWSTR text, int count, const RECT* rect)
+	{
+		unsigned long long key = ProbeMix(std::hash<std::wstring_view>{}(api), ProbeBase(caller));
+		key = ProbeMix(key, ProbeClassHash(theme));
+		key = ProbeMix(key, (static_cast<unsigned long long>(part) << 32) | static_cast<unsigned>(state));
+		key = ProbeMix(key, color);
+		key = ProbeMix(key, g_light ? 1 : 2);
+		std::wstring name;
+		if (!ProbeFirst(key, theme, name)) return;
+		wchar_t from[96], font[96], sample[32], line[512];
+		ProbeCaller(caller, from, std::size(from));
+		ProbeFont(dc, font, std::size(font));
+		ProbeSample(text, count, sample, std::size(sample));
+		const long height = rect ? rect->bottom - rect->top : -1;
+		swprintf_s(line, L"probe %s from %s class '%.50s' part %d state %d color %06lx flags %lx %s rect h %ld %s light %d text '%s'",
+			api, from, theme ? name.c_str() : L"-", part, state, static_cast<unsigned long>(color), static_cast<unsigned long>(flags), extra ? extra : L"", height, font, g_light ? 1 : 0, sample);
+		Log(line);
+	}
+
+	HRESULT WINAPI GetThemeColorHook(HTHEME theme, int part, int state, int property, COLORREF* color)
+	{
+		ProbeScope scope;
+		const HRESULT hr = g_getThemeColor(theme, part, state, property, color);
+		if (!scope.outer || g_probeFull) return hr;
+		const COLORREF value = SUCCEEDED(hr) && color ? *color : 0xFFFFFFFF;
+		void* caller = _ReturnAddress();
+		unsigned long long key = ProbeMix(0x47544331, ProbeBase(caller));
+		key = ProbeMix(key, ProbeClassHash(theme));
+		key = ProbeMix(key, (static_cast<unsigned long long>(part) << 40) | (static_cast<unsigned long long>(state) << 20) | static_cast<unsigned>(property));
+		key = ProbeMix(key, value);
+		key = ProbeMix(key, g_light ? 1 : 2);
+		std::wstring name;
+		if (!ProbeFirst(key, theme, name)) return hr;
+		wchar_t from[96], line[256];
+		ProbeCaller(caller, from, std::size(from));
+		swprintf_s(line, L"probe GetThemeColor from %s class '%.50s' part %d state %d prop %d color %06lx hr %lx light %d",
+			from, name.c_str(), part, state, property, static_cast<unsigned long>(value), static_cast<unsigned long>(hr), g_light ? 1 : 0);
+		Log(line);
+		return hr;
+	}
+
+	COLORREF WINAPI GetThemeSysColorHook(HTHEME theme, int index)
+	{
+		ProbeScope scope;
+		const COLORREF value = g_getThemeSysColor(theme, index);
+		if (!scope.outer) return value;
+		void* caller = _ReturnAddress();
+		unsigned long long key = ProbeMix(0x47545343, ProbeBase(caller));
+		key = ProbeMix(key, ProbeClassHash(theme));
+		key = ProbeMix(key, (static_cast<unsigned long long>(index) << 32) | value);
+		key = ProbeMix(key, g_light ? 1 : 2);
+		std::wstring name;
+		if (!ProbeFirst(key, theme, name)) return value;
+		wchar_t from[96], line[256];
+		ProbeCaller(caller, from, std::size(from));
+		swprintf_s(line, L"probe GetThemeSysColor from %s class '%.50s' index %d color %06lx light %d", from, name.c_str(), index, static_cast<unsigned long>(value), g_light ? 1 : 0);
+		Log(line);
+		return value;
+	}
+
+	HRESULT WINAPI DrawThemeTextHook(HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, DWORD flags2, LPCRECT rect)
+	{
+		ProbeScope scope;
+		if (scope.outer)
+		{
+			COLORREF themed = 0xFFFFFFFF;
+			g_getThemeColor(theme, part, state, TMT_TEXTCOLOR, &themed);
+			wchar_t extra[64];
+			swprintf_s(extra, L"themeText %06lx", static_cast<unsigned long>(themed));
+			ProbeText(L"DrawThemeText", _ReturnAddress(), theme, dc, part, state, themed, flags, extra, text, count, rect);
+		}
+		return g_drawThemeText(theme, dc, part, state, text, count, flags, flags2, rect);
+	}
+
+	HRESULT WINAPI DrawThemeTextExHook(HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
+	{
+		ProbeScope scope;
+		if (scope.outer)
+		{
+			COLORREF themed = 0xFFFFFFFF;
+			g_getThemeColor(theme, part, state, TMT_TEXTCOLOR, &themed);
+			const DWORD dtt = options ? options->dwFlags : 0;
+			const COLORREF color = dtt & DTT_TEXTCOLOR ? options->crText : themed;
+			wchar_t extra[128];
+			swprintf_s(extra, L"dtt %lx themeText %06lx glow %d composited %d", static_cast<unsigned long>(dtt), static_cast<unsigned long>(themed),
+				options && dtt & DTT_GLOWSIZE ? options->iGlowSize : -1, dtt & DTT_COMPOSITED ? 1 : 0);
+			ProbeText(L"DrawThemeTextEx", _ReturnAddress(), theme, dc, part, state, color, flags, extra, text, count, rect);
+		}
+		return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
+	}
+
+	int WINAPI DrawTextWHook(HDC dc, LPCWSTR text, int count, LPRECT rect, UINT format)
+	{
+		ProbeScope scope;
+		if (scope.outer) ProbeText(L"DrawTextW", _ReturnAddress(), nullptr, dc, 0, 0, GetTextColor(dc), format, nullptr, text, count, rect);
+		return g_drawTextW(dc, text, count, rect, format);
+	}
+
+	int WINAPI DrawTextExWHook(HDC dc, LPWSTR text, int count, LPRECT rect, UINT format, LPDRAWTEXTPARAMS params)
+	{
+		ProbeScope scope;
+		if (scope.outer) ProbeText(L"DrawTextExW", _ReturnAddress(), nullptr, dc, 0, 0, GetTextColor(dc), format, nullptr, text, count, rect);
+		return g_drawTextExW(dc, text, count, rect, format, params);
+	}
+
+	BOOL WINAPI ExtTextOutWHook(HDC dc, int x, int y, UINT options, const RECT* rect, LPCWSTR text, UINT count, const INT* dx)
+	{
+		ProbeScope scope;
+		if (scope.outer && count)
+		{
+			const bool glyphs = (options & ETO_GLYPH_INDEX) != 0;
+			ProbeText(glyphs ? L"ExtTextOutW(glyphs)" : L"ExtTextOutW", _ReturnAddress(), nullptr, dc, 0, 0, GetTextColor(dc), options, nullptr,
+				glyphs ? nullptr : text, static_cast<int>(count), rect);
+		}
+		return g_extTextOutW(dc, x, y, options, rect, text, count, dx);
+	}
+
+	DWORD WINAPI GetSysColorHook(int index)
+	{
+		ProbeScope scope;
+		const DWORD value = g_getSysColor(index);
+		if (!scope.outer || g_probeFull) return value;
+		void* caller = _ReturnAddress();
+		unsigned long long key = ProbeMix(0x47534331, ProbeBase(caller));
+		key = ProbeMix(key, (static_cast<unsigned long long>(index) << 32) | value);
+		key = ProbeMix(key, g_light ? 1 : 2);
+		std::wstring name;
+		if (!ProbeFirst(key, nullptr, name)) return value;
+		wchar_t from[96], line[192];
+		ProbeCaller(caller, from, std::size(from));
+		swprintf_s(line, L"probe GetSysColor from %s index %d color %06lx light %d", from, index, static_cast<unsigned long>(value), g_light ? 1 : 0);
+		Log(line);
+		return value;
+	}
+
+	COLORREF WINAPI SetTextColorHook(HDC dc, COLORREF color)
+	{
+		ProbeScope scope;
+		if (scope.outer && !g_probeFull)
+		{
+			void* caller = _ReturnAddress();
+			unsigned long long key = ProbeMix(0x53544331, ProbeBase(caller));
+			key = ProbeMix(key, color);
+			key = ProbeMix(key, g_light ? 1 : 2);
+			std::wstring name;
+			if (ProbeFirst(key, nullptr, name))
+			{
+				wchar_t from[96], line[192];
+				ProbeCaller(caller, from, std::size(from));
+				swprintf_s(line, L"probe SetTextColor from %s color %06lx light %d", from, static_cast<unsigned long>(color), g_light ? 1 : 0);
+				Log(line);
+			}
+		}
+		return g_setTextColor(dc, color);
+	}
 #endif
 
 	// A folder window shows long before it asks DWM for its backdrop: about 0.6 s on the first open after a reboot.
@@ -238,6 +505,7 @@ namespace
 		if (!theme || !classList) return theme;
 #ifdef FLUIDGLASS_LOGS
 		TraceTheme(theme, window, classList);
+		ProbeName(theme, classList);
 #endif
 		Kind kind = Kind::Other;
 		if (!_wcsicmp(classList, L"ItemsView::ListView")) kind = Kind::Items;
@@ -476,6 +744,16 @@ namespace
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_fillRect), FillRectHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_bufferedPaintSetAlpha), BufferedPaintSetAlphaHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_endBufferedPaint), EndBufferedPaintHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_getThemeColor), GetThemeColorHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_getThemeSysColor), GetThemeSysColorHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeText), DrawThemeTextHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeTextEx), DrawThemeTextExHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawTextW), DrawTextWHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawTextExW), DrawTextExWHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_extTextOutW), ExtTextOutWHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_getSysColor), GetSysColorHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_setTextColor), SetTextColorHook);
+			Log(L"probe: grey-text hooks attached");
 		}
 #endif
 		return SlimDetoursTransactionCommit();
