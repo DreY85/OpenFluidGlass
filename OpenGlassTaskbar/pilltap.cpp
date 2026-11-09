@@ -328,6 +328,7 @@ namespace
 			winrt::Windows::UI::Composition::CompositionColorBrush ink{ nullptr };
 			winrt::Windows::UI::Composition::CompositionMaskBrush letters{ nullptr };
 			HaloStyle style{};
+			bool sizeBound{ false };	// the sprites follow the element visual's size through an expression
 			int64_t textToken{ -1 }, foregroundToken{ -1 };
 			winrt::event_token sizeToken{};
 		};
@@ -367,8 +368,24 @@ namespace
 			return out.A > 0 && out.R * 299 + out.G * 587 + out.B * 114 < 128 * 1000;
 		}
 
+		// The alpha mask covers the element's layout slot, not its ActualWidth. The clock's time is a right-aligned
+		// TextBlock whose ActualWidth (29) is half of its slot (59), and its letters sit in the right half of the mask.
+		// The element visual carries the slot size, so the sprites follow it through an expression.
 		void FitHalo(Halo& halo, const wux::Controls::TextBlock& text)
 		{
+			if (!halo.sizeBound)
+			{
+				try
+				{
+					const auto host = wux::Hosting::ElementCompositionPreview::GetElementVisual(text);
+					const auto follow = host.Compositor().CreateExpressionAnimation(L"host.Size");
+					follow.SetReferenceParameter(L"host", host);
+					for (auto& sprite : halo.sprites) sprite.StartAnimation(L"Size", follow);
+					halo.sizeBound = true;
+				}
+				catch (...) {}
+			}
+			if (halo.sizeBound) return;
 			const winrt::Windows::Foundation::Numerics::float2 size{ static_cast<float>(text.ActualWidth()), static_cast<float>(text.ActualHeight()) };
 			for (auto& sprite : halo.sprites) sprite.Size(size);
 		}
