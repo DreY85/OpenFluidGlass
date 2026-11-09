@@ -688,9 +688,9 @@ namespace
 			if (base && (base == g_dui || base == g_blurMica))
 			{
 				// Without DTT_TEXTCOLOR the text takes the theme's colour, as the navigation pane does on hover.
-				COLORREF color{};
-				const bool known = (options->dwFlags & DTT_TEXTCOLOR) ? (color = options->crText, true) :
-					SUCCEEDED(g_getThemeColor(theme, part, state, TMT_TEXTCOLOR, &color));
+				COLORREF color = options->crText;
+				bool known = (options->dwFlags & DTT_TEXTCOLOR) != 0;
+				if (!known) known = SUCCEEDED(GetThemeColor(theme, part, state, TMT_TEXTCOLOR, &color));
 				if (known && IsNeutralDark(color)) DrawGreyBackdrop(mode, theme, dc, part, state, text, count, flags, *rect);
 			}
 		}
