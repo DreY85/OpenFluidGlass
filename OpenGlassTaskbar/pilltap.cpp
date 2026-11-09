@@ -12,13 +12,17 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
 #include <vector>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.UI.h>
+#include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Xaml.h>
+#include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include "pilllog.h"
@@ -178,9 +182,13 @@ namespace
 					m_published = false;
 				}
 				Update();
+				m_halo = ReadHalo();
+				ScanHalos(m_published);
 			});
 			m_timer.Start();
+			m_halo = ReadHalo();
 			Update();
+			ScanHalos(m_published);
 		}
 
 		static constexpr int DefaultIconSize = 24;
@@ -279,6 +287,206 @@ namespace
 				RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassPillRadius", RRF_RT_REG_DWORD, nullptr, &radius, &size);
 			}
 			return { ReadPillSetting(PillHeight), ReadPillSetting(PillPadding), ReadPillSetting(PillGap), ReadPillSetting(PillJoin), radius };
+		}
+
+		// The light mode text halo, the same settings File Explorer's halo uses (itemglass.cpp).
+		struct HaloStyle
+		{
+			DWORD mode{}, strength{}, size{};
+			bool operator==(const HaloStyle&) const = default;
+		};
+
+		static DWORD ReadDwm(const wchar_t* name, DWORD fallback)
+		{
+			DWORD value = fallback, size = sizeof(value);
+			if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS)
+			{
+				value = fallback;
+				size = sizeof(value);
+				if (RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS) value = fallback;
+			}
+			return value;
+		}
+
+		static HaloStyle ReadHalo()
+		{
+			const DWORD size = ReadDwm(L"FluidGlassGrayTextSize", 300);
+			return { (std::min<DWORD>)(ReadDwm(L"FluidGlassGrayText", 1), 2), (std::min<DWORD>)(ReadDwm(L"FluidGlassGrayTextStrength", 60), 100),
+				std::clamp<DWORD>(((std::min<DWORD>)(size, 100000) + 50) / 100, 1, 10) };
+		}
+
+		// The tray's text and glyph icons (network, volume, battery, language, clock) are XAML TextBlocks, so the GDI halo
+		// in itemglass never reaches them. Each dark TextBlock gets a composition child visual: white drop shadows cut from
+		// its own alpha mask, with the letters drawn again on top in the text's colour. A child visual paints above the
+		// element's content, so the letters have to be part of it, or the glow would cover them. They land exactly on the
+		// original letters, which the glow under them hides.
+		struct Halo
+		{
+			winrt::weak_ref<wux::Controls::TextBlock> text;
+			winrt::Windows::UI::Composition::ContainerVisual root{ nullptr };
+			std::vector<winrt::Windows::UI::Composition::SpriteVisual> sprites;	// the glows, then the letters
+			winrt::Windows::UI::Composition::CompositionColorBrush ink{ nullptr };
+			HaloStyle style{};
+			int64_t textToken{ -1 }, foregroundToken{ -1 };
+			winrt::event_token sizeToken{};
+		};
+
+		static constexpr int HaloCores = 2;	// tight glows stacked for a solid edge, then one wide soft glow
+
+		// The text's colour when it is dark enough to need the halo: light mode only.
+		static bool DarkInk(const wux::Controls::TextBlock& text, winrt::Windows::UI::Color& out)
+		{
+			const auto brush = text.Foreground().try_as<wux::Media::SolidColorBrush>();
+			if (!brush) return false;
+			out = brush.Color();
+			out.A = static_cast<uint8_t>(out.A * std::clamp(brush.Opacity(), 0.0, 1.0));
+			return out.A > 0 && out.R * 299 + out.G * 587 + out.B * 114 < 128 * 1000;
+		}
+
+		void FitHalo(Halo& halo, const wux::Controls::TextBlock& text)
+		{
+			const winrt::Windows::Foundation::Numerics::float2 size{ static_cast<float>(text.ActualWidth()), static_cast<float>(text.ActualHeight()) };
+			for (auto& sprite : halo.sprites) sprite.Size(size);
+		}
+
+		// A new text or colour, or new settings.
+		void PaintHalo(Halo& halo, const wux::Controls::TextBlock& text, bool newMask)
+		{
+			namespace wuc = winrt::Windows::UI::Composition;
+			winrt::Windows::UI::Color ink{};
+			const bool dark = DarkInk(text, ink);
+			halo.root.IsVisible(dark);
+			if (dark) halo.ink.Color(ink);
+			const auto mask = newMask ? text.GetAlphaMask() : nullptr;
+			const float strength = halo.style.strength / 100.f, size = static_cast<float>(halo.style.size);
+			for (size_t index = 0; index + 1 < halo.sprites.size(); ++index)
+			{
+				const auto shadow = halo.sprites[index].Shadow().as<wuc::DropShadow>();
+				if (mask) shadow.Mask(mask);
+				const bool core = index < HaloCores;
+				shadow.BlurRadius(core ? (std::max)(1.f, size * 0.75f) : size * 2.f + 1.f);
+				shadow.Opacity(core ? strength : strength * 0.8f);
+			}
+			if (mask) halo.sprites.back().Brush().as<wuc::CompositionMaskBrush>().Mask(mask);
+		}
+
+		void AddHalo(void* key, const wux::Controls::TextBlock& text)
+		{
+			namespace wuc = winrt::Windows::UI::Composition;
+			const auto compositor = wux::Hosting::ElementCompositionPreview::GetElementVisual(text).Compositor();
+			Halo halo;
+			halo.text = winrt::make_weak(text);
+			halo.style = m_halo;
+			halo.root = compositor.CreateContainerVisual();
+			for (int index = 0; index <= HaloCores; ++index)
+			{
+				const auto glow = compositor.CreateSpriteVisual();
+				const auto shadow = compositor.CreateDropShadow();
+				shadow.Color(winrt::Windows::UI::Color{ 255, 255, 255, 255 });
+				shadow.Offset({ 0, 0, 0 });
+				glow.Shadow(shadow);
+				halo.root.Children().InsertAtTop(glow);
+				halo.sprites.push_back(glow);
+			}
+			halo.ink = compositor.CreateColorBrush();
+			const auto letters = compositor.CreateSpriteVisual();
+			const auto brush = compositor.CreateMaskBrush();
+			brush.Source(halo.ink);
+			letters.Brush(brush);
+			halo.root.Children().InsertAtTop(letters);
+			halo.sprites.push_back(letters);
+			PaintHalo(halo, text, true);
+			FitHalo(halo, text);
+			wux::Hosting::ElementCompositionPreview::SetElementChildVisual(text, halo.root);
+			// The clock's text changes every minute and a pressed icon changes colour: the mask and ink follow.
+			halo.textToken = text.RegisterPropertyChangedCallback(wux::Controls::TextBlock::TextProperty(), [this, key](const wux::DependencyObject& node, auto&&)
+			{
+				if (const auto found = m_halos.find(key); found != m_halos.end()) PaintHalo(found->second, node.as<wux::Controls::TextBlock>(), true);
+			});
+			halo.foregroundToken = text.RegisterPropertyChangedCallback(wux::Controls::TextBlock::ForegroundProperty(), [this, key](const wux::DependencyObject& node, auto&&)
+			{
+				if (const auto found = m_halos.find(key); found != m_halos.end()) PaintHalo(found->second, node.as<wux::Controls::TextBlock>(), false);
+			});
+			halo.sizeToken = text.SizeChanged([this, key](const winrt::Windows::Foundation::IInspectable& sender, auto&&)
+			{
+				if (const auto found = m_halos.find(key); found != m_halos.end())
+				{
+					const auto node = sender.as<wux::Controls::TextBlock>();
+					FitHalo(found->second, node);
+					PaintHalo(found->second, node, true);
+				}
+			});
+			m_halos.emplace(key, std::move(halo));
+		}
+
+		static void RemoveHalo(Halo& halo)
+		{
+			const auto text = halo.text.get();
+			if (!text) return;
+			wux::Hosting::ElementCompositionPreview::SetElementChildVisual(text, nullptr);
+			if (halo.textToken >= 0) text.UnregisterPropertyChangedCallback(wux::Controls::TextBlock::TextProperty(), halo.textToken);
+			if (halo.foregroundToken >= 0) text.UnregisterPropertyChangedCallback(wux::Controls::TextBlock::ForegroundProperty(), halo.foregroundToken);
+			text.SizeChanged(halo.sizeToken);
+		}
+
+		void ClearHalos()
+		{
+			for (auto& [key, halo] : m_halos) RemoveHalo(halo);
+			m_halos.clear();
+		}
+
+		void CollectTexts(const wux::DependencyObject& node, int depth, std::vector<wux::Controls::TextBlock>& out)
+		{
+			const int count = wux::Media::VisualTreeHelper::GetChildrenCount(node);
+			for (int index = 0; index < count && out.size() < 200; ++index)
+			{
+				const auto child = wux::Media::VisualTreeHelper::GetChild(node, index);
+				if (const auto text = child.try_as<wux::Controls::TextBlock>()) { out.push_back(text); continue; }
+				if (depth > 0) CollectTexts(child, depth - 1, out);
+			}
+		}
+
+		// Twice a second, with the pills up: new icons get a halo, settings changes reach the old ones.
+		void ScanHalos(bool enabled)
+		{
+			try
+			{
+				if (!enabled || m_halo.mode == 0 || m_halo.strength == 0)
+				{
+					if (!m_halos.empty()) { ClearHalos(); m_haloCount = 0; Log(L"tray halo off"); }
+					return;
+				}
+				std::vector<wux::Controls::TextBlock> texts;
+				CollectTexts(m_trayGrid, 16, texts);
+				for (const auto& text : texts)
+				{
+					void* key = winrt::get_abi(text);
+					auto found = m_halos.find(key);
+					// A freed TextBlock's address can come back as a new one.
+					if (found != m_halos.end() && found->second.text.get() != text) { m_halos.erase(found); found = m_halos.end(); }
+					if (found == m_halos.end())
+					{
+						winrt::Windows::UI::Color ink{};
+						if (DarkInk(text, ink)) AddHalo(key, text);
+					}
+					else if (found->second.style != m_halo)
+					{
+						found->second.style = m_halo;
+						PaintHalo(found->second, text, false);
+					}
+				}
+				std::erase_if(m_halos, [](const auto& entry) { return !entry.second.text.get(); });
+				if (m_halos.size() != m_haloCount)
+				{
+					m_haloCount = m_halos.size();
+					Log(L"tray halo on " + std::to_wstring(m_haloCount) + L" of " + std::to_wstring(texts.size()) + L" texts");
+				}
+			}
+			catch (...)
+			{
+				if (!m_haloFailed) Log(L"tray halo threw");
+				m_haloFailed = true;
+			}
 		}
 
 		void RoundTray(const wux::DependencyObject& node, int depth, const std::vector<winrt::Windows::Foundation::Rect>& pills, double pillRadius, double minHeight)
@@ -465,6 +673,7 @@ namespace
 				if (!host || !m_share)
 				{
 					if (!m_rounded.empty()) UnroundTray();
+					if (!m_halos.empty()) ScanHalos(false);
 					m_published = false;
 					return;
 				}
@@ -556,6 +765,10 @@ namespace
 		FillBoost m_boost;
 		bool m_trayDumped{};
 		PillStyle m_style{};
+		HaloStyle m_halo{};
+		std::map<void*, Halo> m_halos;
+		size_t m_haloCount{};
+		bool m_haloFailed{};
 	};
 
 	class Factory : public IClassFactory
