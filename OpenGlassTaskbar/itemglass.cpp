@@ -53,6 +53,8 @@ namespace
 	decltype(&DrawThemeBackground) g_drawThemeBackground = DrawThemeBackground;
 	decltype(&DrawThemeBackgroundEx) g_drawThemeBackgroundEx = DrawThemeBackgroundEx;
 	decltype(&DrawThemeTextEx) g_drawThemeTextEx = DrawThemeTextEx;
+	decltype(&BeginBufferedPaint) g_beginBufferedPaint = BeginBufferedPaint;
+	decltype(&EndBufferedPaint) g_endBufferedPaint = EndBufferedPaint;
 	HMODULE g_module{};
 	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey and black item text in light mode
 	std::atomic<int> g_grayStrength{ 60 };	// FluidGlassGrayTextStrength: halo peak opacity in percent, 0 to 100
@@ -78,7 +80,6 @@ namespace
 
 	decltype(&FillRect) g_fillRect = FillRect;
 	decltype(&BufferedPaintSetAlpha) g_bufferedPaintSetAlpha = BufferedPaintSetAlpha;
-	decltype(&EndBufferedPaint) g_endBufferedPaint = EndBufferedPaint;
 	std::map<HTHEME, std::wstring> g_themeNames;
 
 	// Milliseconds since the last folder window started, or -1 past its first five seconds or outside it. A null
@@ -131,7 +132,7 @@ namespace
 		return g_bufferedPaintSetAlpha(buffer, rect, alpha);
 	}
 
-	HRESULT WINAPI EndBufferedPaintHook(HPAINTBUFFER buffer, BOOL update)
+	void TraceEndBufferedPaint(HPAINTBUFFER buffer, BOOL update)
 	{
 		if (g_traceStart && update && TraceTime(nullptr) >= 0)
 		{
@@ -144,7 +145,6 @@ namespace
 				Trace(WindowFromDC(GetBufferedPaintTargetDC(buffer)), what);
 			}
 		}
-		return g_endBufferedPaint(buffer, update);
 	}
 
 	void TraceTheme(HTHEME theme, HWND window, LPCWSTR classList)
@@ -547,6 +547,104 @@ namespace
 		return r == g && g == b && r <= 0xA0;
 	}
 
+	bool InModule(void* address, HMODULE module)
+	{
+		PVOID base{};
+		return module && RtlPcToFileHeader(address, &base) && base == module;
+	}
+
+	// ExplorerBlurMica draws each navigation pane label into a paint buffer exactly the size of the label's rect,
+	// then blends it onto the pane. A halo drawn into that buffer loses everything outside the rect, so the start of
+	// the first letter had no halo. Its open buffers are kept per thread, and the halo goes onto the DC underneath.
+	// The buffer uses the target's coordinates, and its clear pixels leave what is under them as it was.
+	struct OpenBuffer
+	{
+		HPAINTBUFFER buffer;
+		HDC bufferDc;
+		HDC targetDc;
+	};
+	thread_local OpenBuffer t_buffers[4]{};
+	thread_local int t_bufferCount{};
+
+	HPAINTBUFFER WINAPI BeginBufferedPaintHook(HDC target, const RECT* rect, BP_BUFFERFORMAT format, BP_PAINTPARAMS* params, HDC* bufferDc)
+	{
+		void* caller = _ReturnAddress();
+		const HPAINTBUFFER buffer = g_beginBufferedPaint(target, rect, format, params, bufferDc);
+		if (buffer && bufferDc && *bufferDc && t_bufferCount < static_cast<int>(std::size(t_buffers)) && InModule(caller, g_blurMica))
+		{
+			t_buffers[t_bufferCount++] = { buffer, *bufferDc, target };
+		}
+		return buffer;
+	}
+
+	HRESULT WINAPI EndBufferedPaintHook(HPAINTBUFFER buffer, BOOL update)
+	{
+#ifdef FLUIDGLASS_LOGS
+		TraceEndBufferedPaint(buffer, update);
+#endif
+		for (int i = t_bufferCount - 1; i >= 0; --i)
+		{
+			if (t_buffers[i].buffer == buffer)
+			{
+				for (int j = i + 1; j < t_bufferCount; ++j) t_buffers[j - 1] = t_buffers[j];
+				--t_bufferCount;
+				break;
+			}
+		}
+		return g_endBufferedPaint(buffer, update);
+	}
+
+	HDC TargetUnder(HDC bufferDc)
+	{
+		for (int i = t_bufferCount - 1; i >= 0; --i)
+		{
+			if (t_buffers[i].bufferDc == bufferDc) return t_buffers[i].targetDc;
+		}
+		return nullptr;
+	}
+
+	// The folder view clips its text to the label's rect, which also cut the halo off where the first letter starts
+	// and above and below tall letters. The clip is widened by the halo's margin while it is drawn, then put back.
+	class WiderClip
+	{
+	public:
+		WiderClip(HDC dc, const RECT& place) : m_dc{ dc }
+		{
+			m_saved = CreateRectRgn(0, 0, 0, 0);
+			if (!m_saved) return;
+			if (GetClipRgn(dc, m_saved) != 1)
+			{
+				// No clip region: nothing narrower than the bitmap to widen.
+				DeleteObject(m_saved);
+				m_saved = nullptr;
+				return;
+			}
+			POINT corners[2]{ { place.left, place.top }, { place.right, place.bottom } };
+			LPtoDP(dc, corners, 2);
+			HRGN wider = CreateRectRgn(std::min(corners[0].x, corners[1].x), std::min(corners[0].y, corners[1].y),
+				std::max(corners[0].x, corners[1].x), std::max(corners[0].y, corners[1].y));
+			if (wider)
+			{
+				CombineRgn(wider, wider, m_saved, RGN_OR);
+				m_changed = ExtSelectClipRgn(dc, wider, RGN_COPY) != ERROR;
+				DeleteObject(wider);
+			}
+		}
+		~WiderClip()
+		{
+			if (!m_saved) return;
+			if (m_changed) SelectClipRgn(m_dc, m_saved);
+			DeleteObject(m_saved);
+		}
+		WiderClip(const WiderClip&) = delete;
+		WiderClip& operator=(const WiderClip&) = delete;
+
+	private:
+		HDC m_dc;
+		HRGN m_saved{};
+		bool m_changed{};
+	};
+
 	// Premultiplied white with the given coverage, AlphaBlended onto the DC at the rect's place.
 	void BlendWhite(HDC dc, const RECT& place, const std::vector<BYTE>& alpha, int width, int height)
 	{
@@ -592,9 +690,12 @@ namespace
 			}
 	}
 
-	void DrawGreyBackdrop(int mode, HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect)
+	// dc is where the text is drawn and gives its font, blendDc is where the halo or patch goes.
+	void DrawGreyBackdrop(int mode, HTHEME theme, HDC dc, HDC blendDc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect)
 	{
 		constexpr int Pad = 4;
+		const int strength = g_grayStrength;
+		if (mode == 1 && strength <= 0) return;
 		const int width = rect.right - rect.left + 2 * Pad, height = rect.bottom - rect.top + 2 * Pad;
 		if (width <= 2 * Pad || height <= 2 * Pad || width > 4096 || height > 512) return;
 
@@ -646,7 +747,6 @@ namespace
 				}
 			Blur(grown, width, height, 1);
 			Blur(grown, width, height, 1);
-			const int strength = g_grayStrength;
 			for (BYTE& a : grown) a = static_cast<BYTE>(std::min(255, a * 2) * strength / 100);
 			alpha.swap(grown);
 		}
@@ -666,7 +766,10 @@ namespace
 				}
 		}
 		const RECT place{ rect.left - Pad, rect.top - Pad, rect.right + Pad, rect.bottom + Pad };
-		BlendWhite(dc, place, alpha, width, height);
+		{
+			WiderClip clip{ blendDc, place };
+			BlendWhite(blendDc, place, alpha, width, height);
+		}
 		static std::atomic<int> s_logged{};
 		if (s_logged.exchange(mode) != mode) Log(mode == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
 	}
@@ -683,15 +786,18 @@ namespace
 		{
 			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
 			if (!g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
-			PVOID base{};
-			RtlPcToFileHeader(caller, &base);
-			if (base && (base == g_dui || base == g_blurMica))
+			const bool fromBlurMica = InModule(caller, g_blurMica);
+			if (fromBlurMica || InModule(caller, g_dui))
 			{
 				// Without DTT_TEXTCOLOR the text takes the theme's colour, as the navigation pane does on hover.
 				COLORREF color = options->crText;
 				bool known = (options->dwFlags & DTT_TEXTCOLOR) != 0;
 				if (!known) known = SUCCEEDED(GetThemeColor(theme, part, state, TMT_TEXTCOLOR, &color));
-				if (known && IsNeutralDark(color)) DrawGreyBackdrop(mode, theme, dc, part, state, text, count, flags, *rect);
+				if (known && IsNeutralDark(color))
+				{
+					HDC under = fromBlurMica ? TargetUnder(dc) : nullptr;
+					DrawGreyBackdrop(mode, theme, dc, under ? under : dc, part, state, text, count, flags, *rect);
+				}
 			}
 		}
 		return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
@@ -957,7 +1063,12 @@ namespace
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_closeThemeData), CloseThemeDataHook);
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeBackground), DrawThemeBackgroundHook);
 		SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeBackgroundEx), DrawThemeBackgroundExHook);
-		if (g_inExplorer) SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeTextEx), DrawThemeTextExHook);
+		if (g_inExplorer)
+		{
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeTextEx), DrawThemeTextExHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_beginBufferedPaint), BeginBufferedPaintHook);
+			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_endBufferedPaint), EndBufferedPaintHook);
+		}
 #ifdef FLUIDGLASS_LOGS
 		if (g_inExplorer)
 		{
@@ -965,7 +1076,6 @@ namespace
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_dwmExtendFrame), DwmExtendFrameHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_fillRect), FillRectHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_bufferedPaintSetAlpha), BufferedPaintSetAlphaHook);
-			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_endBufferedPaint), EndBufferedPaintHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_getThemeColor), GetThemeColorHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_getThemeSysColor), GetThemeSysColorHook);
 			SlimDetoursAttach(reinterpret_cast<PVOID*>(&g_drawThemeText), DrawThemeTextHook);
@@ -1041,6 +1151,8 @@ namespace
 			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayTextStrength", RRF_RT_REG_DWORD, nullptr, &grayStrength, &grayStrengthSize);
 		}
 		grayStrength = std::min<DWORD>(grayStrength, 100);
+		// BeginBufferedPaintHook needs this before the first label is drawn.
+		if (g_inExplorer && !g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
 		const bool grayTextChanged =
 			(g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText)) |
 			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength));
