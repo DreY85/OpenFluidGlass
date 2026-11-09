@@ -324,14 +324,38 @@ namespace
 		{
 			winrt::weak_ref<wux::Controls::TextBlock> text;
 			winrt::Windows::UI::Composition::ContainerVisual root{ nullptr };
-			std::vector<winrt::Windows::UI::Composition::SpriteVisual> sprites;	// the glows, then the letters
+			std::vector<winrt::Windows::UI::Composition::SpriteVisual> sprites;	// the glows, then the four letter copies
 			winrt::Windows::UI::Composition::CompositionColorBrush ink{ nullptr };
+			winrt::Windows::UI::Composition::CompositionMaskBrush letters{ nullptr };
 			HaloStyle style{};
 			int64_t textToken{ -1 }, foregroundToken{ -1 };
 			winrt::event_token sizeToken{};
 		};
 
 		static constexpr int HaloCores = 2;	// tight glows stacked for a solid edge, then one wide soft glow
+		static constexpr size_t HaloGlows = HaloCores + 1;
+		// The tray's text and glyphs are small and thin. The letters are drawn four times, one pixel apart, so every
+		// stroke gains a pixel and reads as bold without touching the taskbar's layout.
+		static constexpr float LetterShifts[4][2] = { { 0, 0 }, { 1, 0 }, { 0, 1 }, { 1, 1 } };
+
+		// XAML's mask brush stretches its surface over the sprite. The clock's surface can be bigger than its TextBlock,
+		// with the text at its normal place inside it, so the stretch drew the time at half size in the top left corner.
+		// The same surface drawn 1:1 from the top left lines up whatever the surface's size.
+		static winrt::Windows::UI::Composition::CompositionBrush PinMask(const winrt::Windows::UI::Composition::CompositionBrush& mask)
+		{
+			namespace wuc = winrt::Windows::UI::Composition;
+			const auto source = mask ? mask.try_as<wuc::CompositionSurfaceBrush>() : nullptr;
+			if (!source) return mask;
+			const auto pinned = source.Compositor().CreateSurfaceBrush(source.Surface());
+			pinned.Stretch(wuc::CompositionStretch::None);
+			pinned.HorizontalAlignmentRatio(0);
+			pinned.VerticalAlignmentRatio(0);
+			pinned.Offset(source.Offset());
+			pinned.Scale(source.Scale());
+			pinned.CenterPoint(source.CenterPoint());
+			pinned.TransformMatrix(source.TransformMatrix());
+			return pinned;
+		}
 
 		// The text's colour when it is dark enough to need the halo: light mode only.
 		static bool DarkInk(const wux::Controls::TextBlock& text, winrt::Windows::UI::Color& out)
@@ -357,9 +381,9 @@ namespace
 			const bool dark = DarkInk(text, ink);
 			halo.root.IsVisible(dark);
 			if (dark) halo.ink.Color(ink);
-			const auto mask = newMask ? text.GetAlphaMask() : nullptr;
+			const auto mask = newMask ? PinMask(text.GetAlphaMask()) : nullptr;
 			const float strength = halo.style.strength / 100.f, size = static_cast<float>(halo.style.size);
-			for (size_t index = 0; index + 1 < halo.sprites.size(); ++index)
+			for (size_t index = 0; index < HaloGlows; ++index)
 			{
 				const auto shadow = halo.sprites[index].Shadow().as<wuc::DropShadow>();
 				if (mask) shadow.Mask(mask);
@@ -367,7 +391,7 @@ namespace
 				shadow.BlurRadius(core ? (std::max)(1.f, size * 0.75f) : size * 2.f + 1.f);
 				shadow.Opacity(core ? strength : strength * 0.8f);
 			}
-			if (mask) halo.sprites.back().Brush().as<wuc::CompositionMaskBrush>().Mask(mask);
+			if (mask) halo.letters.Mask(mask);
 		}
 
 		void AddHalo(void* key, const wux::Controls::TextBlock& text)
@@ -389,12 +413,16 @@ namespace
 				halo.sprites.push_back(glow);
 			}
 			halo.ink = compositor.CreateColorBrush();
-			const auto letters = compositor.CreateSpriteVisual();
-			const auto brush = compositor.CreateMaskBrush();
-			brush.Source(halo.ink);
-			letters.Brush(brush);
-			halo.root.Children().InsertAtTop(letters);
-			halo.sprites.push_back(letters);
+			halo.letters = compositor.CreateMaskBrush();
+			halo.letters.Source(halo.ink);
+			for (const auto& shift : LetterShifts)
+			{
+				const auto letters = compositor.CreateSpriteVisual();
+				letters.Brush(halo.letters);
+				letters.Offset({ shift[0], shift[1], 0 });
+				halo.root.Children().InsertAtTop(letters);
+				halo.sprites.push_back(letters);
+			}
 			PaintHalo(halo, text, true);
 			FitHalo(halo, text);
 			wux::Hosting::ElementCompositionPreview::SetElementChildVisual(text, halo.root);
