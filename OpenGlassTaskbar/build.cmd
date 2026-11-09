@@ -22,7 +22,19 @@ if defined logs type nul > "%out%\logs.flag"
 cd /d "%~dp0"
 cl /nologo %logs% /std:c++20 /EHsc /O2 /W3 /LD pilltap.cpp /Fe"%out%\pilltap.dll" /Fo"%out%\obj\\" /link /EXPORT:DllGetClassObject,PRIVATE /EXPORT:DllCanUnloadNow,PRIVATE oleaut32.lib user32.lib ole32.lib advapi32.lib windowsapp.lib || exit /b 1
 cl /nologo %logs% /std:c++20 /EHsc /O2 /W3 /LD starttap.cpp /Fe"%out%\starttap.dll" /Fo"%out%\obj\\" /link /EXPORT:DllGetClassObject,PRIVATE /EXPORT:DllCanUnloadNow,PRIVATE oleaut32.lib user32.lib ole32.lib windowsapp.lib || exit /b 1
-cl /nologo %logs% /std:c++20 /EHsc /O2 /W3 /LD itemglass.cpp /I"%~dp0..\vcpkg_installed\x64-windows-static\include" /Fe"%out%\itemglass.dll" /Fo"%out%\obj\\" /link /EXPORT:DllGetClassObject,PRIVATE /EXPORT:DllCanUnloadNow,PRIVATE /LIBPATH:"%~dp0..\vcpkg_installed\x64-windows-static\lib" KNSoft.SlimDetours.lib ntdll.lib uxtheme.lib user32.lib gdi32.lib msimg32.lib dwmapi.lib advapi32.lib uuid.lib ole32.lib || exit /b 1
+rem File Explorer's header is WinUI 3. Its C++/WinRT headers are made from the Windows App Runtime metadata that ships
+rem with Windows 11. Without that metadata, or without cppwinrt from the Windows SDK, itemglass leaves the header out.
+set header=
+set "wasdk=%SystemRoot%\SystemApps\Microsoft.WindowsAppRuntime.CBS.2_8wekyb3d8bbwe"
+set "webview=%SystemRoot%\SystemApps\Microsoft.WindowsAppRuntime.CBS_8wekyb3d8bbwe\Microsoft.Web.WebView2.Core.winmd"
+if not exist "%wasdk%\Microsoft.UI.Xaml.winmd" goto noheader
+if not exist "%webview%" goto noheader
+where cppwinrt >nul 2>nul || goto noheader
+cppwinrt -in "%wasdk%\Microsoft.UI.Xaml.winmd" "%wasdk%\Microsoft.UI.winmd" "%wasdk%\Microsoft.Foundation.winmd" "%wasdk%\Microsoft.UI.Text.winmd" "%wasdk%\Microsoft.Graphics.winmd" "%wasdk%\Microsoft.Windows.ApplicationModel.Resources.winmd" "%wasdk%\Microsoft.Windows.Foundation.winmd" "%webview%" sdk -out "%out%\obj\winui3" || goto noheader
+set header=headerglass.cpp /bigobj /DFLUIDGLASS_HEADER /I"%out%\obj\winui3"
+:noheader
+if not defined header echo itemglass is built without the File Explorer header halo.
+cl /nologo %logs% /std:c++20 /EHsc /O2 /W3 /LD itemglass.cpp %header% /I"%~dp0..\vcpkg_installed\x64-windows-static\include" /Fe"%out%\itemglass.dll" /Fo"%out%\obj\\" /link /EXPORT:DllGetClassObject,PRIVATE /EXPORT:DllCanUnloadNow,PRIVATE /LIBPATH:"%~dp0..\vcpkg_installed\x64-windows-static\lib" KNSoft.SlimDetours.lib ntdll.lib uxtheme.lib user32.lib gdi32.lib msimg32.lib dwmapi.lib advapi32.lib uuid.lib ole32.lib windowsapp.lib || exit /b 1
 rc /nologo /fo"%out%\obj\pillhost.res" pillhost.rc || exit /b 1
 cl /nologo %logs% /std:c++20 /EHsc /O2 /W3 pillhost.cpp "%out%\obj\pillhost.res" /Fe"%out%\pillhost.exe" /Fo"%out%\obj\\" user32.lib gdi32.lib advapi32.lib dwmapi.lib winmm.lib /link /SUBSYSTEM:WINDOWS || exit /b 1
 if not defined logs if exist "%out%\logs.flag" del "%out%\logs.flag"

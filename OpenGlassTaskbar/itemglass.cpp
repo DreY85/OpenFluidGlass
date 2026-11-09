@@ -28,6 +28,14 @@
 #include <KNSoft/SlimDetours/SlimDetours.h>
 #include "pilllog.h"
 
+#ifdef FLUIDGLASS_HEADER
+// headerglass.cpp: the halo for File Explorer's WinUI 3 header.
+extern const CLSID CLSID_HeaderTap;
+HRESULT HeaderGlassClassObject(REFIID riid, void** out);
+void HeaderGlassStart(HMODULE module);
+void HeaderGlassSettings(bool on, int strength, int size);
+#endif
+
 namespace
 {
 	enum class Kind { Other, Items, Focus, Tree, Tooltip };
@@ -1177,6 +1185,9 @@ namespace
 			(g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText)) |
 			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength)) |
 			(g_graySize.exchange(static_cast<int>(graySize)) != static_cast<int>(graySize));
+#ifdef FLUIDGLASS_HEADER
+		if (g_inExplorer) HeaderGlassSettings(enabled && grayText && grayStrength, static_cast<int>(grayStrength), static_cast<int>(graySize));
+#endif
 		if (grayTextChanged)
 		{
 			wchar_t line[80];
@@ -1267,6 +1278,9 @@ namespace
 #endif
 		if (g_inExplorer && !SetWinEventHook(EVENT_OBJECT_CREATE, lastEvent, g_module, FolderEvent, GetCurrentProcessId(), 0, WINEVENT_INCONTEXT)) Log(L"folder hook failed");
 		EnumWindows(RefreshFolder, TRUE);
+#ifdef FLUIDGLASS_HEADER
+		if (g_inExplorer) HeaderGlassStart(g_module);
+#endif
 		// A dialog loads its folder extensions while it builds the view, so its window may not be complete yet.
 		if (!g_inExplorer)
 		{
@@ -1350,6 +1364,9 @@ namespace
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID riid, void** out)
 {
+#ifdef FLUIDGLASS_HEADER
+	if (clsid == CLSID_HeaderTap) return HeaderGlassClassObject(riid, out);
+#endif
 	if (clsid != CLSID_ItemGlass) return CLASS_E_CLASSNOTAVAILABLE;
 	return g_factory.QueryInterface(riid, out);
 }
