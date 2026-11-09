@@ -394,8 +394,79 @@ namespace
 			if (mask) halo.letters.Mask(mask);
 		}
 
+		// Logs builds only: what a tray text and its alpha mask look like, to line the halo up with odd texts (the clock).
+		static void DescribeText([[maybe_unused]] const wchar_t* why, [[maybe_unused]] const wux::Controls::TextBlock& text)
+		{
+#ifdef FLUIDGLASS_LOGS
+			namespace wuc = winrt::Windows::UI::Composition;
+			try
+			{
+				wchar_t line[1024];
+				const auto desired = text.DesiredSize();
+				const auto margin = text.Margin(), padding = text.Padding();
+				const auto transform = text.RenderTransform();
+				swprintf_s(line, L"halo %s '%s' text '%s' actual %.1fx%.1f desired %.1fx%.1f font %.1f align %d halign %d valign %d flow %d margin %.0f,%.0f,%.0f,%.0f padding %.0f,%.0f,%.0f,%.0f opacity %.2f transform %s",
+					why, text.Name().c_str(), text.Text().c_str(), text.ActualWidth(), text.ActualHeight(), desired.Width, desired.Height, text.FontSize(),
+					static_cast<int>(text.TextAlignment()), static_cast<int>(text.HorizontalAlignment()), static_cast<int>(text.VerticalAlignment()),
+					static_cast<int>(text.FlowDirection()), margin.Left, margin.Top, margin.Right, margin.Bottom, padding.Left, padding.Top, padding.Right,
+					padding.Bottom, text.Opacity(), transform ? winrt::get_class_name(transform).c_str() : L"none");
+				Log(line);
+				const auto visual = wux::Hosting::ElementCompositionPreview::GetElementVisual(text);
+				const auto offset = visual.Offset();
+				const auto visualSize = visual.Size();
+				const auto scale = visual.Scale();
+				const auto matrix = visual.TransformMatrix();
+				swprintf_s(line, L"  visual offset %.1f,%.1f size %.1fx%.1f scale %.2f,%.2f matrix %.2f,%.2f,%.2f,%.2f,%.1f,%.1f anchor %.2f,%.2f",
+					offset.x, offset.y, visualSize.x, visualSize.y, scale.x, scale.y, matrix.m11, matrix.m12, matrix.m21, matrix.m22, matrix.m41, matrix.m42,
+					visual.AnchorPoint().x, visual.AnchorPoint().y);
+				Log(line);
+				const auto mask = text.GetAlphaMask();
+				if (!mask) { Log(L"  mask none"); return; }
+				std::wstring info = L"  mask " + std::wstring(winrt::get_class_name(mask));
+				if (const auto surfaceBrush = mask.try_as<wuc::CompositionSurfaceBrush>())
+				{
+					const auto brushOffset = surfaceBrush.Offset();
+					const auto brushScale = surfaceBrush.Scale();
+					const auto brushMatrix = surfaceBrush.TransformMatrix();
+					swprintf_s(line, L" stretch %d ratio %.2f,%.2f offset %.1f,%.1f scale %.2f,%.2f matrix %.2f,%.2f,%.2f,%.2f,%.1f,%.1f center %.1f,%.1f anchor %.2f,%.2f inset %d",
+						static_cast<int>(surfaceBrush.Stretch()), surfaceBrush.HorizontalAlignmentRatio(), surfaceBrush.VerticalAlignmentRatio(), brushOffset.x,
+						brushOffset.y, brushScale.x, brushScale.y, brushMatrix.m11, brushMatrix.m12, brushMatrix.m21, brushMatrix.m22, brushMatrix.m31,
+						brushMatrix.m32, surfaceBrush.CenterPoint().x, surfaceBrush.CenterPoint().y, surfaceBrush.AnchorPoint().x, surfaceBrush.AnchorPoint().y,
+						surfaceBrush.SnapToPixels() ? 1 : 0);
+					info += line;
+					const auto surface = surfaceBrush.Surface();
+					info += L" surface " + std::wstring(surface ? winrt::get_class_name(surface) : winrt::hstring{ L"none" });
+					if (const auto drawing = surface ? surface.try_as<wuc::CompositionDrawingSurface>() : nullptr)
+					{
+						swprintf_s(line, L" drawing %.1fx%.1f pixels %dx%d", drawing.Size().Width, drawing.Size().Height, drawing.SizeInt32().Width, drawing.SizeInt32().Height);
+						info += line;
+					}
+					if (const auto visualSurface = surface ? surface.try_as<wuc::CompositionVisualSurface>() : nullptr)
+					{
+						swprintf_s(line, L" visual source %.1f,%.1f size %.1fx%.1f", visualSurface.SourceOffset().x, visualSurface.SourceOffset().y,
+							visualSurface.SourceSize().x, visualSurface.SourceSize().y);
+						info += line;
+					}
+				}
+				Log(info);
+				int depth = 0;
+				for (auto node = wux::Media::VisualTreeHelper::GetParent(text); node && depth < 4; node = wux::Media::VisualTreeHelper::GetParent(node), ++depth)
+				{
+					const auto element = node.try_as<wux::FrameworkElement>();
+					if (!element) continue;
+					const auto parentTransform = element.RenderTransform();
+					swprintf_s(line, L"  parent %d %s '%s' actual %.1fx%.1f transform %s", depth, winrt::get_class_name(node).c_str(), element.Name().c_str(),
+						element.ActualWidth(), element.ActualHeight(), parentTransform ? winrt::get_class_name(parentTransform).c_str() : L"none");
+					Log(line);
+				}
+			}
+			catch (...) { Log(L"  describe threw"); }
+#endif
+		}
+
 		void AddHalo(void* key, const wux::Controls::TextBlock& text)
 		{
+			DescribeText(L"add", text);
 			namespace wuc = winrt::Windows::UI::Composition;
 			const auto compositor = wux::Hosting::ElementCompositionPreview::GetElementVisual(text).Compositor();
 			Halo halo;
@@ -429,7 +500,11 @@ namespace
 			// The clock's text changes every minute and a pressed icon changes colour: the mask and ink follow.
 			halo.textToken = text.RegisterPropertyChangedCallback(wux::Controls::TextBlock::TextProperty(), [this, key](const wux::DependencyObject& node, auto&&)
 			{
-				if (const auto found = m_halos.find(key); found != m_halos.end()) PaintHalo(found->second, node.as<wux::Controls::TextBlock>(), true);
+				if (const auto found = m_halos.find(key); found != m_halos.end())
+				{
+					DescribeText(L"text", node.as<wux::Controls::TextBlock>());
+					PaintHalo(found->second, node.as<wux::Controls::TextBlock>(), true);
+				}
 			});
 			halo.foregroundToken = text.RegisterPropertyChangedCallback(wux::Controls::TextBlock::ForegroundProperty(), [this, key](const wux::DependencyObject& node, auto&&)
 			{
