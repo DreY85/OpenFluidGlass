@@ -54,7 +54,7 @@ namespace
 	decltype(&DrawThemeBackgroundEx) g_drawThemeBackgroundEx = DrawThemeBackgroundEx;
 	decltype(&DrawThemeTextEx) g_drawThemeTextEx = DrawThemeTextEx;
 	HMODULE g_module{};
-	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey item text in light mode
+	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey and black item text in light mode
 	std::atomic<int> g_grayStrength{ 60 };	// FluidGlassGrayTextStrength: halo peak opacity in percent, 0 to 100
 
 	void Log(const wchar_t* line)
@@ -535,13 +535,16 @@ namespace
 	// Grey item text (type, size, status) on glass in light mode. Its colour is fixed by the theme while the glass shows
 	// whatever lies behind the window, so on a dark wallpaper it nearly vanishes. Instead of a darker grey, which fails
 	// the same way, the text gets local contrast: a soft white halo around its letters, or a frosted patch behind it.
-	// Only DUI70's own DrawThemeTextEx calls (the folder view) with a neutral grey colour are touched.
+	// Black item names fade the same way, so they get it too. Only DrawThemeTextEx calls from DUI70 (the folder view)
+	// and ExplorerBlurMica (it redraws the navigation pane text) with a neutral colour from black to mid grey are
+	// touched. Lighter text, such as white text on a selection, and coloured text, such as links, stay as they are.
 	HMODULE g_dui{};
+	HMODULE g_blurMica{};
 
-	bool IsGrey(COLORREF color)
+	bool IsNeutralDark(COLORREF color)
 	{
 		const int r = GetRValue(color), g = GetGValue(color), b = GetBValue(color);
-		return r == g && g == b && r >= 0x50 && r <= 0xA0;
+		return r == g && g == b && r <= 0xA0;
 	}
 
 	// Premultiplied white with the given coverage, AlphaBlended onto the DC at the rect's place.
@@ -676,12 +679,20 @@ namespace
 		if (scope.outer) ProbeDrawThemeTextEx(caller, theme, dc, part, state, text, count, flags, rect, options);
 #endif
 		const int mode = g_grayText;
-		if (mode && g_enabled && g_light && rect && dc && text && !(flags & DT_CALCRECT) && options && (options->dwFlags & DTT_TEXTCOLOR) && IsGrey(options->crText))
+		if (mode && g_enabled && g_light && rect && dc && text && !(flags & DT_CALCRECT) && options)
 		{
 			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
+			if (!g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
 			PVOID base{};
 			RtlPcToFileHeader(caller, &base);
-			if (g_dui && base == g_dui) DrawGreyBackdrop(mode, theme, dc, part, state, text, count, flags, *rect);
+			if (base && (base == g_dui || base == g_blurMica))
+			{
+				// Without DTT_TEXTCOLOR the text takes the theme's colour, as the navigation pane does on hover.
+				COLORREF color{};
+				const bool known = (options->dwFlags & DTT_TEXTCOLOR) ? (color = options->crText, true) :
+					SUCCEEDED(g_getThemeColor(theme, part, state, TMT_TEXTCOLOR, &color));
+				if (known && IsNeutralDark(color)) DrawGreyBackdrop(mode, theme, dc, part, state, text, count, flags, *rect);
+			}
 		}
 		return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
 	}
