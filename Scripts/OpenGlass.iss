@@ -595,7 +595,7 @@ begin
     'DisableGlassOnBattery', 'DisabledHooks', 'GlassSafetyZoneMode',
     'MINMAXBUTTONGLOWid', 'CLOSEBUTTONGLOWid', 'TOOLCLOSEBUTTONGLOWid',
     'FluidGlass', 'FluidGlassIor', 'FluidGlassBezel', 'FluidGlassThickness', 'FluidGlassGap', 'FluidGlassScale',
-    'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassReadabilityLight', 'FluidGlassGrayText', 'FluidGlassGrayTextStrength', 'FluidGlassRim', 'FluidGlassShine',
+    'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassReadabilityLight', 'FluidGlassGrayText', 'FluidGlassGrayTextStrength', 'FluidGlassGrayTextSize', 'FluidGlassRim', 'FluidGlassShine',
     'FluidGlassLight', 'FluidGlassRadius', 'FluidGlassPillRadius', 'FluidGlassProfile', 'FluidGlassClarity',
     'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs'
   ];

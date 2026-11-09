@@ -58,6 +58,7 @@ namespace
 	HMODULE g_module{};
 	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey and black item text in light mode
 	std::atomic<int> g_grayStrength{ 60 };	// FluidGlassGrayTextStrength: halo peak opacity in percent, 0 to 100
+	std::atomic<int> g_graySize{ 3 };	// FluidGlassGrayTextSize / 100: halo reach in pixels, 1 to 10
 
 	void Log(const wchar_t* line)
 	{
@@ -693,9 +694,11 @@ namespace
 	// dc is where the text is drawn and gives its font, blendDc is where the halo or patch goes.
 	void DrawGreyBackdrop(int mode, HTHEME theme, HDC dc, HDC blendDc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect)
 	{
-		constexpr int Pad = 4;
 		const int strength = g_grayStrength;
+		const int size = std::clamp(g_graySize.load(), 1, 10);
 		if (mode == 1 && strength <= 0) return;
+		// The halo reaches size pixels past the letters, the patch stays inside four.
+		const int Pad = mode == 1 ? size + 1 : 4;
 		const int width = rect.right - rect.left + 2 * Pad, height = rect.bottom - rect.top + 2 * Pad;
 		if (width <= 2 * Pad || height <= 2 * Pad || width > 4096 || height > 512) return;
 
@@ -734,20 +737,30 @@ namespace
 
 		if (mode == 1)
 		{
-			// Halo: the letters grown by one pixel, softened over two more, about 85 % white at its core.
-			std::vector<BYTE> grown(alpha.size());
+			// Halo: the letters grown by a third of the size, then softened over the rest with two box blurs.
+			// Size 3 is one pixel grown and two softened. Larger sizes give the wide soft cloud of the Windows 7 glow.
+			const int grow = std::max(1, size / 3), soft = size - grow;
+			const int r1 = (soft + 1) / 2, r2 = soft - r1;
+			std::vector<BYTE> row(alpha.size()), grown(alpha.size());
 			for (int y = 0; y < height; ++y)
 				for (int x = 0; x < width; ++x)
 				{
 					BYTE m = 0;
-					for (int dy = -1; dy <= 1; ++dy)
-						for (int dx = -1; dx <= 1; ++dx)
-							m = std::max(m, alpha[std::clamp(y + dy, 0, height - 1) * width + std::clamp(x + dx, 0, width - 1)]);
+					for (int k = -grow; k <= grow; ++k) m = std::max(m, alpha[y * width + std::clamp(x + k, 0, width - 1)]);
+					row[y * width + x] = m;
+				}
+			for (int y = 0; y < height; ++y)
+				for (int x = 0; x < width; ++x)
+				{
+					BYTE m = 0;
+					for (int k = -grow; k <= grow; ++k) m = std::max(m, row[std::clamp(y + k, 0, height - 1) * width + x]);
 					grown[y * width + x] = m;
 				}
-			Blur(grown, width, height, 1);
-			Blur(grown, width, height, 1);
-			for (BYTE& a : grown) a = static_cast<BYTE>(std::min(255, a * 2) * strength / 100);
+			if (r1) Blur(grown, width, height, r1);
+			if (r2) Blur(grown, width, height, r2);
+			// A wider blur spreads the same white thinner, so the gain rises from 2 at size 3 to 4 at size 6.
+			const int gain3 = std::clamp(2 * size, 6, 12);
+			for (BYTE& a : grown) a = static_cast<BYTE>(std::min(255, a * gain3 / 3) * strength / 100);
 			alpha.swap(grown);
 		}
 		else
@@ -1151,15 +1164,23 @@ namespace
 			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayTextStrength", RRF_RT_REG_DWORD, nullptr, &grayStrength, &grayStrengthSize);
 		}
 		grayStrength = std::min<DWORD>(grayStrength, 100);
+		DWORD graySize = 300, graySizeSize = sizeof(graySize);
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayTextSize", RRF_RT_REG_DWORD, nullptr, &graySize, &graySizeSize) != ERROR_SUCCESS)
+		{
+			graySizeSize = sizeof(graySize);
+			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayTextSize", RRF_RT_REG_DWORD, nullptr, &graySize, &graySizeSize);
+		}
+		graySize = std::clamp<DWORD>((std::min<DWORD>(graySize, 100000) + 50) / 100, 1, 10);
 		// BeginBufferedPaintHook needs this before the first label is drawn.
 		if (g_inExplorer && !g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
 		const bool grayTextChanged =
 			(g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText)) |
-			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength));
+			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength)) |
+			(g_graySize.exchange(static_cast<int>(graySize)) != static_cast<int>(graySize));
 		if (grayTextChanged)
 		{
-			wchar_t line[64];
-			swprintf_s(line, L"grey text mode %lu strength %lu", grayText, grayStrength);
+			wchar_t line[80];
+			swprintf_s(line, L"grey text mode %lu strength %lu size %lu", grayText, grayStrength, graySize);
 			Log(line);
 		}
 		if (g_enabled.exchange(enabled) != enabled)
