@@ -71,6 +71,7 @@ namespace
 #ifdef FLUIDGLASS_LOGS
 	// Dev trace of a folder window's first seconds, for the dark flash on the first open after a reboot: when its
 	// parts are created and shown, which backdrop and frame it asks DWM for, and what its class erases with.
+#pragma comment(lib, "comctl32.lib")	// SetWindowSubclass for the paint trace
 	std::atomic<LONGLONG> g_traceStart{};
 	decltype(&DwmSetWindowAttribute) g_dwmSetWindowAttribute = DwmSetWindowAttribute;
 	decltype(&DwmExtendFrameIntoClientArea) g_dwmExtendFrame = DwmExtendFrameIntoClientArea;
@@ -171,6 +172,57 @@ namespace
 		Trace(WindowFromDC(dc), what);
 	}
 
+	// Where a part of the folder window sits, relative to the folder window, so a log line can be matched to the
+	// area that shows white under the address bar.
+	void TracePlace(HWND window, const wchar_t* what)
+	{
+		RECT part{}, root{};
+		GetWindowRect(window, &part);
+		GetWindowRect(GetAncestor(window, GA_ROOT), &root);
+		wchar_t line[160];
+		swprintf_s(line, L"%s at %ld,%ld %ldx%ld", what, part.left - root.left, part.top - root.top, part.right - part.left, part.bottom - part.top);
+		Trace(window, line);
+	}
+
+	// What each part of a new folder window does with erase and paint in its first seconds. The FillRect trace only
+	// sees fills that go through user32 FillRect, so a part that erases another way, or not at all, shows up here.
+	LRESULT CALLBACK TraceProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR)
+	{
+		if (message == WM_NCDESTROY || TraceTime(window) < 0)
+		{
+			RemoveWindowSubclass(window, TraceProc, id);
+			return DefSubclassProc(window, message, wParam, lParam);
+		}
+		wchar_t what[128];
+		switch (message)
+		{
+		case WM_ERASEBKGND:
+		{
+			const LRESULT result = DefSubclassProc(window, message, wParam, lParam);
+			RECT clip{};
+			GetClipBox(reinterpret_cast<HDC>(wParam), &clip);
+			swprintf_s(what, L"WM_ERASEBKGND clip %ld,%ld %ldx%ld returned %Id", clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top, result);
+			Trace(window, what);
+			return result;
+		}
+		case WM_PAINT:
+		{
+			RECT update{};
+			GetUpdateRect(window, &update, FALSE);
+			swprintf_s(what, L"WM_PAINT update %ld,%ld %ldx%ld", update.left, update.top, update.right - update.left, update.bottom - update.top);
+			Trace(window, what);
+			const LRESULT result = DefSubclassProc(window, message, wParam, lParam);
+			if (GetUpdateRect(window, &update, FALSE)) Trace(window, L"WM_PAINT left part of it unpainted");
+			return result;
+		}
+		case WM_WINDOWPOSCHANGED:
+			if (const auto* pos = reinterpret_cast<const WINDOWPOS*>(lParam); (pos->flags & (SWP_NOSIZE | SWP_NOMOVE)) != (SWP_NOSIZE | SWP_NOMOVE) || (pos->flags & (SWP_SHOWWINDOW | SWP_HIDEWINDOW)))
+				TracePlace(window, L"placed");
+			break;
+		}
+		return DefSubclassProc(window, message, wParam, lParam);
+	}
+
 	void CALLBACK TraceEvent(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG, DWORD, DWORD)
 	{
 		if (object != OBJID_WINDOW || !window) return;
@@ -192,7 +244,10 @@ namespace
 			else swprintf_s(line, L"trace folder class brush %p unreadable", handle);
 			Log(line);
 		}
-		Trace(window, event == EVENT_OBJECT_CREATE ? L"create" : event == EVENT_OBJECT_SHOW ? L"show" : event == EVENT_OBJECT_HIDE ? L"hide" : L"destroy");
+		if (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW) TracePlace(window, event == EVENT_OBJECT_CREATE ? L"create" : L"show");
+		else Trace(window, event == EVENT_OBJECT_HIDE ? L"hide" : L"destroy");
+		// The in-context hook runs on the thread that made the window, the only thread that may subclass it.
+		if (event == EVENT_OBJECT_CREATE && TraceTime(window) >= 0 && !SetWindowSubclass(window, TraceProc, 1, 0)) Trace(window, L"subclass failed");
 	}
 
 	HRESULT WINAPI DwmSetWindowAttributeHook(HWND window, DWORD attribute, LPCVOID value, DWORD size)
