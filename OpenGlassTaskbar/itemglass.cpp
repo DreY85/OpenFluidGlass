@@ -55,6 +55,7 @@ namespace
 	decltype(&DrawThemeTextEx) g_drawThemeTextEx = DrawThemeTextEx;
 	HMODULE g_module{};
 	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey item text in light mode
+	std::atomic<int> g_grayStrength{ 60 };	// FluidGlassGrayTextStrength: halo peak opacity in percent, 0 to 100
 
 	void Log(const wchar_t* line)
 	{
@@ -587,7 +588,8 @@ namespace
 				}
 			Blur(grown, width, height, 1);
 			Blur(grown, width, height, 1);
-			for (BYTE& a : grown) a = static_cast<BYTE>(std::min(255, a * 2) * 217 / 255);
+			const int strength = g_grayStrength;
+			for (BYTE& a : grown) a = static_cast<BYTE>(std::min(255, a * 2) * strength / 100);
 			alpha.swap(grown);
 		}
 		else
@@ -966,11 +968,20 @@ namespace
 			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayText", RRF_RT_REG_DWORD, nullptr, &grayText, &grayTextSize);
 		}
 		grayText = std::min<DWORD>(grayText, 2);
-		const bool grayTextChanged = g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText);
+		DWORD grayStrength = 60, grayStrengthSize = sizeof(grayStrength);
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayTextStrength", RRF_RT_REG_DWORD, nullptr, &grayStrength, &grayStrengthSize) != ERROR_SUCCESS)
+		{
+			grayStrengthSize = sizeof(grayStrength);
+			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayTextStrength", RRF_RT_REG_DWORD, nullptr, &grayStrength, &grayStrengthSize);
+		}
+		grayStrength = std::min<DWORD>(grayStrength, 100);
+		const bool grayTextChanged =
+			(g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText)) |
+			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength));
 		if (grayTextChanged)
 		{
-			wchar_t line[48];
-			swprintf_s(line, L"grey text mode %lu", grayText);
+			wchar_t line[64];
+			swprintf_s(line, L"grey text mode %lu strength %lu", grayText, grayStrength);
 			Log(line);
 		}
 		if (g_enabled.exchange(enabled) != enabled)
