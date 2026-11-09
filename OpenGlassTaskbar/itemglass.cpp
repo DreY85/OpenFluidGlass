@@ -644,19 +644,6 @@ namespace
 		const HWND root = GetAncestor(window, GA_ROOT);
 		wchar_t name[32]{};
 		if (!root || !GetClassNameW(root, name, ARRAYSIZE(name)) || wcscmp(name, L"CabinetWClass")) return;
-		const auto black = reinterpret_cast<LONG_PTR>(GetStockObject(BLACK_BRUSH));
-		// The tab host under the address bar erases with the window colour and the view host with a white brush,
-		// white in Light for about half a second before the folder view first paints. Black erases as clear glass.
-		// The desktop has its own view classes, so only these two are changed.
-		if (window != root && GetClassNameW(window, name, ARRAYSIZE(name)) && (!wcscmp(name, L"ShellTabWindowClass") || !wcscmp(name, L"DirectUIHWND")) && GetClassLongPtrW(window, GCLP_HBRBACKGROUND) != black)
-		{
-			SetClassLongPtrW(window, GCLP_HBRBACKGROUND, black);
-#ifdef FLUIDGLASS_LOGS
-			wchar_t line[64];
-			swprintf_s(line, L"folder part %s erases black", name);
-			Log(line);
-#endif
-		}
 		DWM_SYSTEMBACKDROP_TYPE backdrop{};
 		if (SUCCEEDED(DwmGetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop))) && backdrop >= DWMSBT_MAINWINDOW) return;
 		backdrop = DWMSBT_MAINWINDOW;
@@ -664,6 +651,7 @@ namespace
 		const MARGINS sheet{ -1, -1, -1, -1 };
 		DwmExtendFrameIntoClientArea(root, &sheet);
 		// Explorer can register the class again later, with its grey brush, so this is checked for every window.
+		const auto black = reinterpret_cast<LONG_PTR>(GetStockObject(BLACK_BRUSH));
 		if (GetClassLongPtrW(root, GCLP_HBRBACKGROUND) != black) SetClassLongPtrW(root, GCLP_HBRBACKGROUND, black);
 	}
 
