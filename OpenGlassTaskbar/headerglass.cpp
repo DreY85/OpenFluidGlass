@@ -192,8 +192,28 @@ namespace
 		HRESULT STDMETHODCALLTYPE GetSite(REFIID riid, void** out) override { return m_site ? m_site->QueryInterface(riid, out) : E_FAIL; }
 
 		// Runs on the window's XAML thread. When the TAP joins, the elements already there arrive as additions too.
-		HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation, VisualElement element, VisualMutationType mutation) override
+		HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation relation, VisualElement element, VisualMutationType mutation) override
 		{
+#ifdef FLUIDGLASS_LOGS
+			// The tab strip stays white with every XAML background clear, so the roots of the tree (the island and its
+			// backdrop) are written down.
+			if (mutation == Add && element.Type && !relation.Parent && m_rootsLogged < 20)
+			{
+				++m_rootsLogged;
+				std::wstring line = L"tree root " + std::wstring(element.Type, SysStringLen(element.Type));
+				try
+				{
+					if (const auto source = Resolve(element.Handle).try_as<mux::Hosting::DesktopWindowXamlSource>())
+					{
+						const auto backdrop = source.SystemBackdrop();
+						line += L", backdrop " + (backdrop ? std::wstring(winrt::get_class_name(backdrop)) : std::wstring(L"none"));
+						if (const auto mica = backdrop.try_as<mux::Media::MicaBackdrop>()) line += L" kind " + std::to_wstring(int(mica.Kind()));
+					}
+				}
+				catch (...) { line += L", read threw"; }
+				Log(line);
+			}
+#endif
 			if (mutation == Add && element.Type && Claim())
 			{
 				const std::wstring_view type(element.Type, SysStringLen(element.Type));
@@ -655,7 +675,7 @@ namespace
 		mux::Media::SolidColorBrush m_transparent{ nullptr };
 #ifdef FLUIDGLASS_LOGS
 		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dumpTimer{ nullptr };
-		int m_dumps{}, m_dumpRounds{};
+		int m_dumps{}, m_dumpRounds{}, m_rootsLogged{};
 		size_t m_adds{}, m_texts{}, m_unresolved{}, m_flushes{}, m_adopted{};
 
 		// Logs build only: the header turns opaque white once a TAP joins, so the backgrounds of the top of the window
@@ -718,11 +738,62 @@ namespace
 			return text;
 		}
 
+		// A composition visual an app hangs on an element paints outside every XAML brush.
+		void DumpVisual(const mux::UIElement& element, const wchar_t* where)
+		{
+			try
+			{
+				const auto visual = mux::Hosting::ElementCompositionPreview::GetElementChildVisual(element);
+				if (!visual) return;
+				const auto s = visual.Size();
+				const auto o = visual.Offset();
+				std::wstring brush = L"no brush";
+				if (const auto sprite = visual.try_as<muc::SpriteVisual>(); sprite && sprite.Brush())
+				{
+					brush = winrt::get_class_name(sprite.Brush());
+					if (const auto color = sprite.Brush().try_as<muc::CompositionColorBrush>())
+					{
+						const auto c = color.Color();
+						wchar_t text[32];
+						swprintf_s(text, L" #%02X%02X%02X%02X", c.A, c.R, c.G, c.B);
+						brush += text;
+					}
+				}
+				int children = -1;
+				if (const auto container = visual.try_as<muc::ContainerVisual>()) children = container.Children().Count();
+				wchar_t line[300];
+				swprintf_s(line, L"%s visual %s at %.0f,%.0f %.0fx%.0f opacity %.2f visible %d children %d ", where, winrt::get_class_name(visual).c_str(), o.x, o.y, s.x, s.y,
+					visual.Opacity(), visual.IsVisible() ? 1 : 0, children);
+				Log(line + brush);
+			}
+			catch (...) { Log(L"visual read threw"); }
+		}
+
 		void Dump(const mux::UIElement& root)
 		{
 			const auto size = root.ActualSize();
 			Log(L"dump " + std::to_wstring(m_dumps) + L" of round " + std::to_wstring(m_dumpRounds) + L" begins: root " + std::to_wstring(int(size.x)) + L"x" +
 				std::to_wstring(int(size.y)) + L", backgrounds in the top 200 px");
+			if (m_dumps == 1)
+			{
+				// What sits above the window content, and any composition visual hung on it.
+				mux::DependencyObject up = root;
+				for (int level = 0; up && level < 12; ++level)
+				{
+					up = mux::Media::VisualTreeHelper::GetParent(up);
+					if (!up) break;
+					mux::Media::Brush brush{ nullptr };
+					if (const auto panel = up.try_as<mux::Controls::Panel>()) brush = panel.Background();
+					else if (const auto border = up.try_as<mux::Controls::Border>()) brush = border.Background();
+					else if (const auto control = up.try_as<mux::Controls::Control>()) brush = control.Background();
+					else if (const auto presenter = up.try_as<mux::Controls::ContentPresenter>()) brush = presenter.Background();
+					std::wstring line = L"above " + std::to_wstring(level) + L" " + std::wstring(winrt::get_class_name(up));
+					if (const auto element = up.try_as<mux::FrameworkElement>())
+						line += L" '" + std::wstring(element.Name()) + L"' " + std::to_wstring(int(element.ActualWidth())) + L"x" + std::to_wstring(int(element.ActualHeight()));
+					Log(line + L" bg " + (brush ? Describe(brush) : std::wstring(L"none")));
+					if (const auto element = up.try_as<mux::UIElement>()) DumpVisual(element, L"above");
+				}
+			}
 			std::vector<std::pair<mux::DependencyObject, int>> stack{ { root, 0 } };
 			int visited = 0, logged = 0, top = 0;
 			while (!stack.empty() && visited < 6000 && logged < 400)
@@ -757,6 +828,7 @@ namespace
 					element.ActualWidth(), element.ActualHeight(), element.Opacity(), element.Visibility() == mux::Visibility::Visible ? L"" : L" hidden", kind);
 				Log(line + (brush ? Describe(brush) : std::wstring(L"none")));
 				++logged;
+				if (everything) DumpVisual(element, L"child");
 			}
 			Log(L"dump ends: " + std::to_wstring(visited) + L" elements visited, " + std::to_wstring(logged) + L" lines, " + std::to_wstring(top) + L" in the top 40 px");
 		}
