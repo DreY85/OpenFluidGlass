@@ -26,6 +26,7 @@
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Hosting.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
+#include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include "pilllog.h"
 
 namespace mux = winrt::Microsoft::UI::Xaml;
@@ -296,6 +297,9 @@ namespace
 						if (const auto text = mux::Media::VisualTreeHelper::GetChild(node, index).try_as<mux::Controls::TextBlock>()) Consider(text);
 				}
 				std::erase_if(m_halos, [](const auto& entry) { return !entry.second.text.get(); });
+#ifdef FLUIDGLASS_LOGS
+				if (!m_halos.empty()) ScheduleDump();
+#endif
 				if (m_halos.size() != m_logged)
 				{
 					m_logged = m_halos.size();
@@ -455,6 +459,90 @@ namespace
 		std::vector<winrt::weak_ref<mux::DependencyObject>> m_pending;
 		std::map<void*, Halo> m_halos;
 		size_t m_logged{};
+#ifdef FLUIDGLASS_LOGS
+		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dumpTimer{ nullptr };
+		int m_dumps{};
+
+		// Logs build only: the header turns opaque white once a TAP joins, so the backgrounds of the top of the window
+		// are written down a few seconds after joining, and again later, to see which element paints the white.
+		void ScheduleDump()
+		{
+			if (m_dumpTimer) return;
+			m_dumpTimer = m_queue.CreateTimer();
+			m_dumpTimer.Interval(std::chrono::seconds(4));
+			m_dumpTimer.IsRepeating(true);
+			m_dumpTimer.Tick([this](auto&&, auto&&)
+			{
+				if (++m_dumps >= 3) m_dumpTimer.Stop();
+				try
+				{
+					for (const auto& [key, halo] : m_halos)
+						if (const auto text = halo.text.get(); text && text.XamlRoot())
+						{
+							if (const auto content = text.XamlRoot().Content()) { Dump(content); return; }
+						}
+					Log(L"dump: no root");
+				}
+				catch (...) { Log(L"dump threw"); }
+			});
+			m_dumpTimer.Start();
+		}
+
+		static std::wstring Describe(const mux::Media::Brush& brush)
+		{
+			wchar_t text[256];
+			if (const auto solid = brush.try_as<mux::Media::SolidColorBrush>())
+			{
+				const auto c = solid.Color();
+				swprintf_s(text, L"solid #%02X%02X%02X%02X x%.2f", c.A, c.R, c.G, c.B, solid.Opacity());
+				return text;
+			}
+			if (const auto acrylic = brush.try_as<mux::Media::AcrylicBrush>())
+			{
+				const auto t = acrylic.TintColor(), f = acrylic.FallbackColor();
+				const auto luminosity = acrylic.TintLuminosityOpacity();
+				swprintf_s(text, L"acrylic tint #%02X%02X%02X%02X op %.2f lum %.2f fallback #%02X%02X%02X%02X always %d x%.2f", t.A, t.R, t.G, t.B,
+					acrylic.TintOpacity(), luminosity ? luminosity.Value() : -1.0, f.A, f.R, f.G, f.B, acrylic.AlwaysUseFallback() ? 1 : 0, acrylic.Opacity());
+				return text;
+			}
+			swprintf_s(text, L"%s x%.2f", winrt::get_class_name(brush).c_str(), brush.Opacity());
+			return text;
+		}
+
+		void Dump(const mux::UIElement& root)
+		{
+			Log(L"dump " + std::to_wstring(m_dumps) + L" begins: backgrounds in the top 200 px");
+			std::vector<std::pair<mux::DependencyObject, int>> stack{ { root, 0 } };
+			int visited = 0, logged = 0;
+			while (!stack.empty() && visited < 6000 && logged < 400)
+			{
+				const auto [node, depth] = stack.back();
+				stack.pop_back();
+				++visited;
+				const int count = mux::Media::VisualTreeHelper::GetChildrenCount(node);
+				for (int index = count - 1; index >= 0; --index) stack.emplace_back(mux::Media::VisualTreeHelper::GetChild(node, index), depth + 1);
+				const auto element = node.try_as<mux::FrameworkElement>();
+				if (!element || element.ActualWidth() < 1 || element.ActualHeight() < 1) continue;
+				mux::Media::Brush brush{ nullptr };
+				const wchar_t* kind = L"bg";
+				if (const auto panel = node.try_as<mux::Controls::Panel>()) brush = panel.Background();
+				else if (const auto border = node.try_as<mux::Controls::Border>()) brush = border.Background();
+				else if (const auto control = node.try_as<mux::Controls::Control>()) brush = control.Background();
+				else if (const auto presenter = node.try_as<mux::Controls::ContentPresenter>()) brush = presenter.Background();
+				else if (const auto shape = node.try_as<mux::Shapes::Shape>()) { brush = shape.Fill(); kind = L"fill"; }
+				if (!brush) continue;
+				if (const auto solid = brush.try_as<mux::Media::SolidColorBrush>(); solid && (solid.Color().A == 0 || solid.Opacity() <= 0)) continue;
+				const auto at = element.TransformToVisual(nullptr).TransformPoint({ 0, 0 });
+				if (at.Y > 200) continue;
+				wchar_t line[400];
+				swprintf_s(line, L"d%d %s '%s' at %.0f,%.0f %.0fx%.0f opacity %.2f %s ", depth, winrt::get_class_name(node).c_str(), element.Name().c_str(), at.X, at.Y,
+					element.ActualWidth(), element.ActualHeight(), element.Opacity(), kind);
+				Log(line + Describe(brush));
+				++logged;
+			}
+			Log(L"dump ends: " + std::to_wstring(visited) + L" elements visited, " + std::to_wstring(logged) + L" backgrounds");
+		}
+#endif
 	};
 
 	class Factory final : public IClassFactory
