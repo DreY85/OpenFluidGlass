@@ -87,6 +87,11 @@ namespace
 	constexpr int HaloCores = 1;
 	constexpr size_t HaloGlows = HaloCores + 1;
 	// The glow is a child visual, drawn above the element's own text, so the letters are drawn once more on top of it.
+#ifdef FLUIDGLASS_LOGS
+#define LOGS_ONLY(...) __VA_ARGS__
+#else
+#define LOGS_ONLY(...)
+#endif
 	constexpr size_t TextLimit = 1500;	// per window, so a huge Home page cannot pile up visuals without end
 
 	// The mask brush stretches its surface over the sprite. The same surface drawn 1:1 from the top left lines up
@@ -196,6 +201,12 @@ namespace
 				const bool text = type == L"Microsoft.UI.Xaml.Controls.TextBlock";
 				const bool icon = !text && type.starts_with(L"Microsoft.UI.Xaml.Controls.") && type.ends_with(L"Icon");
 				if (text || icon) Queue(element.Handle);
+#ifdef FLUIDGLASS_LOGS
+				++m_adds;
+				m_texts += text || icon;
+				if (!m_probe.get())
+					if (const auto node = Resolve(element.Handle).try_as<mux::UIElement>()) { m_probe = winrt::make_weak(node); ScheduleDump(); }
+#endif
 			}
 			// The strings are ours to free.
 			SysFreeString(element.Type);
@@ -266,13 +277,8 @@ namespace
 		{
 			try
 			{
-				IXamlDiagnostics* diagnostics{};
-				if (FAILED(m_site->QueryInterface(__uuidof(IXamlDiagnostics), reinterpret_cast<void**>(&diagnostics)))) return;
-				winrt::Windows::Foundation::IInspectable object;
-				const HRESULT hr = diagnostics->GetIInspectableFromHandle(handle, reinterpret_cast<::IInspectable**>(winrt::put_abi(object)));
-				diagnostics->Release();
-				const auto node = SUCCEEDED(hr) && object ? object.try_as<mux::DependencyObject>() : nullptr;
-				if (!node) return;
+				const auto node = Resolve(handle);
+				if (!node) { LOGS_ONLY(++m_unresolved;) return; }
 				m_pending.push_back(winrt::make_weak(node));
 				if (m_flushQueued) return;
 				m_flushQueued = m_queue.TryEnqueue(winrt::Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [this] { Flush(); });
@@ -280,9 +286,20 @@ namespace
 			catch (...) { Log(L"queue threw"); }
 		}
 
+		mux::DependencyObject Resolve(InstanceHandle handle)
+		{
+			IXamlDiagnostics* diagnostics{};
+			if (FAILED(m_site->QueryInterface(__uuidof(IXamlDiagnostics), reinterpret_cast<void**>(&diagnostics)))) return nullptr;
+			winrt::Windows::Foundation::IInspectable object;
+			const HRESULT hr = diagnostics->GetIInspectableFromHandle(handle, reinterpret_cast<::IInspectable**>(winrt::put_abi(object)));
+			diagnostics->Release();
+			return SUCCEEDED(hr) && object ? object.try_as<mux::DependencyObject>() : nullptr;
+		}
+
 		void Flush()
 		{
 			m_flushQueued = false;
+			LOGS_ONLY(++m_flushes;)
 			try
 			{
 				auto pending = std::move(m_pending);
@@ -297,9 +314,6 @@ namespace
 						if (const auto text = mux::Media::VisualTreeHelper::GetChild(node, index).try_as<mux::Controls::TextBlock>()) Consider(text);
 				}
 				std::erase_if(m_halos, [](const auto& entry) { return !entry.second.text.get(); });
-#ifdef FLUIDGLASS_LOGS
-				if (!m_halos.empty()) ScheduleDump();
-#endif
 				if (m_halos.size() != m_logged)
 				{
 					m_logged = m_halos.size();
@@ -462,6 +476,8 @@ namespace
 #ifdef FLUIDGLASS_LOGS
 		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dumpTimer{ nullptr };
 		int m_dumps{};
+		size_t m_adds{}, m_texts{}, m_unresolved{}, m_flushes{};
+		winrt::weak_ref<mux::UIElement> m_probe;
 
 		// Logs build only: the header turns opaque white once a TAP joins, so the backgrounds of the top of the window
 		// are written down a few seconds after joining, and again later, to see which element paints the white.
@@ -476,11 +492,12 @@ namespace
 				if (++m_dumps >= 3) m_dumpTimer.Stop();
 				try
 				{
-					for (const auto& [key, halo] : m_halos)
-						if (const auto text = halo.text.get(); text && text.XamlRoot())
-						{
-							if (const auto content = text.XamlRoot().Content()) { Dump(content); return; }
-						}
+					Log(L"seen " + std::to_wstring(m_adds) + L" additions, " + std::to_wstring(m_texts) + L" texts or icons, " + std::to_wstring(m_unresolved) +
+						L" unresolved, " + std::to_wstring(m_flushes) + L" flushes, " + std::to_wstring(m_halos.size()) + L" watched");
+					if (const auto probe = m_probe.get(); probe && probe.XamlRoot())
+					{
+						if (const auto content = probe.XamlRoot().Content()) { Dump(content); return; }
+					}
 					Log(L"dump: no root");
 				}
 				catch (...) { Log(L"dump threw"); }
