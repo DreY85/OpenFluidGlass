@@ -202,7 +202,7 @@ namespace
 				const bool icon = !text && type.starts_with(L"Microsoft.UI.Xaml.Controls.") && type.ends_with(L"Icon");
 				if (text || icon) Queue(element.Handle);
 				if (!m_probe.get())
-					if (const auto node = Resolve(element.Handle).try_as<mux::UIElement>()) { m_probe = winrt::make_weak(node); StartClearing(); LOGS_ONLY(ScheduleDump();) }
+					if (const auto node = Resolve(element.Handle).try_as<mux::UIElement>()) { m_probe = winrt::make_weak(node); StartClearing(); }
 #ifdef FLUIDGLASS_LOGS
 				++m_adds;
 				m_texts += text || icon;
@@ -327,7 +327,10 @@ namespace
 
 		void StartClearing()
 		{
-			if (m_clearTimer) return;
+			// Every new batch of elements looks again for a while, since a later window on this thread (Explorer keeps a
+			// hidden window ready and shows yours on the same thread) is built after the first one.
+			m_clearTicks = 0;
+			if (m_clearTimer) { if (!m_clearTimer.IsRunning()) m_clearTimer.Start(); return; }
 			// The header is built in steps after the TAP joins, so it is looked at again for a while.
 			m_clearTimer = m_queue.CreateTimer();
 			m_clearTimer.Interval(std::chrono::milliseconds(500));
@@ -341,13 +344,37 @@ namespace
 			ClearHeader();
 		}
 
-		void ClearHeader()
+		// Remembers the XAML root of the window this element is in. One thread can hold several windows.
+		void NoteRoot(const mux::DependencyObject& node)
 		{
 			try
 			{
-				const auto probe = m_probe.get();
-				const auto root = probe && probe.XamlRoot() ? probe.XamlRoot().Content() : nullptr;
-				if (!root) return;
+				const auto element = node.try_as<mux::UIElement>();
+				const auto xamlRoot = element ? element.XamlRoot() : nullptr;
+				const auto content = xamlRoot ? xamlRoot.Content() : nullptr;
+				if (!content) return;
+				void* const key = winrt::get_abi(content);
+				if (const auto found = m_roots.find(key); found != m_roots.end() && found->second.get() == content) return;
+				m_roots[key] = winrt::make_weak(content);
+				LOGS_ONLY(Log(L"window root found, " + std::to_wstring(m_roots.size()) + L" known"); ScheduleDump();)
+			}
+			catch (...) {}
+		}
+
+		void ClearHeader()
+		{
+			if (const auto probe = m_probe.get()) NoteRoot(probe);
+			for (const auto& [key, halo] : m_halos)
+				if (const auto text = halo.text.get()) NoteRoot(text);
+			std::erase_if(m_roots, [](const auto& entry) { return !entry.second.get(); });
+			for (const auto& [key, weak] : m_roots)
+				if (const auto root = weak.get()) ClearRoot(root);
+		}
+
+		void ClearRoot(const mux::UIElement& root)
+		{
+			try
+			{
 				// The command bars' own ContentRoot grid carries the same fill as the bar. Inside the address bar and the
 				// search box every light fill (the boxes, their borders and buttons) is cleared too.
 				struct Step { mux::DependencyObject node; int barDepth; bool box; };
@@ -444,6 +471,7 @@ namespace
 		{
 			m_flushQueued = false;
 			LOGS_ONLY(++m_flushes;)
+			StartClearing();
 			try
 			{
 				auto pending = std::move(m_pending);
@@ -452,6 +480,7 @@ namespace
 				{
 					const auto node = weak.get();
 					if (!node) continue;
+					NoteRoot(node);
 					if (const auto text = node.try_as<mux::Controls::TextBlock>()) { Consider(text); continue; }
 					const int count = mux::Media::VisualTreeHelper::GetChildrenCount(node);
 					for (int index = 0; index < count; ++index)
@@ -622,17 +651,27 @@ namespace
 		int m_clearTicks{};
 		bool m_clearFailed{};
 		std::map<void*, winrt::weak_ref<mux::DependencyObject>> m_cleared;
+		std::map<void*, winrt::weak_ref<mux::UIElement>> m_roots;	// the content of each window seen on this thread
 		mux::Media::SolidColorBrush m_transparent{ nullptr };
 #ifdef FLUIDGLASS_LOGS
 		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dumpTimer{ nullptr };
-		int m_dumps{};
+		int m_dumps{}, m_dumpRounds{};
 		size_t m_adds{}, m_texts{}, m_unresolved{}, m_flushes{}, m_adopted{};
 
 		// Logs build only: the header turns opaque white once a TAP joins, so the backgrounds of the top of the window
 		// are written down a few seconds after joining, and again later, to see which element paints the white.
 		void ScheduleDump()
 		{
-			if (m_dumpTimer) return;
+			// Each new window root starts a round of three dumps, at most four rounds.
+			if (m_dumpTimer)
+			{
+				if (m_dumpTimer.IsRunning() || m_dumpRounds >= 4) return;
+				++m_dumpRounds;
+				m_dumps = 0;
+				m_dumpTimer.Start();
+				return;
+			}
+			++m_dumpRounds;
 			m_dumpTimer = m_queue.CreateTimer();
 			m_dumpTimer.Interval(std::chrono::seconds(4));
 			m_dumpTimer.IsRepeating(true);
@@ -643,13 +682,17 @@ namespace
 				{
 					Log(L"seen " + std::to_wstring(m_adds) + L" additions, " + std::to_wstring(m_texts) + L" texts or icons, " + std::to_wstring(m_unresolved) +
 						L" unresolved, " + std::to_wstring(m_flushes) + L" flushes, " + std::to_wstring(m_adopted) + L" adopted, " + std::to_wstring(m_halos.size()) + L" watched");
-					if (const auto probe = m_probe.get(); probe && probe.XamlRoot())
-					{
-						if (const auto content = probe.XamlRoot().Content()) { Dump(content); return; }
-					}
-					Log(L"dump: no root");
 				}
-				catch (...) { Log(L"dump threw"); }
+				catch (...) {}
+				int dumped = 0;
+				for (const auto& [key, weak] : m_roots)
+				{
+					const auto root = weak.get();
+					if (!root) continue;
+					try { Dump(root); ++dumped; }
+					catch (...) { Log(L"dump threw"); }
+				}
+				if (!dumped) Log(L"dump: no root");
 			});
 			m_dumpTimer.Start();
 		}
@@ -677,7 +720,9 @@ namespace
 
 		void Dump(const mux::UIElement& root)
 		{
-			Log(L"dump " + std::to_wstring(m_dumps) + L" begins: backgrounds in the top 200 px");
+			const auto size = root.ActualSize();
+			Log(L"dump " + std::to_wstring(m_dumps) + L" of round " + std::to_wstring(m_dumpRounds) + L" begins: root " + std::to_wstring(int(size.x)) + L"x" +
+				std::to_wstring(int(size.y)) + L", backgrounds in the top 200 px");
 			std::vector<std::pair<mux::DependencyObject, int>> stack{ { root, 0 } };
 			int visited = 0, logged = 0, top = 0;
 			while (!stack.empty() && visited < 6000 && logged < 400)
