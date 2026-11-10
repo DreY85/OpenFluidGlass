@@ -81,11 +81,11 @@ namespace
 	std::map<DWORD, Served> g_threads;	// the XAML thread each TAP serves; a second TAP on the same thread stays idle
 	std::atomic<int> g_sites{};	// TAPs that got their site, so the attach loop knows a connection really loaded one
 
-	constexpr int HaloCores = 2;	// tight glows stacked for a solid edge, then one wide soft glow
+	// The header sits on glass and its text is dense, so one tight glow and one soft one are enough. More turns the
+	// address bar and the command bar into a white haze.
+	constexpr int HaloCores = 1;
 	constexpr size_t HaloGlows = HaloCores + 1;
-	// The header's text is small and thin. The letters are drawn four times, one pixel apart, so every stroke gains a
-	// pixel and reads as bold without touching the layout.
-	constexpr float LetterShifts[4][2] = { { 0, 0 }, { 1, 0 }, { 0, 1 }, { 1, 1 } };
+	// The glow is a child visual, drawn above the element's own text, so the letters are drawn once more on top of it.
 	constexpr size_t TextLimit = 1500;	// per window, so a huge Home page cannot pile up visuals without end
 
 	// The mask brush stretches its surface over the sprite. The same surface drawn 1:1 from the top left lines up
@@ -135,10 +135,13 @@ namespace
 	{
 		winrt::weak_ref<mux::Controls::TextBlock> text;
 		muc::ContainerVisual root{ nullptr };
-		std::vector<muc::SpriteVisual> sprites;	// the glows, then the four letter copies
+		std::vector<muc::SpriteVisual> sprites;	// the glows, then the letters
 		muc::CompositionColorBrush ink{ nullptr };
 		muc::CompositionMaskBrush letters{ nullptr };
 		bool sized{};	// the sprites follow the element visual's size through an expression
+		// A shadow without a mask is cast by the whole sprite, a white box the size of the text's slot. The halo only
+		// shows once the text gave its mask.
+		bool masked{};
 		int64_t foregroundToken{ -1 }, textToken{ -1 };
 		winrt::event_token sizeToken{};
 	};
@@ -332,6 +335,7 @@ namespace
 			const auto host = mux::Hosting::ElementCompositionPreview::GetElementVisual(text);
 			const auto compositor = host.Compositor();
 			halo.root = compositor.CreateContainerVisual();
+			halo.root.IsVisible(false);
 			for (size_t index = 0; index < HaloGlows; ++index)
 			{
 				const auto glow = compositor.CreateSpriteVisual();
@@ -345,11 +349,9 @@ namespace
 			halo.ink = compositor.CreateColorBrush();
 			halo.letters = compositor.CreateMaskBrush();
 			halo.letters.Source(halo.ink);
-			for (const auto& shift : LetterShifts)
 			{
 				const auto letters = compositor.CreateSpriteVisual();
 				letters.Brush(halo.letters);
-				letters.Offset({ shift[0], shift[1], 0 });
 				halo.root.Children().InsertAtTop(letters);
 				halo.sprites.push_back(letters);
 			}
@@ -400,22 +402,36 @@ namespace
 					return;
 				}
 				if (!halo.root) { Build(halo, text); newMask = true; }
-				halo.root.IsVisible(true);
+				if (newMask)
+				{
+					const auto mask = PinMask(text.GetAlphaMask());
+					if (!mask)
+					{
+						halo.root.IsVisible(false);
+						halo.masked = false;
+						return;
+					}
+					for (size_t index = 0; index < HaloGlows; ++index) halo.sprites[index].Shadow().as<muc::DropShadow>().Mask(mask);
+					halo.letters.Mask(mask);
+					halo.masked = true;
+				}
+				if (!halo.masked) { halo.root.IsVisible(false); return; }
 				halo.ink.Color(ink);
-				const auto mask = newMask ? PinMask(text.GetAlphaMask()) : nullptr;
 				const float strength = m_style.strength / 100.f, size = static_cast<float>(m_style.size);
 				for (size_t index = 0; index < HaloGlows; ++index)
 				{
 					const auto shadow = halo.sprites[index].Shadow().as<muc::DropShadow>();
-					if (mask) shadow.Mask(mask);
 					const bool core = index < HaloCores;
-					shadow.BlurRadius(core ? (std::max)(1.f, size * 0.75f) : size * 2.f + 1.f);
-					shadow.Opacity(core ? strength : strength * 0.8f);
+					shadow.BlurRadius(core ? (std::max)(1.f, size * 0.75f) : size * 1.5f + 1.f);
+					shadow.Opacity(core ? strength * 0.85f : strength * 0.45f);
 				}
-				if (mask) halo.letters.Mask(mask);
+				halo.root.IsVisible(true);
 			}
 			catch (...)
 			{
+				// Whatever failed, no half-made halo stays on screen.
+				try { if (halo.root) halo.root.IsVisible(false); } catch (...) {}
+				halo.masked = false;
 				if (!m_paintFailed) Log(L"paint threw");
 				m_paintFailed = true;
 			}
