@@ -348,24 +348,27 @@ namespace
 				const auto probe = m_probe.get();
 				const auto root = probe && probe.XamlRoot() ? probe.XamlRoot().Content() : nullptr;
 				if (!root) return;
-				// The command bars' own ContentRoot grid carries the same fill as the bar.
-				struct Step { mux::DependencyObject node; int barDepth; };
-				std::vector<Step> stack{ { root, -1 } };
+				// The command bars' own ContentRoot grid carries the same fill as the bar. Inside the address bar and the
+				// search box every light fill (the boxes, their borders and buttons) is cleared too.
+				struct Step { mux::DependencyObject node; int barDepth; bool box; };
+				std::vector<Step> stack{ { root, -1, false } };
 				int visited = 0;
 				while (!stack.empty() && visited < 6000)
 				{
-					auto [node, barDepth] = stack.back();
+					auto [node, barDepth, box] = stack.back();
 					stack.pop_back();
 					++visited;
 					const auto element = node.try_as<mux::FrameworkElement>();
 					const std::wstring name = element ? std::wstring(element.Name()) : std::wstring{};
 					if (barDepth >= 0 && ++barDepth > 4) barDepth = -1;
+					box = box || name == L"NavigationBarControlGrid" || name == L"FileExplorerSearchBox";
 					bool clear = HeaderBand(name);
 					if (clear && node.try_as<mux::Controls::CommandBar>()) barDepth = 0;
 					else if (barDepth > 0 && name == L"ContentRoot") clear = true;
-					if (clear) Clear(node);
+					if (clear) Clear(node, false);
+					else if (box) Clear(node, true);
 					const int count = mux::Media::VisualTreeHelper::GetChildrenCount(node);
-					for (int index = 0; index < count; ++index) stack.push_back({ mux::Media::VisualTreeHelper::GetChild(node, index), barDepth });
+					for (int index = 0; index < count; ++index) stack.push_back({ mux::Media::VisualTreeHelper::GetChild(node, index), barDepth, box });
 				}
 			}
 			catch (...) { if (!m_clearFailed) Log(L"clear threw"); m_clearFailed = true; }
@@ -377,27 +380,48 @@ namespace
 			return !brush || (solid && (solid.Color().A == 0 || solid.Opacity() <= 0));
 		}
 
-		void Clear(const mux::DependencyObject& node)
+		// The near-white fills (#B3FFFFFF and the like) the header gets once a TAP joins. Dark fills such as the thin
+		// separator lines are left alone.
+		static bool IsLight(const mux::Media::Brush& brush)
 		{
-			const auto panel = node.try_as<mux::Controls::Panel>();
-			const auto control = panel ? nullptr : node.try_as<mux::Controls::Control>();
-			if (!panel && !control) return;
-			const auto property = panel ? mux::Controls::Panel::BackgroundProperty() : mux::Controls::Control::BackgroundProperty();
+			const auto solid = brush ? brush.try_as<mux::Media::SolidColorBrush>() : nullptr;
+			if (!solid || solid.Opacity() <= 0) return false;
+			const auto c = solid.Color();
+			return c.A > 0 && c.R >= 0xE0 && c.G >= 0xE0 && c.B >= 0xE0;
+		}
+
+		static mux::DependencyProperty BackgroundOf(const mux::DependencyObject& node)
+		{
+			if (node.try_as<mux::Controls::Panel>()) return mux::Controls::Panel::BackgroundProperty();
+			if (node.try_as<mux::Controls::Border>()) return mux::Controls::Border::BackgroundProperty();
+			if (node.try_as<mux::Controls::Control>()) return mux::Controls::Control::BackgroundProperty();
+			if (node.try_as<mux::Controls::ContentPresenter>()) return mux::Controls::ContentPresenter::BackgroundProperty();
+			return nullptr;
+		}
+
+		// Sets the background to transparent and keeps it so. With lightOnly only light fills are replaced, so the
+		// address bar's own states (hover, pressed) that use other colours still show.
+		void Clear(const mux::DependencyObject& node, bool lightOnly)
+		{
+			const auto property = BackgroundOf(node);
+			if (!property) return;
+			const auto wanted = [lightOnly](const mux::Media::Brush& brush) { return lightOnly ? IsLight(brush) : !IsClear(brush); };
+			const auto brush = node.GetValue(property).try_as<mux::Media::Brush>();
 			void* const key = winrt::get_abi(node);
 			if (const auto found = m_cleared.find(key); found == m_cleared.end() || found->second.get() != node)
 			{
 				m_cleared[key] = winrt::make_weak(node);
-				node.RegisterPropertyChangedCallback(property, [this](const mux::DependencyObject& changed, const mux::DependencyProperty& which)
+				node.RegisterPropertyChangedCallback(property, [this, wanted](const mux::DependencyObject& changed, const mux::DependencyProperty& which)
 				{
 					try
 					{
-						if (!IsClear(changed.GetValue(which).try_as<mux::Media::Brush>())) changed.SetValue(which, Transparent());
+						if (wanted(changed.GetValue(which).try_as<mux::Media::Brush>())) changed.SetValue(which, Transparent());
 					}
 					catch (...) {}
 				});
-				LOGS_ONLY(Log(L"clearing " + std::wstring(winrt::get_class_name(node)) + L" '" + std::wstring(node.as<mux::FrameworkElement>().Name()) + L"'");)
+				LOGS_ONLY(if (!lightOnly || wanted(brush)) Log(L"clearing " + std::wstring(winrt::get_class_name(node)) + L" '" + std::wstring(node.as<mux::FrameworkElement>().Name()) + L"'");)
 			}
-			if (!IsClear(node.GetValue(property).try_as<mux::Media::Brush>())) node.SetValue(property, Transparent());
+			if (wanted(brush)) node.SetValue(property, Transparent());
 		}
 
 		mux::Media::SolidColorBrush Transparent()
@@ -655,7 +679,7 @@ namespace
 		{
 			Log(L"dump " + std::to_wstring(m_dumps) + L" begins: backgrounds in the top 200 px");
 			std::vector<std::pair<mux::DependencyObject, int>> stack{ { root, 0 } };
-			int visited = 0, logged = 0;
+			int visited = 0, logged = 0, top = 0;
 			while (!stack.empty() && visited < 6000 && logged < 400)
 			{
 				const auto [node, depth] = stack.back();
@@ -672,17 +696,24 @@ namespace
 				else if (const auto control = node.try_as<mux::Controls::Control>()) brush = control.Background();
 				else if (const auto presenter = node.try_as<mux::Controls::ContentPresenter>()) brush = presenter.Background();
 				else if (const auto shape = node.try_as<mux::Shapes::Shape>()) { brush = shape.Fill(); kind = L"fill"; }
-				if (!brush) continue;
-				if (const auto solid = brush.try_as<mux::Media::SolidColorBrush>(); solid && (solid.Color().A == 0 || solid.Opacity() <= 0)) continue;
 				const auto at = element.TransformToVisual(nullptr).TransformPoint({ 0, 0 });
-				if (at.Y > 200) continue;
+				// The tab strip turns white too but shows no solid fill, so on the first dump everything that starts in
+				// the top 40 px is written down, painted or not.
+				const bool everything = m_dumps == 1 && at.Y < 40 && top < 300;
+				if (!everything)
+				{
+					if (!brush) continue;
+					if (const auto solid = brush.try_as<mux::Media::SolidColorBrush>(); solid && (solid.Color().A == 0 || solid.Opacity() <= 0)) continue;
+					if (at.Y > 200) continue;
+				}
+				else ++top;
 				wchar_t line[400];
-				swprintf_s(line, L"d%d %s '%s' at %.0f,%.0f %.0fx%.0f opacity %.2f %s ", depth, winrt::get_class_name(node).c_str(), element.Name().c_str(), at.X, at.Y,
-					element.ActualWidth(), element.ActualHeight(), element.Opacity(), kind);
-				Log(line + Describe(brush));
+				swprintf_s(line, L"d%d %s '%s' at %.0f,%.0f %.0fx%.0f opacity %.2f%s %s ", depth, winrt::get_class_name(node).c_str(), element.Name().c_str(), at.X, at.Y,
+					element.ActualWidth(), element.ActualHeight(), element.Opacity(), element.Visibility() == mux::Visibility::Visible ? L"" : L" hidden", kind);
+				Log(line + (brush ? Describe(brush) : std::wstring(L"none")));
 				++logged;
 			}
-			Log(L"dump ends: " + std::to_wstring(visited) + L" elements visited, " + std::to_wstring(logged) + L" backgrounds");
+			Log(L"dump ends: " + std::to_wstring(visited) + L" elements visited, " + std::to_wstring(logged) + L" lines, " + std::to_wstring(top) + L" in the top 40 px");
 		}
 #endif
 	};
