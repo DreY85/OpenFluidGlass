@@ -201,12 +201,30 @@ namespace
 				const bool text = type == L"Microsoft.UI.Xaml.Controls.TextBlock";
 				const bool icon = !text && type.starts_with(L"Microsoft.UI.Xaml.Controls.") && type.ends_with(L"Icon");
 				if (text || icon) Queue(element.Handle);
+				if (!m_probe.get())
+					if (const auto node = Resolve(element.Handle).try_as<mux::UIElement>()) { m_probe = winrt::make_weak(node); StartClearing(); LOGS_ONLY(ScheduleDump();) }
 #ifdef FLUIDGLASS_LOGS
 				++m_adds;
 				m_texts += text || icon;
-				if (!m_probe.get())
-					if (const auto node = Resolve(element.Handle).try_as<mux::UIElement>()) { m_probe = winrt::make_weak(node); ScheduleDump(); }
 #endif
+			}
+			else if (mutation == Add && element.Type && m_idle)
+			{
+				// A window can open two connections on one thread, and the elements then arrive at either TAP. The idle one
+				// hands them to the TAP that serves the thread.
+				const std::wstring_view type(element.Type, SysStringLen(element.Type));
+				const bool text = type == L"Microsoft.UI.Xaml.Controls.TextBlock";
+				const bool icon = !text && type.starts_with(L"Microsoft.UI.Xaml.Controls.") && type.ends_with(L"Icon");
+				if (text || icon)
+					if (const auto node = Resolve(element.Handle))
+					{
+						Tap* owner{};
+						{
+							std::lock_guard guard{ g_lock };
+							if (const auto found = g_threads.find(GetCurrentThreadId()); found != g_threads.end()) owner = found->second.tap;
+						}
+						if (owner && owner != this) owner->Adopt(node);
+					}
 			}
 			// The strings are ours to free.
 			SysFreeString(element.Type);
@@ -279,11 +297,113 @@ namespace
 			{
 				const auto node = Resolve(handle);
 				if (!node) { LOGS_ONLY(++m_unresolved;) return; }
+				Adopt(node);
+			}
+			catch (...) { Log(L"queue threw"); }
+		}
+
+	public:
+		void Adopt(const mux::DependencyObject& node)
+		{
+			try
+			{
+				LOGS_ONLY(++m_adopted;)
 				m_pending.push_back(winrt::make_weak(node));
 				if (m_flushQueued) return;
 				m_flushQueued = m_queue.TryEnqueue(winrt::Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [this] { Flush(); });
 			}
-			catch (...) { Log(L"queue threw"); }
+			catch (...) { Log(L"adopt threw"); }
+		}
+
+	private:
+		// Once a TAP joins, Explorer paints the header's bands with opaque fills (the command bar #FFFFFFFF, the address
+		// row #B3FFFFFF) and the glass behind them is gone. These are the bands' own containers: they go back to clear,
+		// and stay clear when Explorer sets them again. The address and search boxes keep their own fill.
+		static bool HeaderBand(std::wstring_view name)
+		{
+			return name == L"NavigationBarControlGrid" || name == L"CommandBarControlRootGrid" || name == L"FileExplorerCommandBar"
+				|| name == L"FileExplorerSecondaryCommandBar";
+		}
+
+		void StartClearing()
+		{
+			if (m_clearTimer) return;
+			// The header is built in steps after the TAP joins, so it is looked at again for a while.
+			m_clearTimer = m_queue.CreateTimer();
+			m_clearTimer.Interval(std::chrono::milliseconds(500));
+			m_clearTimer.IsRepeating(true);
+			m_clearTimer.Tick([this](auto&&, auto&&)
+			{
+				if (++m_clearTicks >= 40) m_clearTimer.Stop();
+				ClearHeader();
+			});
+			m_clearTimer.Start();
+			ClearHeader();
+		}
+
+		void ClearHeader()
+		{
+			try
+			{
+				const auto probe = m_probe.get();
+				const auto root = probe && probe.XamlRoot() ? probe.XamlRoot().Content() : nullptr;
+				if (!root) return;
+				// The command bars' own ContentRoot grid carries the same fill as the bar.
+				struct Step { mux::DependencyObject node; int barDepth; };
+				std::vector<Step> stack{ { root, -1 } };
+				int visited = 0;
+				while (!stack.empty() && visited < 6000)
+				{
+					auto [node, barDepth] = stack.back();
+					stack.pop_back();
+					++visited;
+					const auto element = node.try_as<mux::FrameworkElement>();
+					const std::wstring name = element ? std::wstring(element.Name()) : std::wstring{};
+					if (barDepth >= 0 && ++barDepth > 4) barDepth = -1;
+					bool clear = HeaderBand(name);
+					if (clear && node.try_as<mux::Controls::CommandBar>()) barDepth = 0;
+					else if (barDepth > 0 && name == L"ContentRoot") clear = true;
+					if (clear) Clear(node);
+					const int count = mux::Media::VisualTreeHelper::GetChildrenCount(node);
+					for (int index = 0; index < count; ++index) stack.push_back({ mux::Media::VisualTreeHelper::GetChild(node, index), barDepth });
+				}
+			}
+			catch (...) { if (!m_clearFailed) Log(L"clear threw"); m_clearFailed = true; }
+		}
+
+		static bool IsClear(const mux::Media::Brush& brush)
+		{
+			const auto solid = brush ? brush.try_as<mux::Media::SolidColorBrush>() : nullptr;
+			return !brush || (solid && (solid.Color().A == 0 || solid.Opacity() <= 0));
+		}
+
+		void Clear(const mux::DependencyObject& node)
+		{
+			const auto panel = node.try_as<mux::Controls::Panel>();
+			const auto control = panel ? nullptr : node.try_as<mux::Controls::Control>();
+			if (!panel && !control) return;
+			const auto property = panel ? mux::Controls::Panel::BackgroundProperty() : mux::Controls::Control::BackgroundProperty();
+			void* const key = winrt::get_abi(node);
+			if (const auto found = m_cleared.find(key); found == m_cleared.end() || found->second.get() != node)
+			{
+				m_cleared[key] = winrt::make_weak(node);
+				node.RegisterPropertyChangedCallback(property, [this](const mux::DependencyObject& changed, const mux::DependencyProperty& which)
+				{
+					try
+					{
+						if (!IsClear(changed.GetValue(which).try_as<mux::Media::Brush>())) changed.SetValue(which, Transparent());
+					}
+					catch (...) {}
+				});
+				LOGS_ONLY(Log(L"clearing " + std::wstring(winrt::get_class_name(node)) + L" '" + std::wstring(node.as<mux::FrameworkElement>().Name()) + L"'");)
+			}
+			if (!IsClear(node.GetValue(property).try_as<mux::Media::Brush>())) node.SetValue(property, Transparent());
+		}
+
+		mux::Media::SolidColorBrush Transparent()
+		{
+			if (!m_transparent) m_transparent = mux::Media::SolidColorBrush(winrt::Windows::UI::Colors::Transparent());
+			return m_transparent;
 		}
 
 		mux::DependencyObject Resolve(InstanceHandle handle)
@@ -473,11 +593,16 @@ namespace
 		std::vector<winrt::weak_ref<mux::DependencyObject>> m_pending;
 		std::map<void*, Halo> m_halos;
 		size_t m_logged{};
+		winrt::weak_ref<mux::UIElement> m_probe;	// any element of the window, to reach its XAML root
+		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_clearTimer{ nullptr };
+		int m_clearTicks{};
+		bool m_clearFailed{};
+		std::map<void*, winrt::weak_ref<mux::DependencyObject>> m_cleared;
+		mux::Media::SolidColorBrush m_transparent{ nullptr };
 #ifdef FLUIDGLASS_LOGS
 		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_dumpTimer{ nullptr };
 		int m_dumps{};
-		size_t m_adds{}, m_texts{}, m_unresolved{}, m_flushes{};
-		winrt::weak_ref<mux::UIElement> m_probe;
+		size_t m_adds{}, m_texts{}, m_unresolved{}, m_flushes{}, m_adopted{};
 
 		// Logs build only: the header turns opaque white once a TAP joins, so the backgrounds of the top of the window
 		// are written down a few seconds after joining, and again later, to see which element paints the white.
@@ -493,7 +618,7 @@ namespace
 				try
 				{
 					Log(L"seen " + std::to_wstring(m_adds) + L" additions, " + std::to_wstring(m_texts) + L" texts or icons, " + std::to_wstring(m_unresolved) +
-						L" unresolved, " + std::to_wstring(m_flushes) + L" flushes, " + std::to_wstring(m_halos.size()) + L" watched");
+						L" unresolved, " + std::to_wstring(m_flushes) + L" flushes, " + std::to_wstring(m_adopted) + L" adopted, " + std::to_wstring(m_halos.size()) + L" watched");
 					if (const auto probe = m_probe.get(); probe && probe.XamlRoot())
 					{
 						if (const auto content = probe.XamlRoot().Content()) { Dump(content); return; }
