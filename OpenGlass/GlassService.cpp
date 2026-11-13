@@ -17,10 +17,30 @@ namespace OpenGlass::GlassService
 		std::chrono::steady_clock::time_point injectionTimeStamp;
 		wil::unique_handle processHandle;
 
+		bool provenStable{ false };
+
 		CDwmProcessInfo(std::chrono::steady_clock::time_point t, HANDLE h) : injectionTimeStamp(t), processHandle(h) {}
 	};
 	std::unordered_map<DWORD, CDwmProcessInfo> g_dwmInjectionMap{};
 	std::unordered_set<DWORD> g_dwmInjectionBlackList{};
+
+	// Crash guard. A DWM that dies during injection, or soon after it, is a strike.
+	// After c_crashGuardLimit strikes in a row on the same uDWM/dwmcore build the
+	// service stops injecting, and that survives reboots. It resets on its own when
+	// the DWM build changes, or when HKLM\SOFTWARE\OpenGlass\CrashGuard is deleted.
+	// An injection that stays alive past c_crashGuardWindow clears the strikes.
+	constexpr auto c_crashGuardKeyPath = L"SOFTWARE\\OpenGlass\\CrashGuard";
+	constexpr DWORD c_crashGuardLimit = 2;
+	constexpr auto c_crashGuardWindow = std::chrono::seconds{ 60 };
+	std::wstring g_dwmBuildTag{};
+	DWORD g_crashStrikes{ 0 };
+	bool g_crashGuardTripped{ false };
+
+	std::wstring GetSystemFileVersion(PCWSTR fileName);
+	void LoadCrashGuard();
+	void SaveCrashGuard();
+	void RecordCrashStrike(DWORD processId, DWORD exitCode);
+	void ClearCrashStrikes();
 
 
 	bool IsOpenGlassAlreadyLoaded(DWORD processId);
@@ -115,6 +135,142 @@ bool GlassService::IsDwmProcess(HANDLE processHandle) try
 catch (...)
 {
 	return false;
+}
+
+std::wstring GlassService::GetSystemFileVersion(PCWSTR fileName)
+{
+	WCHAR systemDirectory[MAX_PATH]{};
+	const auto length = GetSystemDirectoryW(systemDirectory, MAX_PATH);
+	if (!length || length >= MAX_PATH)
+	{
+		return L"unknown";
+	}
+	const auto filePath = std::wstring{ systemDirectory } + L"\\" + fileName;
+	const auto path = filePath.c_str();
+
+	const auto size = GetFileVersionInfoSizeW(path, nullptr);
+	if (!size)
+	{
+		return L"unknown";
+	}
+	auto data{ std::make_unique_for_overwrite<BYTE[]>(size) };
+	VS_FIXEDFILEINFO* fileInfo{ nullptr };
+	UINT len{ 0 };
+	if (
+		!GetFileVersionInfoW(path, 0, size, data.get()) ||
+		!VerQueryValueW(data.get(), L"\\", reinterpret_cast<PVOID*>(&fileInfo), &len) ||
+		!len ||
+		!fileInfo ||
+		fileInfo->dwSignature != VS_FFI_SIGNATURE
+	)
+	{
+		return L"unknown";
+	}
+
+	WCHAR version[64]{};
+	if (swprintf_s(
+		version,
+		L"%u.%u.%u.%u",
+		HIWORD(fileInfo->dwFileVersionMS),
+		LOWORD(fileInfo->dwFileVersionMS),
+		HIWORD(fileInfo->dwFileVersionLS),
+		LOWORD(fileInfo->dwFileVersionLS)
+	) <= 0)
+	{
+		return L"unknown";
+	}
+	return version;
+}
+
+void GlassService::LoadCrashGuard()
+{
+	g_dwmBuildTag = GetSystemFileVersion(L"uDWM.dll") + L"|" + GetSystemFileVersion(L"dwmcore.dll");
+	g_crashStrikes = 0;
+	g_crashGuardTripped = false;
+
+	WCHAR savedBuild[128]{};
+	DWORD size{ sizeof(savedBuild) };
+	if (
+		RegGetValueW(HKEY_LOCAL_MACHINE, c_crashGuardKeyPath, L"DwmBuild", RRF_RT_REG_SZ, nullptr, savedBuild, &size) != ERROR_SUCCESS ||
+		g_dwmBuildTag != savedBuild
+	)
+	{
+		// Nothing saved, or strikes from another DWM build: start clean.
+		return;
+	}
+
+	DWORD strikes{ 0 };
+	size = sizeof(strikes);
+	if (RegGetValueW(HKEY_LOCAL_MACHINE, c_crashGuardKeyPath, L"Strikes", RRF_RT_REG_DWORD, nullptr, &strikes, &size) == ERROR_SUCCESS)
+	{
+		g_crashStrikes = strikes;
+	}
+	g_crashGuardTripped = g_crashStrikes >= c_crashGuardLimit;
+	if (g_crashGuardTripped)
+	{
+		LOG_HR_MSG(
+			HRESULT_FROM_WIN32(ERROR_CANCELLED),
+			"Crash guard is tripped for DWM build %ls, injection stays off until the build changes or %ls is deleted",
+			g_dwmBuildTag.c_str(),
+			c_crashGuardKeyPath
+		);
+	}
+}
+
+void GlassService::SaveCrashGuard()
+{
+	wil::unique_hkey key{};
+	const auto createResult = RegCreateKeyExW(HKEY_LOCAL_MACHINE, c_crashGuardKeyPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, key.put(), nullptr);
+	if (createResult != ERROR_SUCCESS)
+	{
+		LOG_WIN32_MSG(createResult, "Unable to save the crash guard state");
+		return;
+	}
+	LOG_IF_WIN32_ERROR(RegSetValueExW(
+		key.get(),
+		L"DwmBuild",
+		0,
+		REG_SZ,
+		reinterpret_cast<const BYTE*>(g_dwmBuildTag.c_str()),
+		static_cast<DWORD>((g_dwmBuildTag.size() + 1) * sizeof(WCHAR))
+	));
+	LOG_IF_WIN32_ERROR(RegSetValueExW(
+		key.get(),
+		L"Strikes",
+		0,
+		REG_DWORD,
+		reinterpret_cast<const BYTE*>(&g_crashStrikes),
+		sizeof(g_crashStrikes)
+	));
+}
+
+void GlassService::RecordCrashStrike(DWORD processId, DWORD exitCode)
+{
+	g_crashStrikes++;
+	if (g_crashStrikes >= c_crashGuardLimit)
+	{
+		g_crashGuardTripped = true;
+	}
+	SaveCrashGuard();
+	LOG_HR_MSG(
+		E_FAIL,
+		"DWM %lu died after injection (exit 0x%08lX), strike %lu of %lu on DWM build %ls%ls",
+		processId,
+		exitCode,
+		g_crashStrikes,
+		c_crashGuardLimit,
+		g_dwmBuildTag.c_str(),
+		g_crashGuardTripped ? L", injection is now off" : L""
+	);
+}
+
+void GlassService::ClearCrashStrikes()
+{
+	if (g_crashStrikes)
+	{
+		g_crashStrikes = 0;
+		SaveCrashGuard();
+	}
 }
 
 HRESULT GlassService::InjectOpenGlassDLL(DWORD processId, bool inject)
@@ -366,6 +522,7 @@ HRESULT GlassService::RunInjectionThread(const ThreadControl& control)
 	RETURN_HR_IF(E_UNEXPECTED, startupWait != WAIT_OBJECT_0 + 1);
 
 	g_dwmInjectionMap.clear();
+	LoadCrashGuard();
 	RETURN_IF_WIN32_BOOL_FALSE(SetEvent(control.readyEvent));
 
 	const auto GetThreadStatus = [&control]() -> ThreadStatus
@@ -405,8 +562,23 @@ HRESULT GlassService::RunInjectionThread(const ThreadControl& control)
 		auto currentTimeStamp = std::chrono::steady_clock::now();
 		for (auto it = g_dwmInjectionMap.begin(); it != g_dwmInjectionMap.end(); )
 		{
-			const auto& [injectionTimeStamp, _] = it->second;
-			if (currentTimeStamp - injectionTimeStamp >= std::chrono::minutes{ 3 })
+			auto& info = it->second;
+			const auto age = currentTimeStamp - info.injectionTimeStamp;
+			if (!info.provenStable && age > c_crashGuardWindow)
+			{
+				DWORD exitCode{ 0 };
+				if (
+					info.processHandle &&
+					GetExitCodeProcess(info.processHandle.get(), &exitCode) &&
+					exitCode == STILL_ACTIVE
+				)
+				{
+					// This DWM has lived with OpenGlass past the crash window.
+					info.provenStable = true;
+					ClearCrashStrikes();
+				}
+			}
+			if (age >= std::chrono::minutes{ 3 })
 			{
 				it = g_dwmInjectionMap.erase(it);
 			}
@@ -422,7 +594,7 @@ HRESULT GlassService::RunInjectionThread(const ThreadControl& control)
 
 		WalkDwmProcesses([&](DWORD processId) -> bool
 		{
-			if (GetThreadStatus() != ThreadStatus::Running)
+			if (GetThreadStatus() != ThreadStatus::Running || g_crashGuardTripped)
 			{
 				return false;
 			}
@@ -470,53 +642,51 @@ HRESULT GlassService::RunInjectionThread(const ThreadControl& control)
 				const auto it = g_dwmInjectionMap.find(sessionId);
 				if (it != g_dwmInjectionMap.end())
 				{
-					const auto& [injectionTimeStamp, processHandle] = it->second;
+					const auto& info = it->second;
 
 					DWORD exitCode{ 0 };
-					LOG_IF_WIN32_BOOL_FALSE(GetExitCodeProcess(processHandle.get(), &exitCode));
-					// DWM constantly crashes or manual fast fail triggered by user
+					LOG_IF_WIN32_BOOL_FALSE(GetExitCodeProcess(info.processHandle.get(), &exitCode));
+					// The DWM we injected last time in this session is gone. A quick death
+					// or a fail fast counts as a strike. A session manager shutdown does not.
 					if (
+						exitCode != STILL_ACTIVE &&
 						(
-							currentTimeStamp - injectionTimeStamp <= std::chrono::seconds{ 15 } &&
-							// DWM shutdown by session manager
-							exitCode != 0xD00002FE
-						) ||
-						exitCode == 0xC0000409
+							(
+								currentTimeStamp - info.injectionTimeStamp <= c_crashGuardWindow &&
+								exitCode != 0xD00002FE
+							) ||
+							exitCode == 0xC0000409
+						)
 					)
 					{
-						auto title = Util::GetResourceStringView<IDS_STRING101>();
-						auto content = Util::GetResourceStringView<IDS_STRING109>();
-						DWORD response{ IDTIMEOUT };
-						WTSSendMessageW(
-							WTS_CURRENT_SERVER_HANDLE,
-							sessionId,
-							const_cast<LPWSTR>(title.data()),
-							static_cast<DWORD>(title.size() * sizeof(WCHAR)),
-							const_cast<LPWSTR>(content.data()),
-							static_cast<DWORD>(content.size() * sizeof(WCHAR)),
-							MB_ICONERROR | MB_ABORTRETRYIGNORE,
-							0,
-							&response,
-							TRUE
-						);
-						if (response == IDABORT)
-						{
-							LOG_IF_WIN32_BOOL_FALSE(SetEvent(control.stopEvent));
-							hr = E_ABORT;
-							return false;
-						}
-						if (response == IDIGNORE)
-						{
-							g_dwmInjectionMap.erase(it);
-							g_dwmInjectionBlackList.emplace(processId);
-							return false;
-						}
+						RecordCrashStrike(processId, exitCode);
+					}
+					g_dwmInjectionMap.erase(it);
+					if (g_crashGuardTripped)
+					{
+						return false;
 					}
 				}
 
+				// A fail fast inside the init thread kills DWM before the injection can
+				// report success, so watch the process itself as well.
+				wil::unique_handle watchHandle{ OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId) };
 				if (const auto hresult = InjectOpenGlassDLL(processId, true); SUCCEEDED(hresult))
 				{
 					g_dwmInjectionMap.insert_or_assign(sessionId, CDwmProcessInfo{ currentTimeStamp, OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId) });
+				}
+				else if (watchHandle && WaitForSingleObject(watchHandle.get(), 3000) == WAIT_OBJECT_0)
+				{
+					DWORD exitCode{ 0 };
+					LOG_IF_WIN32_BOOL_FALSE(GetExitCodeProcess(watchHandle.get(), &exitCode));
+					if (exitCode != 0xD00002FE)
+					{
+						RecordCrashStrike(processId, exitCode);
+						if (g_crashGuardTripped)
+						{
+							return false;
+						}
+					}
 				}
 			}
 

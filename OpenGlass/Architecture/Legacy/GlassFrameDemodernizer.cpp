@@ -28,13 +28,8 @@ namespace OpenGlass::GlassFrameDemodernizer
 	DetourChains::TopLevelWindowUpdateNCAreaBackgroundDemodernizerNode g_CTopLevelWindow_UpdateNCAreaBackground_Org{};
 	Projection::CustomDispatchDetour<uDWM::Symbol_SetMargin, &MySetMargin> g_SetMargin_Org{};
 
-	UCHAR g_callCDesktopManager_IsHighContrastMode_Instructions[]
-	{
-		// call ???
-		0xE8, 0x00, 0x00, 0x00, 0x00,
-		// test al, al
-		0x84, 0xC0
-	};
+	// Only the 5-byte call is replaced, so whatever sits between the call and
+	// "test al, al" stays intact (26100.9974 puts "mov cl, imm8" there).
 	UCHAR g_callCDesktopManager_IsHighContrastMode_replacedInstruction[]
 	{
 		// move al, 0x01
@@ -42,9 +37,7 @@ namespace OpenGlass::GlassFrameDemodernizer
 		// nop
 		// nop
 		// nop
-		0x90, 0x90, 0x90,
-		// test al, al
-		0x84, 0xC0
+		0x90, 0x90, 0x90
 	};
 	UCHAR g_callCTopLevelWindow_IsShadowNCAreaPart_inlined_Instructions[]
 	{
@@ -89,6 +82,9 @@ namespace OpenGlass::GlassFrameDemodernizer
 	std::vector<HookHelper::InstructionPatch> g_instructionPatches{};
 	std::vector<std::byte> g_atlasedImageNullSentinel{};
 	bool g_systemBackdrop{ false };
+	// True only after Startup applied every patch and hook, so Shutdown never
+	// toggles hooks that were never attached.
+	bool g_started{ false };
 }
 
 HRESULT GlassFrameDemodernizer::MyCTopLevelWindow_ValidateVisual(uDWM::CTopLevelWindow* This)
@@ -285,45 +281,50 @@ void GlassFrameDemodernizer::Startup()
 
 	auto i = 1'500;
 	const auto CTopLevelWindow_UpdateWindowVisuals_Instructions_Previous = CTopLevelWindow_UpdateWindowVisuals_Instructions;
-	bool callCDesktopManager_IsHighContrastMode_SecondTime{};
+	// Look for "call CDesktopManager::IsHighContrastMode" followed by "test al, al".
+	// Older builds put the test right after the call. 26100.9974 inserts "mov cl, imm8"
+	// in between. The exact form wins when present, so builds that already worked keep
+	// the patch site they always used. Like before, the last exact match wins, in case
+	// we touched the inlined call part of CTopLevelWindow::GetBorderRect.
+	UCHAR* highContrastCallExact{ nullptr };
+	UCHAR* highContrastCallWithMovCl{ nullptr };
 	do
 	{
-		*reinterpret_cast<DWORD*>(&g_callCDesktopManager_IsHighContrastMode_Instructions[1]) = static_cast<DWORD>(CDesktopManager_IsHighContrastMode_Instructions - (CTopLevelWindow_UpdateWindowVisuals_Instructions + 5));
-		if (
-			memcmp(
-				CTopLevelWindow_UpdateWindowVisuals_Instructions,
-				g_callCDesktopManager_IsHighContrastMode_Instructions,
-				sizeof(g_callCDesktopManager_IsHighContrastMode_Instructions)
-			) == 0
-		)
+		const auto instructions = CTopLevelWindow_UpdateWindowVisuals_Instructions;
+		const auto expectedRelative = static_cast<DWORD>(CDesktopManager_IsHighContrastMode_Instructions - (instructions + 5));
+		DWORD relative{};
+		memcpy_s(&relative, sizeof(relative), instructions + 1, sizeof(relative));
+		if (instructions[0] == 0xE8 && relative == expectedRelative)
 		{
-			// in case we touched the inlined call part of CTopLevelWindow::GetBorderRect
-			if (callCDesktopManager_IsHighContrastMode_SecondTime)
+			if (instructions[5] == 0x84 && instructions[6] == 0xC0)
 			{
-				g_instructionsBackup.clear();
-				g_instructionsToReplace.clear();
+				highContrastCallExact = instructions;
 			}
-			std::vector<UCHAR> backup(sizeof(g_callCDesktopManager_IsHighContrastMode_Instructions), 0);
-			memcpy_s(
-				backup.data(),
-				backup.size(),
-				CTopLevelWindow_UpdateWindowVisuals_Instructions,
-				sizeof(g_callCDesktopManager_IsHighContrastMode_Instructions)
-			);
-			g_instructionsBackup.insert_or_assign(
-				CTopLevelWindow_UpdateWindowVisuals_Instructions,
-				backup
-			);
-			g_instructionsToReplace.insert_or_assign(
-				CTopLevelWindow_UpdateWindowVisuals_Instructions,
-				std::vector(std::begin(g_callCDesktopManager_IsHighContrastMode_replacedInstruction), std::end(g_callCDesktopManager_IsHighContrastMode_replacedInstruction))
-			);
-			callCDesktopManager_IsHighContrastMode_SecondTime = true;
+			else if (instructions[5] == 0xB1 && instructions[7] == 0x84 && instructions[8] == 0xC0)
+			{
+				highContrastCallWithMovCl = instructions;
+			}
 		}
 
 		CTopLevelWindow_UpdateWindowVisuals_Instructions += 1;
 		i--;
 	} while (i);
+
+	if (const auto highContrastCall = highContrastCallExact ? highContrastCallExact : highContrastCallWithMovCl; highContrastCall)
+	{
+		std::vector<UCHAR> backup(sizeof(g_callCDesktopManager_IsHighContrastMode_replacedInstruction), 0);
+		memcpy_s(
+			backup.data(),
+			backup.size(),
+			highContrastCall,
+			sizeof(g_callCDesktopManager_IsHighContrastMode_replacedInstruction)
+		);
+		g_instructionsBackup.insert_or_assign(highContrastCall, backup);
+		g_instructionsToReplace.insert_or_assign(
+			highContrastCall,
+			std::vector(std::begin(g_callCDesktopManager_IsHighContrastMode_replacedInstruction), std::end(g_callCDesktopManager_IsHighContrastMode_replacedInstruction))
+		);
+	}
 
 	CTopLevelWindow_UpdateWindowVisuals_Instructions = CTopLevelWindow_UpdateWindowVisuals_Instructions_Previous;
 	if (uDWM::g_versionInfo.build < os::build_w11_24h2)
@@ -400,7 +401,21 @@ void GlassFrameDemodernizer::Startup()
 			i--;
 		} while (i);
 	}
-	FAIL_FAST_IF_FAILED_MSG(g_instructionsToReplace.size() == 2 ? S_OK : E_NOINTERFACE, "Unable to locate the complete frame-demodernizer instruction patch set");
+	// An unknown DWM build must not take DWM down. Without the full patch set the
+	// frame demodernizer stays off and the rest of OpenGlass keeps running.
+	if (g_instructionsToReplace.size() != 2)
+	{
+		LOG_HR_MSG(
+			E_NOINTERFACE,
+			"Frame demodernizer patch set incomplete (%u of 2) on uDWM %u.%u, leaving it off",
+			static_cast<unsigned>(g_instructionsToReplace.size()),
+			static_cast<unsigned>(uDWM::g_versionInfo.build),
+			static_cast<unsigned>(uDWM::g_versionInfo.revision)
+		);
+		g_instructionsBackup.clear();
+		g_instructionsToReplace.clear();
+		return;
+	}
 	g_instructionPatches.clear();
 	g_instructionPatches.reserve(g_instructionsToReplace.size());
 	for (const auto& [address, instructions] : g_instructionsToReplace)
@@ -427,14 +442,16 @@ void GlassFrameDemodernizer::Startup()
 			{ &g_SetMargin_Org },
 		}
 	);
+	g_started = true;
 }
 
 void GlassFrameDemodernizer::Shutdown()
 {
-	if (uDWM::g_versionInfo.build < os::build_w11_21h2)
+	if (uDWM::g_versionInfo.build < os::build_w11_21h2 || !g_started)
 	{
 		return;
 	}
+	g_started = false;
 
 	HookHelper::ApplyInlineHooks(
 		std::initializer_list<HookHelper::DetourInfo>
