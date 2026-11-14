@@ -625,7 +625,7 @@ void HeaderGlassSettings(bool on, int strength, int size)
 {
 	std::lock_guard guard{ g_lock };
 	DWORD light = 1, lightSize = sizeof(light);
-	RegGetValueW(HKEY_CURRENT_USER, L"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
+	RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
 	const Style style{ on, strength, size, light != 0 };
 	if (style == g_style) return;
 	g_style = style;
