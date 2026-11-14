@@ -322,6 +322,10 @@ namespace
 		// original letters, which the glow under them hides.
 		struct Halo
 		{
+			// What the last paint saw. A switch between light and dark mode recolours the tray without a Foreground
+			// change on the TextBlock, so the scan compares the colour itself.
+			bool dark{};
+			winrt::Windows::UI::Color inkSeen{};
 			winrt::weak_ref<wux::Controls::TextBlock> text;
 			winrt::Windows::UI::Composition::ContainerVisual root{ nullptr };
 			std::vector<winrt::Windows::UI::Composition::SpriteVisual> sprites;	// the glows, then the four letter copies
@@ -396,6 +400,8 @@ namespace
 			namespace wuc = winrt::Windows::UI::Composition;
 			winrt::Windows::UI::Color ink{};
 			const bool dark = DarkInk(text, ink);
+			halo.dark = dark;
+			halo.inkSeen = ink;
 			halo.root.IsVisible(dark);
 			if (dark) halo.ink.Color(ink);
 			const auto mask = newMask ? PinMask(text.GetAlphaMask()) : nullptr;
@@ -589,10 +595,16 @@ namespace
 						winrt::Windows::UI::Color ink{};
 						if (DarkInk(text, ink)) AddHalo(key, text);
 					}
-					else if (found->second.style != m_halo)
+					else
 					{
-						found->second.style = m_halo;
-						PaintHalo(found->second, text, false);
+						// Without the colour check the halo kept drawing black letters over text that had turned white.
+						winrt::Windows::UI::Color ink{};
+						const bool dark = DarkInk(text, ink);
+						if (found->second.style != m_halo || dark != found->second.dark || (dark && ink != found->second.inkSeen))
+						{
+							found->second.style = m_halo;
+							PaintHalo(found->second, text, false);
+						}
 					}
 				}
 				std::erase_if(m_halos, [](const auto& entry) { return !entry.second.text.get(); });

@@ -70,6 +70,7 @@ namespace
 	{
 		bool on{};
 		int strength{ 60 }, size{ 3 };
+		bool light{ true };	// the apps' mode; a change makes every text look at its colour again
 		bool operator==(const Style&) const = default;
 	};
 
@@ -179,6 +180,7 @@ namespace
 				header->m_halos.clear();
 				header->m_pending.clear();
 				header->m_stale.clear();
+				try { if (header->m_repaintTimer) header->m_repaintTimer.Stop(); } catch (...) {}
 				try { if (header->m_staleTimer) header->m_staleTimer.Stop(); } catch (...) {}
 				header->m_roots.clear();
 				Log(L"window closed");
@@ -208,6 +210,14 @@ namespace
 		void Refresh()
 		{
 			if (m_closed) return;
+			Repaint();
+			try { LogCount(); } catch (...) {}
+			StartRepaints();
+		}
+
+	private:
+		void Repaint()
+		{
 			try
 			{
 				m_style = CurrentStyle();
@@ -218,12 +228,36 @@ namespace
 					Paint(it->second, text, false);
 					++it;
 				}
-				LogCount();
 			}
-			catch (...) { Log(L"refresh threw"); }
+			catch (...) { Log(L"repaint threw"); }
 		}
 
-	private:
+		// A switch between light and dark mode recolours the header's text without a Foreground change on the
+		// TextBlock itself (the colour is inherited, or the brush is recoloured in place), and it reaches the window
+		// a moment after the setting changes. So the texts are looked at again a few times over the next seconds.
+		// Without this the halo kept drawing black letters over text that had turned white.
+		void StartRepaints()
+		{
+			if (m_closed) return;
+			try
+			{
+				m_repaints = 6;
+				if (!m_repaintTimer)
+				{
+					m_repaintTimer = m_queue.CreateTimer();
+					m_repaintTimer.Interval(std::chrono::milliseconds(500));
+					m_repaintTimer.IsRepeating(true);
+					m_repaintTimer.Tick([this](auto&&, auto&&)
+					{
+						if (--m_repaints <= 0 || m_closed) m_repaintTimer.Stop();
+						if (!m_closed) Repaint();
+					});
+				}
+				if (!m_repaintTimer.IsRunning()) m_repaintTimer.Start();
+			}
+			catch (...) { Log(L"repaint timer threw"); }
+		}
+
 		void LogCount()
 		{
 			size_t lit = 0, unmasked = 0;
@@ -255,6 +289,7 @@ namespace
 				std::erase_if(m_roots, [](const auto& entry) { return !entry.second.get(); });
 				m_roots[key] = winrt::make_weak(content);
 				Log(L"window root found, " + std::to_wstring(m_roots.size()) + L" known");
+				if (const auto frame = content.try_as<mux::FrameworkElement>()) frame.ActualThemeChanged([this](auto&&, auto&&) { StartRepaints(); });
 				Scan(content);
 			}
 			catch (...) {}
@@ -506,6 +541,8 @@ namespace
 		std::vector<winrt::weak_ref<mux::DependencyObject>> m_pending;
 		std::map<void*, Halo> m_halos;
 		size_t m_logged{}, m_popupTexts{};
+		int m_repaints{};
+		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_repaintTimer{ nullptr };
 		struct Wait { int readings; ULONGLONG since; };
 		std::map<void*, Wait> m_stale;	// halos waiting for a fresh mask, with the readings left
 		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_staleTimer{ nullptr };
@@ -587,10 +624,12 @@ void HeaderGlassStart(HMODULE)
 void HeaderGlassSettings(bool on, int strength, int size)
 {
 	std::lock_guard guard{ g_lock };
-	const Style style{ on, strength, size };
+	DWORD light = 1, lightSize = sizeof(light);
+	RegGetValueW(HKEY_CURRENT_USER, L"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
+	const Style style{ on, strength, size, light != 0 };
 	if (style == g_style) return;
 	g_style = style;
-	Log(std::wstring(on ? L"on" : L"off") + L", strength " + std::to_wstring(strength) + L", size " + std::to_wstring(size));
+	Log(std::wstring(on ? L"on" : L"off") + L", strength " + std::to_wstring(strength) + L", size " + std::to_wstring(size) + (light ? L", light" : L", dark"));
 	for (const auto& [thread, header] : g_threads)
 	{
 		if (header->Closed()) continue;
