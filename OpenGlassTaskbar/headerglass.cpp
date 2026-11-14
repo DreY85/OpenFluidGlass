@@ -80,7 +80,7 @@ namespace
 
 	// A drop shadow of thin letters peaks far below its opacity, so a few tight glows are stacked to reach the strength
 	// the item list's halo shows at the same setting, with one soft glow around them.
-	constexpr int HaloCores = 4;
+	constexpr int HaloCores = 6;
 	constexpr size_t HaloGlows = HaloCores + 1;
 	constexpr size_t TextLimit = 1500;	// per window, so a huge Home page cannot pile up visuals without end
 
@@ -375,8 +375,8 @@ namespace
 		}
 
 		// The text or its size changed. Until XAML has drawn the new letters the alpha mask still holds the old ones,
-		// and a halo cut from it would write the old text over the new. So the halo hides at once and comes back a
-		// moment later with a fresh mask, which is read twice in case the first reading was still early.
+		// and a halo cut from it would write the old text over the new. So the halo hides at once and fades back in
+		// some 60 to 100 ms later with a fresh mask, which is read once more in case the first reading was early.
 		void Stale(void* key)
 		{
 			if (m_closed) return;
@@ -385,11 +385,11 @@ namespace
 			try
 			{
 				if (found->second.root) found->second.root.IsVisible(false);
-				m_stale[key] = 2;
+				m_stale[key] = { 2, GetTickCount64() };
 				if (!m_staleTimer)
 				{
 					m_staleTimer = m_queue.CreateTimer();
-					m_staleTimer.Interval(std::chrono::milliseconds(120));
+					m_staleTimer.Interval(std::chrono::milliseconds(40));
 					m_staleTimer.IsRepeating(true);
 					m_staleTimer.Tick([this](auto&&, auto&&) { Remask(); });
 				}
@@ -405,8 +405,25 @@ namespace
 				const auto found = m_halos.find(it->first);
 				const auto text = found != m_halos.end() ? found->second.text.get() : nullptr;
 				if (!text || m_closed) { it = m_stale.erase(it); continue; }
-				Paint(found->second, text, true);
-				if (--it->second <= 0) it = m_stale.erase(it);
+				if (GetTickCount64() - it->second.since < 60) { ++it; continue; }
+				auto& halo = found->second;
+				const bool first = it->second.readings == 2;
+				Paint(halo, text, true);
+				if (first && halo.root && halo.root.IsVisible())
+				{
+					// Back in with a short fade, so the return does not read as a blink.
+					try
+					{
+						const auto compositor = halo.root.Compositor();
+						const auto fade = compositor.CreateScalarKeyFrameAnimation();
+						fade.InsertKeyFrame(0.f, 0.f);
+						fade.InsertKeyFrame(1.f, 1.f);
+						fade.Duration(std::chrono::milliseconds(160));
+						halo.root.StartAnimation(L"Opacity", fade);
+					}
+					catch (...) { try { halo.root.Opacity(1.f); } catch (...) {} }
+				}
+				if (--it->second.readings <= 0) it = m_stale.erase(it);
 				else ++it;
 			}
 			if (m_stale.empty() && m_staleTimer) m_staleTimer.Stop();
@@ -447,10 +464,11 @@ namespace
 				if (!halo.masked) { halo.root.IsVisible(false); return; }
 				halo.ink.Color(ink);
 				const float strength = m_style.strength / 100.f, size = static_cast<float>(m_style.size);
-				// One glow of a 1.3 px stroke peaks at about erf(0.46 / sigma) of its opacity, with sigma near half
-				// the blur radius (measured on the breadcrumb). The stacked glows together aim at the strength.
-				const float coreBlur = (std::max)(1.f, size * 0.5f);
-				const float peak = std::erf(0.46f / (coreBlur * 0.5f));
+				// One glow of the header's thin strokes peaks at about erf(0.32 / sigma) of its opacity, with sigma
+				// near half the blur radius (measured twice on the breadcrumb). The stacked glows together aim at the
+				// strength, and stacking also widens the bright bed around the letters, as the item list's halo has.
+				const float coreBlur = (std::max)(1.f, size * 0.75f);
+				const float peak = std::erf(0.32f / (coreBlur * 0.5f));
 				const float coreOpacity = (std::min)(1.f, (1.f - std::pow(1.f - (std::min)(strength, 0.97f), 1.f / HaloCores)) / peak);
 				for (size_t index = 0; index < HaloGlows; ++index)
 				{
@@ -488,7 +506,8 @@ namespace
 		std::vector<winrt::weak_ref<mux::DependencyObject>> m_pending;
 		std::map<void*, Halo> m_halos;
 		size_t m_logged{}, m_popupTexts{};
-		std::map<void*, int> m_stale;	// halos waiting for a fresh mask, with the readings left
+		struct Wait { int readings; ULONGLONG since; };
+		std::map<void*, Wait> m_stale;	// halos waiting for a fresh mask, with the readings left
 		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_staleTimer{ nullptr };
 		std::map<void*, winrt::weak_ref<mux::UIElement>> m_roots;	// the content of each window seen on this thread
 	};
