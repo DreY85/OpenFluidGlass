@@ -30,8 +30,6 @@
 
 #ifdef FLUIDGLASS_HEADER
 // headerglass.cpp: the halo for File Explorer's WinUI 3 header.
-extern const CLSID CLSID_HeaderTap;
-HRESULT HeaderGlassClassObject(REFIID riid, void** out);
 void HeaderGlassStart(HMODULE module);
 void HeaderGlassSettings(bool on, int strength, int size);
 #endif
@@ -1364,9 +1362,6 @@ namespace
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID riid, void** out)
 {
-#ifdef FLUIDGLASS_HEADER
-	if (clsid == CLSID_HeaderTap) return HeaderGlassClassObject(riid, out);
-#endif
 	if (clsid != CLSID_ItemGlass) return CLASS_E_CLASSNOTAVAILABLE;
 	return g_factory.QueryInterface(riid, out);
 }
