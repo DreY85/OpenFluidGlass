@@ -8,6 +8,7 @@
 #include "Symbols.hpp"
 #include "PresetPackage.hpp"
 #include "ConfigurationResources.hpp"
+#include "WrappingLayout.hpp"
 
 namespace OpenGlass
 {

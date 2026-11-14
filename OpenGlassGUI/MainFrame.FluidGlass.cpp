@@ -200,7 +200,7 @@ namespace OpenGlass
 
 	void MainFrame::CreateFluidGlassTab()
 	{
-		wxScrolledWindow* panel = new wxScrolledWindow(m_notebook);
+		wxScrolledWindow* panel = new TabPage(m_notebook);
 		panel->SetScrollRate(5, 5);
 		panel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);

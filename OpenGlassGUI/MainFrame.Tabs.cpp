@@ -166,7 +166,7 @@ namespace OpenGlass
 
 	void MainFrame::CreateDiagnosticsTab()
 	{
-		wxScrolledWindow* panel = new wxScrolledWindow(m_notebook);
+		wxScrolledWindow* panel = new TabPage(m_notebook);
 		panel->SetScrollRate(5, 5);
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 
@@ -427,7 +427,7 @@ namespace OpenGlass
 
 	void MainFrame::CreateThemeTab()
 	{
-		wxScrolledWindow* panel = new wxScrolledWindow(m_notebook);
+		wxScrolledWindow* panel = new TabPage(m_notebook);
 		panel->SetScrollRate(5, 5);
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 
@@ -564,7 +564,7 @@ namespace OpenGlass
 
 	void MainFrame::CreateAppearanceTab()
 	{
-		wxScrolledWindow* panel = new wxScrolledWindow(m_notebook);
+		wxScrolledWindow* panel = new TabPage(m_notebook);
 		panel->SetScrollRate(5, 5);
 		panel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW)); 
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
@@ -798,7 +798,7 @@ namespace OpenGlass
 	void MainFrame::CreateGlassColorsTab()
 	{
 		// Use ScrolledWindow for large content
-		wxScrolledWindow* panel = new wxScrolledWindow(m_notebook);
+		wxScrolledWindow* panel = new TabPage(m_notebook);
 		panel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
 		panel->SetScrollRate(5, 5);
 		wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);

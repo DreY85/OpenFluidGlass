@@ -2,9 +2,20 @@
 #include <wx/stattext.h>
 #include <wx/scrolwin.h>
 #include <wx/sizer.h>
+#include <wx/utils.h>
 
 namespace OpenGlass
 {
+	// A scrolled tab page that stays where the user left it. wxWidgets scrolls a page to whichever control gets the
+	// focus, and coming back to the window gives the focus back to the last control used. After scrolling with the
+	// wheel that control is often far up, so the page jumped to the top. Only Tab key navigation scrolls now.
+	class TabPage : public wxScrolledWindow
+	{
+	public:
+		using wxScrolledWindow::wxScrolledWindow;
+		bool ShouldScrollToChildOnFocus(wxWindow*) override { return wxGetKeyState(WXK_TAB); }
+	};
+
 	inline void LayoutWrappingPage(wxScrolledWindow* page)
 	{
 		auto* sizer = page->GetSizer();
