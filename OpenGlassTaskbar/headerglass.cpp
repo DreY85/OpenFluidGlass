@@ -14,6 +14,7 @@
 #undef GetCurrentTime	// windows.h macro clashes with C++/WinRT
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <mutex>
@@ -76,9 +77,9 @@ namespace
 	Style g_style;
 	std::map<DWORD, Header*> g_threads;	// the XAML thread of each File Explorer window
 
-	// The header sits on glass and its text is dense, so one tight glow and one soft one are enough. More turns the
-	// address bar and the command bar into a white haze.
-	constexpr int HaloCores = 1;
+	// A drop shadow of thin letters peaks far below its opacity, so a few tight glows are stacked to reach the strength
+	// the item list's halo shows at the same setting, with one soft glow around them.
+	constexpr int HaloCores = 4;
 	constexpr size_t HaloGlows = HaloCores + 1;
 	constexpr size_t TextLimit = 1500;	// per window, so a huge Home page cannot pile up visuals without end
 
@@ -109,19 +110,21 @@ namespace
 		return out.A > 0 && out.R * 299 + out.G * 587 + out.B * 114 < 128 * 1000;
 	}
 
-	// Menus, flyouts and tooltips have their own solid faces, so their text keeps the plain look.
-	bool InPopup(const mux::DependencyObject& node)
+	// Menus, flyouts and tooltips have their own solid faces, so their text keeps the plain look. They live outside the
+	// window's content: their parents never lead to it. (Class names do not tell: the command bar's Sort and View
+	// buttons are menu buttons that sit in the header itself.)
+	bool InPopup(const mux::Controls::TextBlock& text)
 	{
-		auto current = mux::Media::VisualTreeHelper::GetParent(node);
-		for (int depth = 0; current && depth < 60; ++depth)
+		const auto xamlRoot = text.XamlRoot();
+		const auto content = xamlRoot ? xamlRoot.Content() : nullptr;
+		if (!content) return true;
+		mux::DependencyObject current = text;
+		for (int depth = 0; current && depth < 200; ++depth)
 		{
-			const std::wstring name(winrt::get_class_name(current));
-			if (name.find(L"Popup") != std::wstring::npos || name.find(L"Flyout") != std::wstring::npos || name.find(L"ToolTip") != std::wstring::npos
-				|| name.find(L"Menu") != std::wstring::npos)
-				return true;
+			if (current == content) return false;
 			current = mux::Media::VisualTreeHelper::GetParent(current);
 		}
-		return false;
+		return true;
 	}
 
 	// One TextBlock. Every text is watched for its colour, but the visuals are only made once it turns dark.
@@ -212,11 +215,20 @@ namespace
 					Paint(it->second, text, false);
 					++it;
 				}
+				LogCount();
 			}
 			catch (...) { Log(L"refresh threw"); }
 		}
 
 	private:
+		void LogCount()
+		{
+			size_t lit = 0, unmasked = 0;
+			for (const auto& [key, halo] : m_halos) { lit += halo.root && halo.root.IsVisible(); unmasked += halo.root && !halo.masked; }
+			Log(std::to_wstring(m_halos.size()) + L" texts watched, " + std::to_wstring(lit) + L" with a halo, " + std::to_wstring(unmasked) + L" without a mask, " +
+				std::to_wstring(m_popupTexts) + L" left out as popup text");
+		}
+
 		explicit Header(const winrt::Microsoft::UI::Dispatching::DispatcherQueue& queue) : m_queue(queue) {}
 
 		static Style CurrentStyle()
@@ -281,9 +293,7 @@ namespace
 				if (m_halos.size() != m_logged)
 				{
 					m_logged = m_halos.size();
-					size_t lit = 0;
-					for (const auto& [key, halo] : m_halos) lit += halo.root && halo.root.IsVisible();
-					Log(std::to_wstring(m_logged) + L" texts watched, " + std::to_wstring(lit) + L" with a halo");
+					LogCount();
 				}
 			}
 			catch (...) { Log(L"flush threw"); }
@@ -298,7 +308,8 @@ namespace
 				if (found->second.text.get() == text) return;
 				m_halos.erase(found);
 			}
-			if (m_halos.size() >= TextLimit || InPopup(text)) return;
+			if (m_halos.size() >= TextLimit) return;
+			if (InPopup(text)) { ++m_popupTexts; return; }
 			Halo halo;
 			halo.text = winrt::make_weak(text);
 			// The colour changes with the theme, with hover and with the window's focus; the halo follows it.
@@ -402,12 +413,17 @@ namespace
 				if (!halo.masked) { halo.root.IsVisible(false); return; }
 				halo.ink.Color(ink);
 				const float strength = m_style.strength / 100.f, size = static_cast<float>(m_style.size);
+				// One glow of a 1.3 px stroke peaks at about erf(0.46 / sigma) of its opacity, with sigma near half
+				// the blur radius (measured on the breadcrumb). The stacked glows together aim at the strength.
+				const float coreBlur = (std::max)(1.f, size * 0.5f);
+				const float peak = std::erf(0.46f / (coreBlur * 0.5f));
+				const float coreOpacity = (std::min)(1.f, (1.f - std::pow(1.f - (std::min)(strength, 0.97f), 1.f / HaloCores)) / peak);
 				for (size_t index = 0; index < HaloGlows; ++index)
 				{
 					const auto shadow = halo.sprites[index].Shadow().as<muc::DropShadow>();
 					const bool core = index < HaloCores;
-					shadow.BlurRadius(core ? (std::max)(1.f, size * 0.75f) : size * 1.5f + 1.f);
-					shadow.Opacity(core ? strength * 0.85f : strength * 0.45f);
+					shadow.BlurRadius(core ? coreBlur : size * 1.5f + 1.f);
+					shadow.Opacity(core ? coreOpacity : strength * 0.45f);
 				}
 				halo.root.IsVisible(true);
 			}
@@ -437,7 +453,7 @@ namespace
 		Style m_style;
 		std::vector<winrt::weak_ref<mux::DependencyObject>> m_pending;
 		std::map<void*, Halo> m_halos;
-		size_t m_logged{};
+		size_t m_logged{}, m_popupTexts{};
 		std::map<void*, winrt::weak_ref<mux::UIElement>> m_roots;	// the content of each window seen on this thread
 	};
 
