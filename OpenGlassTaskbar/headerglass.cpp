@@ -14,6 +14,7 @@
 #undef GetCurrentTime	// windows.h macro clashes with C++/WinRT
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -177,6 +178,8 @@ namespace
 				try { for (auto& [key, halo] : header->m_halos) Remove(halo); } catch (...) {}
 				header->m_halos.clear();
 				header->m_pending.clear();
+				header->m_stale.clear();
+				try { if (header->m_staleTimer) header->m_staleTimer.Stop(); } catch (...) {}
 				header->m_roots.clear();
 				Log(L"window closed");
 			});
@@ -363,19 +366,50 @@ namespace
 			Fit(halo, text);
 			mux::Hosting::ElementCompositionPreview::SetElementChildVisual(text, halo.root);
 			// A new path in the address bar or a new tab title: the mask follows the text.
-			halo.textToken = text.RegisterPropertyChangedCallback(mux::Controls::TextBlock::TextProperty(), [this, key](const mux::DependencyObject& node, auto&&)
-			{
-				if (const auto found = m_halos.find(key); found != m_halos.end()) Paint(found->second, node.as<mux::Controls::TextBlock>(), true);
-			});
+			halo.textToken = text.RegisterPropertyChangedCallback(mux::Controls::TextBlock::TextProperty(), [this, key](auto&&, auto&&) { Stale(key); });
 			halo.sizeToken = text.SizeChanged([this, key](const winrt::Windows::Foundation::IInspectable& sender, auto&&)
 			{
-				if (const auto found = m_halos.find(key); found != m_halos.end())
-				{
-					const auto node = sender.as<mux::Controls::TextBlock>();
-					Fit(found->second, node);
-					Paint(found->second, node, true);
-				}
+				if (const auto found = m_halos.find(key); found != m_halos.end()) Fit(found->second, sender.as<mux::Controls::TextBlock>());
+				Stale(key);
 			});
+		}
+
+		// The text or its size changed. Until XAML has drawn the new letters the alpha mask still holds the old ones,
+		// and a halo cut from it would write the old text over the new. So the halo hides at once and comes back a
+		// moment later with a fresh mask, which is read twice in case the first reading was still early.
+		void Stale(void* key)
+		{
+			if (m_closed) return;
+			const auto found = m_halos.find(key);
+			if (found == m_halos.end()) return;
+			try
+			{
+				if (found->second.root) found->second.root.IsVisible(false);
+				m_stale[key] = 2;
+				if (!m_staleTimer)
+				{
+					m_staleTimer = m_queue.CreateTimer();
+					m_staleTimer.Interval(std::chrono::milliseconds(120));
+					m_staleTimer.IsRepeating(true);
+					m_staleTimer.Tick([this](auto&&, auto&&) { Remask(); });
+				}
+				if (!m_staleTimer.IsRunning()) m_staleTimer.Start();
+			}
+			catch (...) { Log(L"stale threw"); }
+		}
+
+		void Remask()
+		{
+			for (auto it = m_stale.begin(); it != m_stale.end();)
+			{
+				const auto found = m_halos.find(it->first);
+				const auto text = found != m_halos.end() ? found->second.text.get() : nullptr;
+				if (!text || m_closed) { it = m_stale.erase(it); continue; }
+				Paint(found->second, text, true);
+				if (--it->second <= 0) it = m_stale.erase(it);
+				else ++it;
+			}
+			if (m_stale.empty() && m_staleTimer) m_staleTimer.Stop();
 		}
 
 		static void Fit(Halo& halo, const mux::Controls::TextBlock& text)
@@ -454,6 +488,8 @@ namespace
 		std::vector<winrt::weak_ref<mux::DependencyObject>> m_pending;
 		std::map<void*, Halo> m_halos;
 		size_t m_logged{}, m_popupTexts{};
+		std::map<void*, int> m_stale;	// halos waiting for a fresh mask, with the readings left
+		winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_staleTimer{ nullptr };
 		std::map<void*, winrt::weak_ref<mux::UIElement>> m_roots;	// the content of each window seen on this thread
 	};
 
