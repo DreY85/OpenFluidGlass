@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.3
+
+### Windows build 26100.9974
+
+- The glass works again after the Windows update that brings DWM to build 26100.9974. Before, DWM crashed every few seconds once the new debug symbols were in place, and the screen kept flickering. That update changed a few instructions OpenGlass patches inside DWM. The patch now accepts both the old and the new form, and older Windows builds get exactly the same patch as before.
+- If a future update changes DWM in a way OpenGlass does not recognise, that one part now switches itself off instead of taking DWM down.
+
+### Crash guard
+
+- If DWM crashes twice in a row right after the glass loads, on the same DWM version, the service stops loading the glass. Windows keeps running with its normal look. The guard resets by itself after a Windows update that changes DWM, or once the glass runs for a minute without a crash. To clear it by hand, delete the registry key `HKLM\SOFTWARE\OpenGlass\CrashGuard`.
+
 ## 1.0.2
 
 ### Updates and uninstall
