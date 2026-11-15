@@ -246,6 +246,7 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	{
 		// Only the luminance rises, up to a floor that grows with the setting, so mid tones keep their contrast.
 		// The hue and as much of the color as fits stay, so the glass brightens instead of turning milky.
+		float3 unlifted = background.rgb;
 		float floorLuminance = 0.78f * -fgLook.z;
 		float knee = 0.25f * floorLuminance;
 		float lifted = min(0.5f * (luminance + floorLuminance + sqrt((luminance - floorLuminance) * (luminance - floorLuminance) + knee * knee)), 1.0f);
@@ -254,6 +255,9 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 		// Never above white, nor above a channel that was already brighter.
 		float fit = min(1.0f, (max(1.0f, luminance + peak) - lifted) / max(peak, 1e-4f));
 		background.rgb = max(lifted + chroma * fit, 0.0f);
+		// The lift follows the background's coverage. Where nothing is behind the glass (alpha 0, as in a DWM
+		// thumbnail or Alt+Tab), it used to add colour without alpha, which those views showed as a white sheet.
+		background.rgb = lerp(unlifted, background.rgb, saturate(background.a));
 	}
 
 	// Rim light: how steep the bezel is and how much it faces the light.
