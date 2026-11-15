@@ -335,31 +335,32 @@ namespace OpenGlass::GlassIntegrity
 	};
 	GlassSafetyZoneMode g_glassSafetyZoneMode{ GlassSafetyZoneMode::Visible };
 
-	// Pill glass drawn in the last two seconds, in device pixels.
-	// A hover on a taskbar button redraws only the button. On those frames the glass coverage set
-	// can miss the pill, so the safety zone was skipped and the glass sampled the old composed frame.
-	struct RecentPillGlass
+	// Where pill glass was drawn, in device pixels.
+	// A small redraw over a pill (a hover on a taskbar button, the clock changing its minute) redraws
+	// only that rectangle. On those frames the glass coverage set can miss the pill, so the safety zone
+	// was skipped and the glass sampled the old composed frame.
+	// The entries do not expire: a pill can sit unchanged for minutes and then get a single small redraw.
+	// A stale entry only costs a wider redraw near it. The list is cleared with the device resources.
+	struct RememberedPillGlass
 	{
 		D2D1_RECT_F deviceBounds;
+		// when it was last drawn, 0 for a free slot. Only used to pick the slot to reuse.
 		ULONGLONG tick;
 	};
-	constexpr size_t c_recentPillGlassCapacity{ 32 };
-	constexpr ULONGLONG c_recentPillGlassLifetimeMs{ 2000 };
-	std::array<RecentPillGlass, c_recentPillGlassCapacity> g_recentPillGlass{};
+	constexpr size_t c_rememberedPillGlassCapacity{ 32 };
+	std::array<RememberedPillGlass, c_rememberedPillGlassCapacity> g_rememberedPillGlass{};
 
-	bool TouchesRecentPillGlass(const D2D1_RECT_F& deviceRect)
+	bool TouchesRememberedPillGlass(const D2D1_RECT_F& deviceRect)
 	{
 		if (wil::rect_is_empty(deviceRect))
 		{
 			return false;
 		}
 
-		const auto now = GetTickCount64();
-		for (const auto& entry : g_recentPillGlass)
+		for (const auto& entry : g_rememberedPillGlass)
 		{
 			if (
 				entry.tick &&
-				now - entry.tick <= c_recentPillGlassLifetimeMs &&
 				RectF::DoesIntersectUnsafe(entry.deviceBounds, deviceRect)
 			)
 			{
@@ -381,9 +382,10 @@ void GlassIntegrity::RememberDrawnPillGlass(const D2D1_RECT_F& deviceBounds)
 		return;
 	}
 
-	const auto now = GetTickCount64();
-	RecentPillGlass* slot{ nullptr };
-	for (auto& entry : g_recentPillGlass)
+	// never 0, which marks a free slot
+	const auto now = std::max<ULONGLONG>(GetTickCount64(), 1);
+	RememberedPillGlass* slot{ nullptr };
+	for (auto& entry : g_rememberedPillGlass)
 	{
 		// the same pill drawn again only refreshes its time
 		if (
@@ -397,7 +399,7 @@ void GlassIntegrity::RememberDrawnPillGlass(const D2D1_RECT_F& deviceBounds)
 			slot = &entry;
 			break;
 		}
-		// otherwise take a free slot, or the oldest one
+		// otherwise take a free slot, or the one drawn longest ago
 		if (!slot || entry.tick < slot->tick)
 		{
 			slot = &entry;
@@ -1391,7 +1393,7 @@ bool GlassIntegrity::MyCOcclusionContext_PageInPixelsRectToDeviceRect(
 					invokeOriginal(extendedDirtyRect, &extendedDeviceRect) &&
 					(
 						(glassCoverageSet && glassCoverageSet->IsVisible(extendedDeviceRect, coverageSet)) ||
-						TouchesRecentPillGlass(extendedDeviceRect)
+						TouchesRememberedPillGlass(extendedDeviceRect)
 					);
 			}
 			if (useExtendedDirtyRect)
@@ -1653,7 +1655,7 @@ HRESULT GlassIntegrity::MyCDrawingContext_DrawVisualTree(
 				glassCoverageSet->IsEmpty() ||
 				!glassCoverageSet->IsVisible(transformedRect, coverageSet)
 			) &&
-			!TouchesRecentPillGlass(transformedRect)
+			!TouchesRememberedPillGlass(transformedRect)
 		)
 		{
 			break;
@@ -1874,6 +1876,8 @@ HRESULT GlassIntegrity::MyCDrawingContext_DrawVisualTree_Win11(
 void GlassIntegrity::DestroyDeviceResources(dwmcore::CD2DContext* d2dContext)
 {
 	g_safetyZonePool.Cleanup(std::chrono::seconds{ 0 }, d2dContext);
+	// a new device means a new target, maybe a new size. The pills come back with their next draw.
+	g_rememberedPillGlass = {};
 }
 
 void GlassIntegrity::Update([[maybe_unused]] GlassEngine::UpdateType type)
