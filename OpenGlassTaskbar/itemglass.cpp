@@ -65,6 +65,7 @@ namespace
 	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey and black item text in light mode
 	std::atomic<int> g_grayStrength{ 60 };	// FluidGlassGrayTextStrength: halo peak opacity in percent, 0 to 100
 	std::atomic<int> g_graySize{ 3 };	// FluidGlassGrayTextSize / 100: halo reach in pixels, 1 to 10
+	std::atomic<bool> g_explorerFill{ true };	// FluidGlassExplorerFill: paint a folder window's blank surface black
 
 	void Log(const wchar_t* line)
 	{
@@ -77,10 +78,11 @@ namespace
 		}
 	}
 
+#pragma comment(lib, "comctl32.lib")	// SetWindowSubclass for the folder window fill and the paint trace
+
 #ifdef FLUIDGLASS_LOGS
 	// Dev trace of a folder window's first seconds, for the dark flash on the first open after a reboot: when its
 	// parts are created and shown, which backdrop and frame it asks DWM for, and what its class erases with.
-#pragma comment(lib, "comctl32.lib")	// SetWindowSubclass for the paint trace
 	std::atomic<LONGLONG> g_traceStart{};
 	decltype(&DwmSetWindowAttribute) g_dwmSetWindowAttribute = DwmSetWindowAttribute;
 	decltype(&DwmExtendFrameIntoClientArea) g_dwmExtendFrame = DwmExtendFrameIntoClientArea;
@@ -822,6 +824,90 @@ namespace
 		return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
 	}
 
+	// When a folder window is restored from the taskbar, or opened, Windows hands it a new surface filled with one
+	// flat colour (white in light mode, near black in dark mode). Explorer only paints over it about 200 ms later,
+	// so the glass shows a white sheet until then. The surface is written between messages, while the window is
+	// still cloaked, so the window proc checks it around every message for a short while and paints it black,
+	// which is clear glass, the same as Explorer's own erase. Only a surface that is one flat colour at three
+	// spread points is painted, so content Explorer has already drawn is never wiped.
+	constexpr UINT_PTR kFillId = 0x46474C46;	// 'FGLF'
+	constexpr wchar_t kFillUntil[] = L"FluidGlassFillUntil";	// tick count until which the surface is watched
+	constexpr wchar_t kFillMinimized[] = L"FluidGlassFillMinimized";
+	constexpr ULONGLONG kFillOpenMs = 1500, kFillRestoreMs = 500;
+
+	void ArmFill(HWND window, ULONGLONG span)
+	{
+		if (g_enabled && g_explorerFill) SetPropW(window, kFillUntil, reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(GetTickCount64() + span)));
+	}
+
+	void FillIfBlank(HWND window)
+	{
+		const auto until = reinterpret_cast<ULONG_PTR>(GetPropW(window, kFillUntil));
+		if (!until) return;
+		if (GetTickCount64() > until || !g_enabled || !g_explorerFill)
+		{
+			RemovePropW(window, kFillUntil);
+			return;
+		}
+		RECT client{};
+		if (IsIconic(window) || !GetClientRect(window, &client) || client.right < 16 || client.bottom < 16) return;
+		// No DCX_CLIPCHILDREN: the blank surface is shared with the children, and they have not painted yet.
+		const HDC dc = GetDCEx(window, nullptr, DCX_CACHE);
+		if (!dc) return;
+		const COLORREF a = GetPixel(dc, client.right / 2, client.bottom * 3 / 4);
+		const COLORREF b = GetPixel(dc, client.right / 4, client.bottom / 2);
+		const COLORREF c = GetPixel(dc, client.right * 3 / 4, client.bottom * 9 / 10);
+		const bool blank = a != CLR_INVALID && a != RGB(0, 0, 0) && a == b && a == c;
+		if (blank) FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+		ReleaseDC(window, dc);
+#ifdef FLUIDGLASS_LOGS
+		if (blank)
+		{
+			wchar_t line[64];
+			swprintf_s(line, L"fill %p over %06lX", window, static_cast<unsigned long>(a));
+			Log(line);
+		}
+#endif
+	}
+
+	LRESULT CALLBACK FillProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR)
+	{
+		switch (message)
+		{
+		case WM_SIZE:
+			if (wParam == SIZE_MINIMIZED) SetPropW(window, kFillMinimized, reinterpret_cast<HANDLE>(1));
+			break;
+		case WM_WINDOWPOSCHANGING:
+			// The first resize after a minimize is the restore.
+			if (GetPropW(window, kFillMinimized) && lParam && !(reinterpret_cast<const WINDOWPOS*>(lParam)->flags & SWP_NOSIZE))
+			{
+				RemovePropW(window, kFillMinimized);
+				ArmFill(window, kFillRestoreMs);
+			}
+			break;
+		case WM_NCDESTROY:
+			RemovePropW(window, kFillUntil);
+			RemovePropW(window, kFillMinimized);
+			RemoveWindowSubclass(window, FillProc, id);
+			return DefSubclassProc(window, message, wParam, lParam);
+		}
+		FillIfBlank(window);
+		const LRESULT result = DefSubclassProc(window, message, wParam, lParam);
+		FillIfBlank(window);
+		return result;
+	}
+
+	// Runs on the window's own thread, from the in-context create event. A window that was open before we loaded is
+	// watched from the first part it creates, a new one from its creation.
+	void WatchFill(HWND root, bool created)
+	{
+		DWORD_PTR data{};
+		if (GetWindowThreadProcessId(root, nullptr) != GetCurrentThreadId() || GetWindowSubclass(root, FillProc, kFillId, &data)) return;
+		if (!SetWindowSubclass(root, FillProc, kFillId, 0)) return;
+		if (created) ArmFill(root, kFillOpenMs);
+		else if (IsIconic(root)) SetPropW(root, kFillMinimized, reinterpret_cast<HANDLE>(1));
+	}
+
 	// A folder window shows long before it asks DWM for its backdrop: about 0.6 s on the first open after a reboot.
 	// Until then it is a plain window, erased grey with a black band on top, and the glass only takes over after.
 	// Asking for the backdrop as soon as its first part exists makes it glass from its first frame. Black paints as
@@ -835,6 +921,7 @@ namespace
 		const HWND root = GetAncestor(window, GA_ROOT);
 		wchar_t name[32]{};
 		if (!root || !GetClassNameW(root, name, ARRAYSIZE(name)) || wcscmp(name, L"CabinetWClass")) return;
+		WatchFill(root, window == root);
 		DWM_SYSTEMBACKDROP_TYPE backdrop{};
 		if (SUCCEEDED(DwmGetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop))) && backdrop >= DWMSBT_MAINWINDOW) return;
 		backdrop = DWMSBT_MAINWINDOW;
@@ -1152,6 +1239,7 @@ namespace
 	void ReadSettings()
 	{
 		const bool enabled = g_inExplorer ? ReadSwitch(L"FluidGlassItems", 1) : ReadSwitch(L"FluidGlassDialogs", 0);
+		g_explorerFill = ReadSwitch(L"FluidGlassExplorerFill", 1);
 		DWORD lightTheme{}, size = sizeof(lightTheme);
 		RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &lightTheme, &size);
 		const bool light = lightTheme != 0;
