@@ -11,6 +11,7 @@
 #include "MaterialRealizer.hpp"
 #include "D2DPrivates.hpp"
 #include "GlassCoverageSet.hpp"
+#include "GlassIntegrity.hpp"
 #include "DetourChains.hpp"
 
 using namespace OpenGlass;
@@ -501,6 +502,15 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 					}
 				}
 				g_renderFlag.set(RenderFlag_Backdrop, true);
+				if (g_params.pill)
+				{
+					GlassIntegrity::RememberDrawnPillGlass(
+						RectF::Transform2DBounds(
+							shapeWorldBounds,
+							drawingContext->GetDeviceTransform()->GetD3DMatrix()
+						)
+					);
+				}
 			}
 		}
 		else
