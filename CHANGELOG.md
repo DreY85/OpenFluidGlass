@@ -11,6 +11,10 @@
 
 - If DWM crashes twice in a row right after the glass loads, on the same DWM version, the service stops loading the glass. Windows keeps running with its normal look. The guard resets by itself after a Windows update that changes DWM, or once the glass runs for a minute without a crash. To clear it by hand, delete the registry key `HKLM\SOFTWARE\OpenGlass\CrashGuard`.
 
+### Taskbar
+
+- Light rectangles with cyan edges no longer stay over the tray and clock pills of the floating taskbar. They appeared after a hover over the tray icons, and on the corners of the clock when the minute changed. Small redraws over a pill now keep the glass safety zone, so the glass no longer picks up an old frame.
+
 ## 1.0.2
 
 ### Updates and uninstall
