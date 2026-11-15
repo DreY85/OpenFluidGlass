@@ -335,6 +335,82 @@ namespace OpenGlass::GlassIntegrity
 	};
 	GlassSafetyZoneMode g_glassSafetyZoneMode{ GlassSafetyZoneMode::Visible };
 
+	// Pill glass drawn in the last two seconds, in device pixels.
+	// A hover on a taskbar button redraws only the button. On those frames the glass coverage set
+	// can miss the pill, so the safety zone was skipped and the glass sampled the old composed frame.
+	struct RecentPillGlass
+	{
+		D2D1_RECT_F deviceBounds;
+		ULONGLONG tick;
+	};
+	constexpr size_t c_recentPillGlassCapacity{ 32 };
+	constexpr ULONGLONG c_recentPillGlassLifetimeMs{ 2000 };
+	std::array<RecentPillGlass, c_recentPillGlassCapacity> g_recentPillGlass{};
+
+	bool TouchesRecentPillGlass(const D2D1_RECT_F& deviceRect)
+	{
+		if (wil::rect_is_empty(deviceRect))
+		{
+			return false;
+		}
+
+		const auto now = GetTickCount64();
+		for (const auto& entry : g_recentPillGlass)
+		{
+			if (
+				entry.tick &&
+				now - entry.tick <= c_recentPillGlassLifetimeMs &&
+				RectF::DoesIntersectUnsafe(entry.deviceBounds, deviceRect)
+			)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+}
+
+void GlassIntegrity::RememberDrawnPillGlass(const D2D1_RECT_F& deviceBounds)
+{
+	if (
+		wil::rect_is_empty(deviceBounds) ||
+		std::abs(wil::rect_height(deviceBounds) * wil::rect_width(deviceBounds)) <= 1.f
+	)
+	{
+		return;
+	}
+
+	const auto now = GetTickCount64();
+	RecentPillGlass* slot{ nullptr };
+	for (auto& entry : g_recentPillGlass)
+	{
+		// the same pill drawn again only refreshes its time
+		if (
+			entry.tick &&
+			entry.deviceBounds.left == deviceBounds.left &&
+			entry.deviceBounds.top == deviceBounds.top &&
+			entry.deviceBounds.right == deviceBounds.right &&
+			entry.deviceBounds.bottom == deviceBounds.bottom
+		)
+		{
+			slot = &entry;
+			break;
+		}
+		// otherwise take a free slot, or the oldest one
+		if (!slot || entry.tick < slot->tick)
+		{
+			slot = &entry;
+		}
+	}
+
+	slot->deviceBounds = deviceBounds;
+	slot->tick = now;
+}
+
+namespace OpenGlass::GlassIntegrity
+{
+
 	void CheckEmergencyRecoveryHotkey()
 	{
 		const auto isKeyPressed = [](int key)
@@ -1312,9 +1388,11 @@ bool GlassIntegrity::MyCOcclusionContext_PageInPixelsRectToDeviceRect(
 				const auto coverageSet = This->GetArrayBasedCoverageSet();
 				const auto glassCoverageSet = CArrayBasedGlassCoverageSet::GetOrCreate(coverageSet);
 				useExtendedDirtyRect =
-					glassCoverageSet &&
 					invokeOriginal(extendedDirtyRect, &extendedDeviceRect) &&
-					glassCoverageSet->IsVisible(extendedDeviceRect, coverageSet);
+					(
+						(glassCoverageSet && glassCoverageSet->IsVisible(extendedDeviceRect, coverageSet)) ||
+						TouchesRecentPillGlass(extendedDeviceRect)
+					);
 			}
 			if (useExtendedDirtyRect)
 			{
@@ -1574,7 +1652,8 @@ HRESULT GlassIntegrity::MyCDrawingContext_DrawVisualTree(
 				!glassCoverageSet ||
 				glassCoverageSet->IsEmpty() ||
 				!glassCoverageSet->IsVisible(transformedRect, coverageSet)
-			)
+			) &&
+			!TouchesRecentPillGlass(transformedRect)
 		)
 		{
 			break;
