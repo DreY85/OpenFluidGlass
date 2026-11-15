@@ -901,11 +901,16 @@ namespace
 	// watched from the first part it creates, a new one from its creation.
 	void WatchFill(HWND root, bool created)
 	{
+		if (GetWindowThreadProcessId(root, nullptr) != GetCurrentThreadId()) return;
 		DWORD_PTR data{};
-		if (GetWindowThreadProcessId(root, nullptr) != GetCurrentThreadId() || GetWindowSubclass(root, FillProc, kFillId, &data)) return;
-		if (!SetWindowSubclass(root, FillProc, kFillId, 0)) return;
-		if (created) ArmFill(root, kFillOpenMs);
-		else if (IsIconic(root)) SetPropW(root, kFillMinimized, reinterpret_cast<HANDLE>(1));
+		if (!GetWindowSubclass(root, FillProc, kFillId, &data))
+		{
+			if (!SetWindowSubclass(root, FillProc, kFillId, 0)) return;
+			if (IsIconic(root)) SetPropW(root, kFillMinimized, reinterpret_cast<HANDLE>(1));
+		}
+		// A new folder window creates its parts before its own create event arrives, so the first event seen is
+		// often a part's. A window not shown yet is still opening: arm it from that first sight.
+		if (created || !IsWindowVisible(root)) ArmFill(root, kFillOpenMs);
 	}
 
 	// A folder window shows long before it asks DWM for its backdrop: about 0.6 s on the first open after a reboot.
