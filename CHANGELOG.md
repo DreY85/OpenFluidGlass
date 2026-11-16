@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.4
+
+### File Explorer colors
+
+- You can pick your own colors for File Explorer text, separately for Light and Dark mode. There are three colors per mode: text (file and folder names, the header and the command bar), details (descriptions, sizes and dates), and icons (the arrows, refresh, search and the other command bar glyphs). Colorful command bar icons and file icons keep their look.
+- Each mode has a palette list with ten matched sets. Choosing one fills in all three colors at once.
+- Use System Colors puts every color back to the Windows default. Hover, pressed and disabled buttons keep their usual look.
+
+### App
+
+- Card titles are bold.
+- Readability in light mode, Text halo and Halo size are locked while Windows uses dark mode for apps, since they only change light mode.
+
 ## 1.0.3
 
 ### Windows build 26100.9974

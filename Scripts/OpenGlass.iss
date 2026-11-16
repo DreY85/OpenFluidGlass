@@ -597,7 +597,9 @@ begin
     'FluidGlass', 'FluidGlassIor', 'FluidGlassBezel', 'FluidGlassThickness', 'FluidGlassGap', 'FluidGlassScale',
     'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassReadabilityLight', 'FluidGlassGrayText', 'FluidGlassGrayTextStrength', 'FluidGlassGrayTextSize', 'FluidGlassRim', 'FluidGlassShine',
     'FluidGlassLight', 'FluidGlassRadius', 'FluidGlassPillRadius', 'FluidGlassProfile', 'FluidGlassClarity',
-    'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs'
+    'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs',
+    'FluidGlassTextColorLight', 'FluidGlassTextColorDark', 'FluidGlassIconColorLight', 'FluidGlassIconColorDark',
+    'FluidGlassSecondaryTextColorLight', 'FluidGlassSecondaryTextColorDark'
   ];
 
   DeleteConfigValues(HKEY_CURRENT_USER, 'SOFTWARE\Microsoft\Windows\DWM', OpenGlassKeys);

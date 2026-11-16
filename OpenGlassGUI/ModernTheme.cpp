@@ -81,7 +81,7 @@ namespace OpenGlass::ModernTheme
 			}
 			wxFont titleFont = page.GetFont();
 			titleFont.SetFractionalPointSize(titleFont.GetFractionalPointSize() * 1.2);
-			titleFont.SetWeight(wxFONTWEIGHT_SEMIBOLD);
+			titleFont.SetWeight(wxFONTWEIGHT_BOLD);
 			gc.SetFont(titleFont, palette.text);
 			gc.GetTextExtent(card.GetTitle(), &width, &height);
 			gc.DrawText(card.GetTitle(), x, centerY - height / 2);

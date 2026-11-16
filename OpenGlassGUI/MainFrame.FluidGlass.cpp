@@ -287,6 +287,13 @@ namespace OpenGlass
 		wxFont hintFont = panel->GetFont();
 		hintFont.SetFractionalPointSize(hintFont.GetFractionalPointSize() * 0.9);
 
+		// These only act while apps use light mode. The window is rebuilt when Windows changes mode, so this check is enough.
+		const bool darkApps = ModernTheme::Get().dark;
+		auto lightOnly = [](const FluidGlassParameter& parameter)
+		{
+			return wcscmp(parameter.name, L"FluidGlassReadabilityLight") == 0 || wcscmp(parameter.name, L"FluidGlassGrayTextStrength") == 0
+				|| wcscmp(parameter.name, L"FluidGlassGrayTextSize") == 0;
+		};
 		for (const auto& group : c_fluidGlassGroups)
 		{
 			auto* groupSizer = ModernTheme::MakeCard(panel, group.title);
@@ -317,14 +324,191 @@ namespace OpenGlass
 				hint->SetFont(hintFont);
 				groupSizer->Add(hint, 0, wxLEFT | wxBOTTOM, FromDIP(8));
 
+				if (darkApps && lightOnly(parameter))
+				{
+					const wxString locked = wxString(parameter.hint) + L" Locked while Windows uses dark mode for apps.";
+					for (wxWindow* window : { static_cast<wxWindow*>(label), static_cast<wxWindow*>(slider), static_cast<wxWindow*>(value), static_cast<wxWindow*>(hint) })
+					{
+						window->Disable();
+						window->SetToolTip(locked);
+					}
+				}
+
 				rows->push_back({ &parameter, slider, value });
 			}
 			sizer->Add(groupSizer, 0, wxEXPAND | wxALL, 2);
 		}
 
+		// The user's colours for File Explorer's text and icon glyphs, one per mode. Explorer reads them about once a
+		// second. A set colour is stored as 0x01000000 | COLORREF, so black stays possible, and 0 means the system's.
+		// Light mode sits on the left and dark mode on the right. Each column has a palette list that fills its three
+		// colours at once. The rows are stored light first: text, details, icons, then the same for dark mode.
+		struct ColorRow { PCWSTR name; wxChoice* choice; wxColourPickerCtrl* picker; };
+		struct Palette { PCWSTR name; unsigned colors[3]; };	// 0xRRGGBB for text, details, icons
+		static constexpr Palette lightPalettes[]
+		{
+			{ L"Slate", { 0x1E293B, 0x64748B, 0x334155 } },
+			{ L"Ocean", { 0x1A2B4C, 0x5A6E8F, 0x2563EB } },
+			{ L"Indigo", { 0x1E1B4B, 0x6366A0, 0x4F46E5 } },
+			{ L"Teal", { 0x134E4A, 0x5B7F7C, 0x0D9488 } },
+			{ L"Forest", { 0x1F3A2E, 0x5E7D6B, 0x2F855A } },
+			{ L"Olive", { 0x2F3A1F, 0x7A8065, 0x6B8E23 } },
+			{ L"Sepia", { 0x3B2F2F, 0x8A7560, 0xA0522D } },
+			{ L"Wine", { 0x4A1D24, 0x8C6A6F, 0xB23A48 } },
+			{ L"Plum", { 0x3B1F3A, 0x7D6380, 0x8E44AD } },
+			{ L"Graphite", { 0x202124, 0x6B6B6B, 0x3C4043 } },
+		};
+		static constexpr Palette darkPalettes[]
+		{
+			{ L"Slate", { 0xF1F5F9, 0x94A3B8, 0xCBD5E1 } },
+			{ L"Ocean", { 0xE6F0FF, 0x9FB3D1, 0x7DB4FF } },
+			{ L"Indigo", { 0xEEF0FF, 0xA5A9D6, 0x818CF8 } },
+			{ L"Teal", { 0xE0F7F5, 0x98BDB9, 0x5EEAD4 } },
+			{ L"Forest", { 0xE8F5EC, 0x9DBBA8, 0x6FCF97 } },
+			{ L"Olive", { 0xF1F3E6, 0xB2B79A, 0xA8C66C } },
+			{ L"Sepia", { 0xF5EDE3, 0xBFAE98, 0xE0A46E } },
+			{ L"Wine", { 0xFBEAEC, 0xC9A5AA, 0xF28B9B } },
+			{ L"Plum", { 0xF3EAF7, 0xB8A5C4, 0xC39BD3 } },
+			{ L"Graphite", { 0xF2F2F2, 0xA0A0A0, 0xD0D0D0 } },
+		};
+		struct PaletteList { const Palette* items; size_t count; };
+		static constexpr PaletteList paletteLists[2]{ { lightPalettes, std::size(lightPalettes) }, { darkPalettes, std::size(darkPalettes) } };
+		auto toColour = [](unsigned value) { return wxColour((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF); };
+		auto colorRows = std::make_shared<std::vector<ColorRow>>();
+		wxButton* systemColorsButton{};
+		auto paletteChoices = std::make_shared<std::vector<wxChoice*>>();
+		// Shows the palette the three colours of a mode match, or the prompt when they are a mix of the user's own.
+		auto syncPalettes = [colorRows, paletteChoices, toColour]()
+		{
+			for (size_t mode = 0; mode < paletteChoices->size(); ++mode)
+			{
+				int match = 0;
+				for (size_t index = 0; index < paletteLists[mode].count && !match; ++index)
+				{
+					bool same = true;
+					for (size_t slot = 0; slot < 3 && same; ++slot)
+					{
+						const ColorRow& row = (*colorRows)[mode * 3 + slot];
+						same = row.choice->GetSelection() == 1 && row.picker->GetColour() == toColour(paletteLists[mode].items[index].colors[slot]);
+					}
+					if (same) match = static_cast<int>(index) + 1;
+				}
+				(*paletteChoices)[mode]->SetSelection(match);
+			}
+		};
+		{
+			auto* colorGroup = ModernTheme::MakeCard(panel, L"File Explorer colors");
+			auto* colorNote = new wxStaticText(panel, wxID_ANY,
+				L"Your own color for the text and the icons of File Explorer: the file list, the navigation pane, the address bar, the tabs and "
+				L"the command bar. Details are the softer grey text: descriptions, sizes, dates and hints. File icons keep their pictures. "
+				L"Colored names, such as compressed or encrypted files, keep their color.");
+			colorNote->SetForegroundColour(hintColour);
+			colorNote->SetFont(hintFont);
+			colorNote->Wrap(FromDIP(560));
+			wxBoxSizer* noteRow = new wxBoxSizer(wxHORIZONTAL);
+			noteRow->Add(colorNote, 1, wxALIGN_TOP | wxRIGHT, FromDIP(12));
+			systemColorsButton = new wxButton(panel, wxID_ANY, L"Use System Colors");
+			systemColorsButton->SetToolTip(L"Sets all six File Explorer colors back to the system's. Other Fluid Glass settings stay as they are.");
+			noteRow->Add(systemColorsButton, 0, wxALIGN_TOP);
+			colorGroup->Add(noteRow, 0, wxEXPAND | wxALL, 4);
+			const struct { PCWSTR title; PCWSTR names[3]; unsigned initial[3]; } modes[]
+			{
+				{ L"Light mode", { L"FluidGlassTextColorLight", L"FluidGlassSecondaryTextColorLight", L"FluidGlassIconColorLight" }, { 0x000000, 0x6D6D6D, 0x000000 } },
+				{ L"Dark mode", { L"FluidGlassTextColorDark", L"FluidGlassSecondaryTextColorDark", L"FluidGlassIconColorDark" }, { 0xFFFFFF, 0xC5C5C5, 0xFFFFFF } },
+			};
+			const PCWSTR labels[3]{ L"Text:", L"Details:", L"Icons:" };
+			wxBoxSizer* columns = new wxBoxSizer(wxHORIZONTAL);
+			for (size_t mode = 0; mode < std::size(modes); ++mode)
+			{
+				wxBoxSizer* column = new wxBoxSizer(wxVERTICAL);
+				auto* title = new wxStaticText(panel, wxID_ANY, modes[mode].title);
+				title->SetFont(title->GetFont().Bold());
+				column->Add(title, 0, wxALL, 4);
+
+				wxBoxSizer* paletteRow = new wxBoxSizer(wxHORIZONTAL);
+				paletteRow->Add(new wxStaticText(panel, wxID_ANY, L"Palette:", wxDefaultPosition, FromDIP(wxSize(70, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+				auto* palette = new wxChoice(panel, wxID_ANY);
+				palette->Append(L"Choose a palette...");
+				for (size_t index = 0; index < paletteLists[mode].count; ++index) palette->Append(paletteLists[mode].items[index].name);
+				palette->SetToolTip(L"Fills the text, details and icon colors of this mode with a matching set and applies it.");
+				paletteRow->Add(palette, 1, wxALIGN_CENTER_VERTICAL);
+				column->Add(paletteRow, 0, wxEXPAND | wxALL, 4);
+				paletteChoices->push_back(palette);
+
+				for (size_t slot = 0; slot < 3; ++slot)
+				{
+					wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
+					row->Add(new wxStaticText(panel, wxID_ANY, labels[slot], wxDefaultPosition, FromDIP(wxSize(70, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+					auto* choice = new wxChoice(panel, wxID_ANY);
+					choice->Append(L"System");
+					choice->Append(L"Custom");
+					row->Add(choice, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+					auto* picker = new wxColourPickerCtrl(panel, wxID_ANY, toColour(modes[mode].initial[slot]));
+					row->Add(picker, 0, wxALIGN_CENTER_VERTICAL);
+					column->Add(row, 0, wxEXPAND | wxALL, 4);
+					colorRows->push_back({ modes[mode].names[slot], choice, picker });
+				}
+				columns->Add(column, 1, wxEXPAND | (mode == 0 ? wxRIGHT : 0), FromDIP(24));
+			}
+			colorGroup->Add(columns, 0, wxEXPAND | wxALL, 0);
+			sizer->Add(colorGroup, 0, wxEXPAND | wxALL, 2);
+		}
+		auto loadColors = [colorRows, syncPalettes]()
+		{
+			for (const auto& row : *colorRows)
+			{
+				const DWORD value = ReadFluidGlassDword(row.name, 0);
+				const bool custom = (value & 0xFF000000) == 0x01000000;
+				row.choice->SetSelection(custom ? 1 : 0);
+				if (custom) row.picker->SetColour(wxColour(GetRValue(value), GetGValue(value), GetBValue(value)));
+				row.picker->Enable(custom);
+			}
+			syncPalettes();
+		};
+		loadColors();
+		for (const auto& row : *colorRows)
+		{
+			auto update = [this, row, syncPalettes]()
+			{
+				const bool custom = row.choice->GetSelection() == 1;
+				row.picker->Enable(custom);
+				const wxColour colour = row.picker->GetColour();
+				WriteFluidGlassDword(row.name, custom ? 0x01000000 | RGB(colour.Red(), colour.Green(), colour.Blue()) : 0);
+				syncPalettes();
+				SetStatusText(L"File Explorer colors: applied " + wxDateTime::Now().FormatISOTime());
+			};
+			row.choice->Bind(wxEVT_CHOICE, [update](wxCommandEvent&) { update(); });
+			row.picker->Bind(wxEVT_COLOURPICKER_CHANGED, [update](wxColourPickerEvent&) { update(); });
+		}
+		systemColorsButton->Bind(wxEVT_BUTTON, [this, colorRows, loadColors](wxCommandEvent&)
+		{
+			for (const auto& row : *colorRows) WriteFluidGlassDword(row.name, 0);
+			loadColors();
+			SetStatusText(L"File Explorer colors: system colors applied " + wxDateTime::Now().FormatISOTime());
+		});
+		for (size_t mode = 0; mode < paletteChoices->size(); ++mode)
+		{
+			(*paletteChoices)[mode]->Bind(wxEVT_CHOICE, [this, mode, colorRows, paletteChoices, toColour](wxCommandEvent&)
+			{
+				const int selection = (*paletteChoices)[mode]->GetSelection();
+				if (selection < 1 || static_cast<size_t>(selection) > paletteLists[mode].count) return;
+				const Palette& palette = paletteLists[mode].items[selection - 1];
+				for (size_t slot = 0; slot < 3; ++slot)
+				{
+					const ColorRow& row = (*colorRows)[mode * 3 + slot];
+					const wxColour colour = toColour(palette.colors[slot]);
+					row.choice->SetSelection(1);
+					row.picker->SetColour(colour);
+					row.picker->Enable(true);
+					WriteFluidGlassDword(row.name, 0x01000000 | RGB(colour.Red(), colour.Green(), colour.Blue()));
+				}
+				SetStatusText(wxString::Format(L"File Explorer colors: %s palette applied %s", palette.name, wxDateTime::Now().FormatISOTime()));
+			});
+		}
+
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
 		auto* resetButton = new wxButton(panel, wxID_ANY, L"Reset to defaults");
-		resetButton->SetToolTip(L"Write the default Fluid Glass values to HKCU and apply them.");
+		resetButton->SetToolTip(L"Write the default value of every Fluid Glass setting on this page to HKCU and apply them, File Explorer colors included.");
 		auto* copyButton = new wxButton(panel, wxID_ANY, L"Copy values");
 		copyButton->SetToolTip(L"Copy the current values as set-fluid-glass.ps1 arguments.");
 		buttons->AddStretchSpacer();
@@ -402,15 +586,17 @@ namespace OpenGlass
 			SetStatusText(L"Fluid Glass: bezel shape applied");
 		});
 
-		resetButton->Bind(wxEVT_BUTTON, [this, rows, load](wxCommandEvent&)
+		resetButton->Bind(wxEVT_BUTTON, [this, rows, load, colorRows, loadColors](wxCommandEvent&)
 		{
 			for (const auto& row : *rows)
 			{
 				WriteFluidGlassDword(row.parameter->name, EncodeFluidGlassValue(*row.parameter, row.parameter->defaultValue));
 			}
 			WriteFluidGlassDword(L"FluidGlassProfile", 0);
+			for (const auto& row : *colorRows) WriteFluidGlassDword(row.name, 0);
 			NotifyFluidGlassChange();
 			load();
+			loadColors();
 			SetStatusText(L"Fluid Glass: defaults applied");
 		});
 

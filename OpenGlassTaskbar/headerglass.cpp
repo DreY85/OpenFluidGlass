@@ -71,8 +71,25 @@ namespace
 		bool on{};
 		int strength{ 60 }, size{ 3 };
 		bool light{ true };	// the apps' mode; a change makes every text look at its colour again
+		// The user's colours for text and for icon glyphs (FluidGlassTextColorDark and so on), 0x01000000 | COLORREF or
+		// 0 for the system's. Index 1 is light mode.
+		DWORD text[2]{}, second[2]{}, icon[2]{};
 		bool operator==(const Style&) const = default;
 	};
+
+	// The plain text colour of a mode, the one a user colour replaces: black or white, at full or secondary strength.
+	// Accent colours keep theirs, and so do disabled and placeholder text, which are fainter.
+	bool PlainInk(const winrt::Windows::UI::Color& color, bool light)
+	{
+		if (color.A < 0x80) return false;
+		if ((std::max)({ color.R, color.G, color.B }) - (std::min)({ color.R, color.G, color.B }) > 8) return false;
+		return light ? color.R <= 0xA0 : color.R >= 0x60;
+	}
+
+	winrt::Windows::UI::Color UserInk(DWORD value, uint8_t alpha)
+	{
+		return { alpha, GetRValue(value), GetGValue(value), GetBValue(value) };
+	}
 
 	class Header;
 	std::mutex g_lock;	// guards everything below
@@ -143,6 +160,13 @@ namespace
 		bool masked{};
 		int64_t foregroundToken{ -1 }, textToken{ -1 };
 		winrt::event_token sizeToken{};
+		// The user's colour is a Foreground value of the text's own: the theme's brushes are sealed and cannot be
+		// recoloured. An icon's glyph (a TextBlock inside a FontIcon or SymbolIcon) takes the icon colour. A local value
+		// hides the disabled colour, so the text drops it while its control is disabled.
+		bool glyph{};
+		mux::Media::SolidColorBrush tint{ nullptr };
+		winrt::weak_ref<mux::Controls::Control> owner;
+		mux::Controls::Control::IsEnabledChanged_revoker enabledRevoker;
 	};
 
 	// The halos of one XAML thread. Explorer runs each window's XAML on its own thread, and a thread can hold more
@@ -260,9 +284,16 @@ namespace
 
 		void LogCount()
 		{
-			size_t lit = 0, unmasked = 0;
-			for (const auto& [key, halo] : m_halos) { lit += halo.root && halo.root.IsVisible(); unmasked += halo.root && !halo.masked; }
-			Log(std::to_wstring(m_halos.size()) + L" texts watched, " + std::to_wstring(lit) + L" with a halo, " + std::to_wstring(unmasked) + L" without a mask, " +
+			size_t lit = 0, unmasked = 0, glyphs = 0, tinted = 0;
+			for (const auto& [key, halo] : m_halos)
+			{
+				lit += halo.root && halo.root.IsVisible();
+				unmasked += halo.root && !halo.masked;
+				glyphs += halo.glyph;
+				tinted += halo.tint != nullptr;
+			}
+			Log(std::to_wstring(m_halos.size()) + L" texts watched (" + std::to_wstring(glyphs) + L" icon glyphs, " + std::to_wstring(tinted) + L" in the user's colour), " +
+				std::to_wstring(lit) + L" with a halo, " + std::to_wstring(unmasked) + L" without a mask, " +
 				std::to_wstring(m_popupTexts) + L" left out as popup text");
 		}
 
@@ -350,9 +381,33 @@ namespace
 			if (InPopup(text)) { ++m_popupTexts; return; }
 			Halo halo;
 			halo.text = winrt::make_weak(text);
+			try
+			{
+				const auto parent = mux::Media::VisualTreeHelper::GetParent(text);
+				// The glyph sits a level or two below its icon: a FontIcon holds a Grid that holds the TextBlock.
+				mux::DependencyObject up = parent;
+				for (int depth = 0; up && depth < 4 && !halo.glyph; ++depth, up = mux::Media::VisualTreeHelper::GetParent(up))
+					halo.glyph = static_cast<bool>(up.try_as<mux::Controls::IconElement>());
+				mux::DependencyObject current = parent;
+				for (int depth = 0; current && depth < 12; ++depth, current = mux::Media::VisualTreeHelper::GetParent(current))
+				{
+					const auto control = current.try_as<mux::Controls::Control>();
+					if (!control) continue;
+					halo.owner = winrt::make_weak(control);
+					halo.enabledRevoker = control.IsEnabledChanged(winrt::auto_revoke, [this, key](auto&&, auto&&)
+					{
+						const auto found = m_halos.find(key);
+						if (found == m_halos.end()) return;
+						if (const auto text = found->second.text.get()) Paint(found->second, text, false);
+					});
+					break;
+				}
+			}
+			catch (...) {}
 			// The colour changes with the theme, with hover and with the window's focus; the halo follows it.
 			halo.foregroundToken = text.RegisterPropertyChangedCallback(mux::Controls::TextBlock::ForegroundProperty(), [this, key](const mux::DependencyObject& node, auto&&)
 			{
+				if (m_busy) return;
 				if (const auto found = m_halos.find(key); found != m_halos.end()) Paint(found->second, node.as<mux::Controls::TextBlock>(), false);
 			});
 			auto& stored = m_halos.emplace(key, std::move(halo)).first->second;
@@ -471,8 +526,59 @@ namespace
 			for (auto& sprite : halo.sprites) sprite.Size(size);
 		}
 
+		// The user's colours, before the halo, so the halo judges and redraws the colour the text ends up with.
+		void Recolor(Halo& halo, const mux::Controls::TextBlock& text)
+		{
+			try
+			{
+				const auto property = mux::Controls::TextBlock::ForegroundProperty();
+				// Our own value comes off first, so the text shows the colour the system gives it.
+				m_busy = true;
+				if (halo.tint && text.ReadLocalValue(property) == halo.tint) text.ClearValue(property);
+				m_busy = false;
+				halo.tint = nullptr;
+				const bool light = text.ActualTheme() == mux::ElementTheme::Light;
+				if (!m_style.icon[light] && !m_style.text[light] && !m_style.second[light]) return;
+				if (const auto owner = halo.owner.get(); owner && !owner.IsEnabled()) return;
+				const auto brush = text.Foreground().try_as<mux::Media::SolidColorBrush>();
+				if (!brush) return;
+				const double opacity = std::clamp(brush.Opacity(), 0.0, 1.0);
+				auto system = brush.Color();
+				system.A = static_cast<uint8_t>(system.A * opacity);
+				if (!PlainInk(system, light)) return;
+				// WinUI draws secondary text (placeholders, hints) in the same ink as primary text, only fainter
+				// (about 0x9E of 0xFF in light mode and 0xC5 in dark mode, against 0xE4 and 0xFF for primary text).
+				const bool secondary = !halo.glyph && system.A < 0xD0;
+				const DWORD user = halo.glyph ? m_style.icon[light] : secondary ? m_style.second[light] : m_style.text[light];
+				if (!user) return;
+				// Primary text keeps the system's strength. A secondary colour shows as picked, it already is the softer shade.
+				halo.tint = mux::Media::SolidColorBrush(UserInk(user, secondary ? static_cast<uint8_t>(0xFF * opacity) : system.A));
+				m_busy = true;
+				text.Foreground(halo.tint);
+				m_busy = false;
+			}
+			catch (const winrt::hresult_error& error)
+			{
+				m_busy = false;
+				halo.tint = nullptr;
+				if (m_tintFailed++ < 5)
+				{
+					wchar_t line[48];
+					swprintf_s(line, L"tint threw %08X", static_cast<unsigned>(error.code().value));
+					Log(line);
+				}
+			}
+			catch (...)
+			{
+				m_busy = false;
+				halo.tint = nullptr;
+				if (m_tintFailed++ < 5) Log(L"tint threw");
+			}
+		}
+
 		void Paint(Halo& halo, const mux::Controls::TextBlock& text, bool newMask)
 		{
+			Recolor(halo, text);
 			try
 			{
 				winrt::Windows::UI::Color ink{};
@@ -537,6 +643,8 @@ namespace
 		winrt::Microsoft::UI::Dispatching::DispatcherQueue m_queue;
 		std::atomic<bool> m_closed{};
 		bool m_flushQueued{}, m_paintFailed{};
+		int m_tintFailed{};
+		bool m_busy{};	// our own Foreground change, which the callback leaves alone
 		Style m_style;
 		std::vector<winrt::weak_ref<mux::DependencyObject>> m_pending;
 		std::map<void*, Halo> m_halos;
@@ -621,15 +729,17 @@ void HeaderGlassStart(HMODULE)
 
 // Called by itemglass once a second; a change reaches every window on its own thread.
 // The halo only shows on dark text, so light mode needs no switch of its own.
-void HeaderGlassSettings(bool on, int strength, int size)
+void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight)
 {
 	std::lock_guard guard{ g_lock };
 	DWORD light = 1, lightSize = sizeof(light);
 	RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
-	const Style style{ on, strength, size, light != 0 };
+	const Style style{ on, strength, size, light != 0, { textDark, textLight }, { secondDark, secondLight }, { iconDark, iconLight } };
 	if (style == g_style) return;
 	g_style = style;
-	Log(std::wstring(on ? L"on" : L"off") + L", strength " + std::to_wstring(strength) + L", size " + std::to_wstring(size) + (light ? L", light" : L", dark"));
+	wchar_t colors[128];
+	swprintf_s(colors, L", text %08lX %08lX, secondary %08lX %08lX, icons %08lX %08lX", textDark, textLight, secondDark, secondLight, iconDark, iconLight);
+	Log(std::wstring(on ? L"on" : L"off") + L", strength " + std::to_wstring(strength) + L", size " + std::to_wstring(size) + (light ? L", light" : L", dark") + colors);
 	for (const auto& [thread, header] : g_threads)
 	{
 		if (header->Closed()) continue;

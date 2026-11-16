@@ -31,7 +31,7 @@
 #ifdef FLUIDGLASS_HEADER
 // headerglass.cpp: the halo for File Explorer's WinUI 3 header.
 void HeaderGlassStart(HMODULE module);
-void HeaderGlassSettings(bool on, int strength, int size);
+void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight);
 #endif
 
 namespace
@@ -66,6 +66,10 @@ namespace
 	std::atomic<int> g_grayStrength{ 60 };	// FluidGlassGrayTextStrength: halo peak opacity in percent, 0 to 100
 	std::atomic<int> g_graySize{ 3 };	// FluidGlassGrayTextSize / 100: halo reach in pixels, 1 to 10
 	std::atomic<bool> g_explorerFill{ true };	// FluidGlassExplorerFill: paint a folder window's blank surface black
+	// FluidGlassTextColorDark and FluidGlassTextColorLight: the user's colour for the item and navigation pane text,
+	// 0x01000000 | COLORREF, or 0 for the system's own colour. Index 1 is light mode.
+	std::atomic<DWORD> g_textColor[2]{};
+	std::atomic<DWORD> g_secondColor[2]{};	// secondary text (descriptions, sizes, dates), index 1 = light
 
 	void Log(const wchar_t* line)
 	{
@@ -556,6 +560,30 @@ namespace
 		return r == g && g == b && r <= 0xA0;
 	}
 
+	// Dark enough for the light mode halo, for a colour the user picked (it need not be grey).
+	bool IsDarkInk(COLORREF color)
+	{
+		return GetRValue(color) * 299 + GetGValue(color) * 587 + GetBValue(color) * 114 <= 0xA0 * 1000;
+	}
+
+	// The plain text colour of the mode, the one a user colour replaces: near black to mid grey in light mode, light grey
+	// to white in dark mode. White text on a selection in light mode and coloured names (compressed, encrypted, links)
+	// keep their colour.
+	bool IsPlainText(COLORREF color, bool light)
+	{
+		const int r = GetRValue(color), g = GetGValue(color), b = GetBValue(color);
+		if (std::max({ r, g, b }) - std::min({ r, g, b }) > 8) return false;
+		return light ? r <= 0xA0 : r >= 0x60;
+	}
+
+	// Item names and folder names are drawn in the mode's strongest ink (black in light mode, white in dark mode).
+	// Descriptions, sizes, dates and other secondary text use a softer grey, which gets the secondary colour.
+	bool IsPrimaryText(COLORREF color, bool light)
+	{
+		const int r = GetRValue(color);
+		return light ? r <= 0x10 : r >= 0xF0;
+	}
+
 	bool InModule(void* address, HMODULE module)
 	{
 		PVOID base{};
@@ -803,7 +831,11 @@ namespace
 		if (scope.outer) ProbeDrawThemeTextEx(caller, theme, dc, part, state, text, count, flags, rect, options);
 #endif
 		const int mode = g_grayText;
-		if (mode && g_enabled && g_light && rect && dc && text && !(flags & DT_CALCRECT) && options)
+		const bool light = g_light;
+		const DWORD custom = g_textColor[light ? 1 : 0], second = g_secondColor[light ? 1 : 0];
+		const bool halo = mode && g_enabled && light;
+		const bool recolor = (custom || second) && (g_inExplorer || g_enabled);
+		if ((halo || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
 		{
 			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
 			if (!g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
@@ -814,11 +846,26 @@ namespace
 				COLORREF color = options->crText;
 				bool known = (options->dwFlags & DTT_TEXTCOLOR) != 0;
 				if (!known) known = SUCCEEDED(GetThemeColor(theme, part, state, TMT_TEXTCOLOR, &color));
-				if (known && IsNeutralDark(color))
+				DTTOPTS changed{};
+				bool replaced{};
+				const DWORD user = recolor && known && IsPlainText(color, light) ? (IsPrimaryText(color, light) ? custom : second) : 0;
+				if (user)
+				{
+					// A copy, so the caller's options stay as they were. Older callers pass a shorter structure.
+					const UINT size = std::min<UINT>(options->dwSize, sizeof(changed));
+					memcpy(&changed, options, size);
+					changed.dwSize = size;
+					changed.dwFlags |= DTT_TEXTCOLOR;
+					changed.crText = user & 0xFFFFFF;
+					color = changed.crText;
+					replaced = true;
+				}
+				if (halo && known && (replaced ? IsDarkInk(color) : IsNeutralDark(color)))
 				{
 					HDC under = fromBlurMica ? TargetUnder(dc) : nullptr;
 					DrawGreyBackdrop(mode, theme, dc, under ? under : dc, part, state, text, count, flags, *rect);
 				}
+				if (replaced) return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, &changed);
 			}
 		}
 		return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
@@ -1241,6 +1288,18 @@ namespace
 		return value != 0;
 	}
 
+	// A user colour: 0x01000000 | COLORREF, or 0 for the system's colour. Anything else counts as unset.
+	DWORD ReadColor(const wchar_t* name)
+	{
+		DWORD value{}, size = sizeof(value);
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS)
+		{
+			size = sizeof(value);
+			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size);
+		}
+		return (value & 0xFF000000) == 0x01000000 ? value : 0;
+	}
+
 	void ReadSettings()
 	{
 		const bool enabled = g_inExplorer ? ReadSwitch(L"FluidGlassItems", 1) : ReadSwitch(L"FluidGlassDialogs", 0);
@@ -1272,12 +1331,20 @@ namespace
 		graySize = std::clamp<DWORD>((std::min<DWORD>(graySize, 100000) + 50) / 100, 1, 10);
 		// BeginBufferedPaintHook needs this before the first label is drawn.
 		if (g_inExplorer && !g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
+		const DWORD textDark = ReadColor(L"FluidGlassTextColorDark"), textLight = ReadColor(L"FluidGlassTextColorLight");
+		const DWORD secondDark = ReadColor(L"FluidGlassSecondaryTextColorDark"), secondLight = ReadColor(L"FluidGlassSecondaryTextColorLight");
 		const bool grayTextChanged =
 			(g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText)) |
 			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength)) |
-			(g_graySize.exchange(static_cast<int>(graySize)) != static_cast<int>(graySize));
+			(g_graySize.exchange(static_cast<int>(graySize)) != static_cast<int>(graySize)) |
+			(g_textColor[0].exchange(textDark) != textDark) |
+			(g_textColor[1].exchange(textLight) != textLight) |
+			(g_secondColor[0].exchange(secondDark) != secondDark) |
+			(g_secondColor[1].exchange(secondLight) != secondLight);
 #ifdef FLUIDGLASS_HEADER
-		if (g_inExplorer) HeaderGlassSettings(enabled && grayText && grayStrength, static_cast<int>(grayStrength), static_cast<int>(graySize));
+		if (g_inExplorer)
+			HeaderGlassSettings(enabled && grayText && grayStrength, static_cast<int>(grayStrength), static_cast<int>(graySize), textDark, textLight, secondDark, secondLight,
+				ReadColor(L"FluidGlassIconColorDark"), ReadColor(L"FluidGlassIconColorLight"));
 #endif
 		if (grayTextChanged)
 		{
