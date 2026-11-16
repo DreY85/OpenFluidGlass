@@ -53,6 +53,8 @@ namespace OpenGlass
 				{ L"FluidGlassReadabilityLight", L"Readability in light mode:", L"When apps use light mode, lightens backdrops that are too dark for black text. Over a dark wallpaper, apps in dark mode keep the glass clearer.", L"ReadabilityLight", 0.f, 1.f, 0.01f, 0.8f, L"" },
 				{ L"FluidGlassGrayTextStrength", L"Text halo in light mode:", L"When apps use light mode, draws a soft white halo behind the black and grey names in File Explorer so they stay readable on the glass. 0 turns it off.", L"TextHalo", 0.f, 1.f, 0.01f, 0.6f, L"" },
 				{ L"FluidGlassGrayTextSize", L"Halo size in light mode:", L"How far the text halo reaches past the letters. 3 is a tight outline, larger values give a wide soft glow like the Windows 7 title bars and can lighten nearby icons.", L"HaloSize", 1.f, 10.f, 1.f, 3.f, L"px" },
+				{ L"FluidGlassTextGlow", L"Text glow in dark mode:", L"When apps use dark mode, gives the light text in File Explorer a soft glow in its own color, like neon. 0 turns it off.", L"TextGlow", 0.f, 1.f, 0.01f, 0.f, L"" },
+				{ L"FluidGlassTextGlowSize", L"Glow size in dark mode:", L"How far the text glow reaches past the letters. Larger values give a wider, softer light.", L"GlowSize", 1.f, 10.f, 1.f, 4.f, L"px" },
 			} },
 			{ L"Rim light", {
 				{ L"FluidGlassRim", L"Rim light:", L"How brightly the edge catches the light.", L"Rim", 0.f, 5.f, 0.05f, 1.f, L"" },
@@ -294,6 +296,10 @@ namespace OpenGlass
 			return wcscmp(parameter.name, L"FluidGlassReadabilityLight") == 0 || wcscmp(parameter.name, L"FluidGlassGrayTextStrength") == 0
 				|| wcscmp(parameter.name, L"FluidGlassGrayTextSize") == 0;
 		};
+		auto darkOnly = [](const FluidGlassParameter& parameter)
+		{
+			return wcscmp(parameter.name, L"FluidGlassTextGlow") == 0 || wcscmp(parameter.name, L"FluidGlassTextGlowSize") == 0;
+		};
 		for (const auto& group : c_fluidGlassGroups)
 		{
 			auto* groupSizer = ModernTheme::MakeCard(panel, group.title);
@@ -324,9 +330,9 @@ namespace OpenGlass
 				hint->SetFont(hintFont);
 				groupSizer->Add(hint, 0, wxLEFT | wxBOTTOM, FromDIP(8));
 
-				if (darkApps && lightOnly(parameter))
+				if (darkApps ? lightOnly(parameter) : darkOnly(parameter))
 				{
-					const wxString locked = wxString(parameter.hint) + L" Locked while Windows uses dark mode for apps.";
+					const wxString locked = wxString(parameter.hint) + (darkApps ? L" Locked while Windows uses dark mode for apps." : L" Locked while Windows uses light mode for apps.");
 					for (wxWindow* window : { static_cast<wxWindow*>(label), static_cast<wxWindow*>(slider), static_cast<wxWindow*>(value), static_cast<wxWindow*>(hint) })
 					{
 						window->Disable();

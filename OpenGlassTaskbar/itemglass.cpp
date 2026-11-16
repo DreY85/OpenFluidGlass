@@ -31,7 +31,8 @@
 #ifdef FLUIDGLASS_HEADER
 // headerglass.cpp: the halo for File Explorer's WinUI 3 header.
 void HeaderGlassStart(HMODULE module);
-void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight);
+void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
+	int glow, int glowSize);
 #endif
 
 namespace
@@ -65,6 +66,8 @@ namespace
 	std::atomic<int> g_grayText{ 1 };	// FluidGlassGrayText: 0 off, 1 halo, 2 frosted patch behind the grey and black item text in light mode
 	std::atomic<int> g_grayStrength{ 60 };	// FluidGlassGrayTextStrength: halo peak opacity in percent, 0 to 100
 	std::atomic<int> g_graySize{ 3 };	// FluidGlassGrayTextSize / 100: halo reach in pixels, 1 to 10
+	std::atomic<int> g_glowStrength{};	// FluidGlassTextGlow: dark mode glow in the text's own colour, peak opacity in percent, 0 off
+	std::atomic<int> g_glowSize{ 4 };	// FluidGlassTextGlowSize / 100: glow reach in pixels, 1 to 10
 	std::atomic<bool> g_explorerFill{ true };	// FluidGlassExplorerFill: paint a folder window's blank surface black
 	// FluidGlassTextColorDark and FluidGlassTextColorLight: the user's colour for the item and navigation pane text,
 	// 0x01000000 | COLORREF, or 0 for the system's own colour. Index 1 is light mode.
@@ -682,9 +685,10 @@ namespace
 		bool m_changed{};
 	};
 
-	// Premultiplied white with the given coverage, AlphaBlended onto the DC at the rect's place.
-	void BlendWhite(HDC dc, const RECT& place, const std::vector<BYTE>& alpha, int width, int height)
+	// The ink premultiplied by the given coverage, AlphaBlended onto the DC at the rect's place.
+	void BlendInk(HDC dc, const RECT& place, const std::vector<BYTE>& alpha, int width, int height, COLORREF ink)
 	{
+		const DWORD r = GetRValue(ink), g = GetGValue(ink), b = GetBValue(ink);
 		BITMAPINFO info{};
 		info.bmiHeader = { sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB };
 		void* bits{};
@@ -694,7 +698,7 @@ namespace
 		for (size_t i = 0; i < alpha.size(); ++i)
 		{
 			const DWORD a = alpha[i];
-			pixels[i] = (a << 24) | (a << 16) | (a << 8) | a;
+			pixels[i] = (a << 24) | ((r * a + 127) / 255 << 16) | ((g * a + 127) / 255 << 8) | ((b * a + 127) / 255);
 		}
 		if (HDC memory = CreateCompatibleDC(dc))
 		{
@@ -727,11 +731,12 @@ namespace
 			}
 	}
 
-	// dc is where the text is drawn and gives its font, blendDc is where the halo or patch goes.
-	void DrawGreyBackdrop(int mode, HTHEME theme, HDC dc, HDC blendDc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect)
+	// dc is where the text is drawn and gives its font, blendDc is where the halo or patch goes. The halo is drawn in
+	// ink: white for the light mode halo, the text's own colour for the dark mode glow.
+	void DrawGreyBackdrop(int mode, HTHEME theme, HDC dc, HDC blendDc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect,
+		int strength, int size, COLORREF ink)
 	{
-		const int strength = g_grayStrength;
-		const int size = std::clamp(g_graySize.load(), 1, 10);
+		size = std::clamp(size, 1, 10);
 		if (mode == 1 && strength <= 0) return;
 		// The halo reaches size pixels past the letters, the patch stays inside four.
 		const int Pad = mode == 1 ? size + 1 : 4;
@@ -817,10 +822,11 @@ namespace
 		const RECT place{ rect.left - Pad, rect.top - Pad, rect.right + Pad, rect.bottom + Pad };
 		{
 			WiderClip clip{ blendDc, place };
-			BlendWhite(blendDc, place, alpha, width, height);
+			BlendInk(blendDc, place, alpha, width, height, mode == 1 ? ink : RGB(255, 255, 255));
 		}
 		static std::atomic<int> s_logged{};
-		if (s_logged.exchange(mode) != mode) Log(mode == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
+		const int kind = mode == 1 && ink != RGB(255, 255, 255) ? 3 : mode;
+		if (s_logged.exchange(kind) != kind) Log(kind == 3 ? L"text glow: first glow drawn" : kind == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
 	}
 
 	HRESULT WINAPI DrawThemeTextExHook(HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
@@ -834,8 +840,10 @@ namespace
 		const bool light = g_light;
 		const DWORD custom = g_textColor[light ? 1 : 0], second = g_secondColor[light ? 1 : 0];
 		const bool halo = mode && g_enabled && light;
+		const int glowStrength = g_glowStrength;
+		const bool glow = !light && glowStrength > 0 && g_enabled;
 		const bool recolor = (custom || second) && (g_inExplorer || g_enabled);
-		if ((halo || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
+		if ((halo || glow || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
 		{
 			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
 			if (!g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
@@ -863,7 +871,13 @@ namespace
 				if (halo && known && (replaced ? IsDarkInk(color) : IsNeutralDark(color)))
 				{
 					HDC under = fromBlurMica ? TargetUnder(dc) : nullptr;
-					DrawGreyBackdrop(mode, theme, dc, under ? under : dc, part, state, text, count, flags, *rect);
+					DrawGreyBackdrop(mode, theme, dc, under ? under : dc, part, state, text, count, flags, *rect, g_grayStrength, g_graySize, RGB(255, 255, 255));
+				}
+				// Dark mode: the light text, or a colour the user picked, glows in its own colour like neon.
+				else if (glow && known && (replaced || IsPlainText(color, false)))
+				{
+					HDC under = fromBlurMica ? TargetUnder(dc) : nullptr;
+					DrawGreyBackdrop(1, theme, dc, under ? under : dc, part, state, text, count, flags, *rect, glowStrength, g_glowSize, color & 0xFFFFFF);
 				}
 				if (replaced) return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, &changed);
 			}
@@ -1329,6 +1343,19 @@ namespace
 			RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayTextSize", RRF_RT_REG_DWORD, nullptr, &graySize, &graySizeSize);
 		}
 		graySize = std::clamp<DWORD>((std::min<DWORD>(graySize, 100000) + 50) / 100, 1, 10);
+		auto readDword = [](const wchar_t* name, DWORD fallback)
+		{
+			DWORD value = fallback, size = sizeof(value);
+			if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS)
+			{
+				value = fallback;
+				size = sizeof(value);
+				if (RegGetValueW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\DWM", name, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS) value = fallback;
+			}
+			return value;
+		};
+		const DWORD glowStrength = std::min<DWORD>(readDword(L"FluidGlassTextGlow", 0), 100);
+		const DWORD glowSize = std::clamp<DWORD>((std::min<DWORD>(readDword(L"FluidGlassTextGlowSize", 400), 100000) + 50) / 100, 1, 10);
 		// BeginBufferedPaintHook needs this before the first label is drawn.
 		if (g_inExplorer && !g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
 		const DWORD textDark = ReadColor(L"FluidGlassTextColorDark"), textLight = ReadColor(L"FluidGlassTextColorLight");
@@ -1337,6 +1364,8 @@ namespace
 			(g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText)) |
 			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength)) |
 			(g_graySize.exchange(static_cast<int>(graySize)) != static_cast<int>(graySize)) |
+			(g_glowStrength.exchange(static_cast<int>(glowStrength)) != static_cast<int>(glowStrength)) |
+			(g_glowSize.exchange(static_cast<int>(glowSize)) != static_cast<int>(glowSize)) |
 			(g_textColor[0].exchange(textDark) != textDark) |
 			(g_textColor[1].exchange(textLight) != textLight) |
 			(g_secondColor[0].exchange(secondDark) != secondDark) |
@@ -1344,12 +1373,12 @@ namespace
 #ifdef FLUIDGLASS_HEADER
 		if (g_inExplorer)
 			HeaderGlassSettings(enabled && grayText && grayStrength, static_cast<int>(grayStrength), static_cast<int>(graySize), textDark, textLight, secondDark, secondLight,
-				ReadColor(L"FluidGlassIconColorDark"), ReadColor(L"FluidGlassIconColorLight"));
+				ReadColor(L"FluidGlassIconColorDark"), ReadColor(L"FluidGlassIconColorLight"), enabled ? static_cast<int>(glowStrength) : 0, static_cast<int>(glowSize));
 #endif
 		if (grayTextChanged)
 		{
-			wchar_t line[80];
-			swprintf_s(line, L"grey text mode %lu strength %lu size %lu", grayText, grayStrength, graySize);
+			wchar_t line[112];
+			swprintf_s(line, L"grey text mode %lu strength %lu size %lu, glow %lu size %lu", grayText, grayStrength, graySize, glowStrength, glowSize);
 			Log(line);
 		}
 		if (g_enabled.exchange(enabled) != enabled)

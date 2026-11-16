@@ -74,6 +74,8 @@ namespace
 		// The user's colours for text and for icon glyphs (FluidGlassTextColorDark and so on), 0x01000000 | COLORREF or
 		// 0 for the system's. Index 1 is light mode.
 		DWORD text[2]{}, second[2]{}, icon[2]{};
+		// The dark mode glow in the text's own colour (FluidGlassTextGlow and its size): peak opacity in percent, 0 off.
+		int glow{}, glowSize{ 4 };
 		bool operator==(const Style&) const = default;
 	};
 
@@ -127,6 +129,18 @@ namespace
 		out = brush.Color();
 		out.A = static_cast<uint8_t>(out.A * std::clamp(brush.Opacity(), 0.0, 1.0));
 		return out.A > 0 && out.R * 299 + out.G * 587 + out.B * 114 < 128 * 1000;
+	}
+
+	// The text's colour when the dark mode glow lights it: the plain light ink of dark mode, or a colour the user
+	// picked. Disabled and placeholder text is fainter and stays plain.
+	bool GlowInk(const mux::Controls::TextBlock& text, bool tinted, winrt::Windows::UI::Color& out)
+	{
+		if (text.ActualTheme() != mux::ElementTheme::Dark) return false;
+		const auto brush = text.Foreground().try_as<mux::Media::SolidColorBrush>();
+		if (!brush) return false;
+		out = brush.Color();
+		out.A = static_cast<uint8_t>(out.A * std::clamp(brush.Opacity(), 0.0, 1.0));
+		return tinted ? out.A >= 0x80 : PlainInk(out, false);
 	}
 
 	// Menus, flyouts and tooltips have their own solid faces, so their text keeps the plain look. They live outside the
@@ -583,7 +597,9 @@ namespace
 			{
 				winrt::Windows::UI::Color ink{};
 				const bool dark = m_style.on && DarkInk(text, ink);
-				if (!dark)
+				// In dark mode the same visuals give the light text a glow of its own colour instead of a white halo.
+				const bool lit = !dark && m_style.glow > 0 && GlowInk(text, halo.tint != nullptr, ink);
+				if (!dark && !lit)
 				{
 					if (halo.root) halo.root.IsVisible(false);
 					return;
@@ -604,7 +620,8 @@ namespace
 				}
 				if (!halo.masked) { halo.root.IsVisible(false); return; }
 				halo.ink.Color(ink);
-				const float strength = m_style.strength / 100.f, size = static_cast<float>(m_style.size);
+				const float strength = (lit ? m_style.glow : m_style.strength) / 100.f, size = static_cast<float>(lit ? m_style.glowSize : m_style.size);
+				const winrt::Windows::UI::Color shine = lit ? winrt::Windows::UI::Color{ 255, ink.R, ink.G, ink.B } : winrt::Windows::UI::Color{ 255, 255, 255, 255 };
 				// One glow of the header's thin strokes peaks at about erf(0.32 / sigma) of its opacity, with sigma
 				// near half the blur radius (measured twice on the breadcrumb). The stacked glows together aim at the
 				// strength, and stacking also widens the bright bed around the letters, as the item list's halo has.
@@ -615,6 +632,7 @@ namespace
 				{
 					const auto shadow = halo.sprites[index].Shadow().as<muc::DropShadow>();
 					const bool core = index < HaloCores;
+					shadow.Color(shine);
 					shadow.BlurRadius(core ? coreBlur : size * 1.5f + 1.f);
 					shadow.Opacity(core ? coreOpacity : strength * 0.45f);
 				}
@@ -728,17 +746,19 @@ void HeaderGlassStart(HMODULE)
 }
 
 // Called by itemglass once a second; a change reaches every window on its own thread.
-// The halo only shows on dark text, so light mode needs no switch of its own.
-void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight)
+// The halo only shows on dark text, so light mode needs no switch of its own. The glow only shows in dark mode.
+void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
+	int glow, int glowSize)
 {
 	std::lock_guard guard{ g_lock };
 	DWORD light = 1, lightSize = sizeof(light);
 	RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
-	const Style style{ on, strength, size, light != 0, { textDark, textLight }, { secondDark, secondLight }, { iconDark, iconLight } };
+	const Style style{ on, strength, size, light != 0, { textDark, textLight }, { secondDark, secondLight }, { iconDark, iconLight }, glow, glowSize };
 	if (style == g_style) return;
 	g_style = style;
-	wchar_t colors[128];
-	swprintf_s(colors, L", text %08lX %08lX, secondary %08lX %08lX, icons %08lX %08lX", textDark, textLight, secondDark, secondLight, iconDark, iconLight);
+	wchar_t colors[160];
+	swprintf_s(colors, L", text %08lX %08lX, secondary %08lX %08lX, icons %08lX %08lX, glow %d size %d", textDark, textLight, secondDark, secondLight, iconDark, iconLight,
+		glow, glowSize);
 	Log(std::wstring(on ? L"on" : L"off") + L", strength " + std::to_wstring(strength) + L", size " + std::to_wstring(size) + (light ? L", light" : L", dark") + colors);
 	for (const auto& [thread, header] : g_threads)
 	{

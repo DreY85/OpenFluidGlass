@@ -8,10 +8,14 @@
 - Each mode has a palette list with ten matched sets. Choosing one fills in all three colors at once.
 - Use System Colors puts every color back to the Windows default. Hover, pressed and disabled buttons keep their usual look.
 
+### Text glow
+
+- In dark mode, File Explorer text can glow softly in its own color, like neon. Text glow in dark mode sets how bright it is and Glow size how far it reaches. It works with the colors you pick too. It is off by default, and disabled buttons never glow.
+
 ### App
 
 - Card titles are bold.
-- Readability in light mode, Text halo and Halo size are locked while Windows uses dark mode for apps, since they only change light mode.
+- Readability in light mode, Text halo and Halo size are locked while Windows uses dark mode for apps, since they only change light mode. The two glow settings are locked in light mode the same way.
 
 ## 1.0.3
 
