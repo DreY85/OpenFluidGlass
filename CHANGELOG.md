@@ -8,6 +8,23 @@
 - Each mode has a palette list with ten matched sets. Choosing one fills in all three colors at once.
 - Use System Colors puts every color back to the Windows default. Hover, pressed and disabled buttons keep their usual look.
 
+### Text halo in light mode
+
+- In light mode, a soft white halo sits behind the dark and grey text in File Explorer, so names, sizes and dates stay readable over any wallpaper. It covers the file list, the navigation pane and the header with its tabs, address bar, search box and command bar. It is on by default.
+- The taskbar tray text, its glyph icons and the clock get the same halo while the floating pills show.
+- Text halo in light mode sets how strong it is, and 0 turns it off. Halo size in light mode sets how far it reaches, from a tight outline at 3 pixels up to a wide soft glow like the Windows 7 title bars.
+- After a switch from light to dark mode, the tray text and icons turn white again. They used to stay black with a faint halo.
+
+### White flashes
+
+- In light mode, a folder window no longer shows a white sheet for a moment when you restore it from the taskbar or open a new one. The blank surface Windows gives the window is painted as clear glass until File Explorer draws over it.
+- Taskbar thumbnails and Alt+Tab no longer show File Explorer as a white sheet in light mode. Readability in light mode now lifts the glass only where something is behind it.
+
+### Glass
+
+- Softness 0 costs less. With Clarity above 0, the glass now reads the background once per pixel instead of 13 times. The picture is the same.
+- With Direct3D rendering off, the blur no longer creates its bitmap again on every frame.
+
 ### Text glow and outline
 
 - In dark mode, File Explorer text can glow softly in its own color, like neon. Text glow in dark mode sets how bright it is and Glow size how far it reaches. It works with the colors you pick too. It is off by default, and disabled buttons never glow.
@@ -19,6 +36,7 @@
 ### App
 
 - Card titles are bold.
+- A tab page keeps its scroll position when the window loses or regains the focus. It used to jump back to the top.
 - Readability in light mode, Text halo and Halo size are locked while Windows uses dark mode for apps, since they only change light mode. The glow and outline settings are locked in light mode the same way.
 
 ## 1.0.3
