@@ -32,7 +32,7 @@
 // headerglass.cpp: the halo for File Explorer's WinUI 3 header.
 void HeaderGlassStart(HMODULE module);
 void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
-	int glow, int glowSize, int outline, int outlineSize);
+	int glow, int glowSize, int outline, int outlineSize, int outlineLight, int outlineLightSize);
 #endif
 
 namespace
@@ -70,6 +70,8 @@ namespace
 	std::atomic<int> g_glowSize{ 4 };	// FluidGlassTextGlowSize / 100: glow reach in pixels, 1 to 10
 	std::atomic<int> g_outlineStrength{};	// FluidGlassTextOutline: dark mode black outline around the text, opacity in percent, 0 off
 	std::atomic<int> g_outlineSize{ 1 };	// FluidGlassTextOutlineSize / 100: outline width in pixels, 1 or 2
+	std::atomic<int> g_outlineLightStrength{};	// FluidGlassTextOutlineLight: light mode white outline around the dark text, percent, 0 off
+	std::atomic<int> g_outlineLightSize{ 1 };	// FluidGlassTextOutlineSizeLight / 100: its width in pixels, 1 or 2
 	std::atomic<bool> g_explorerFill{ true };	// FluidGlassExplorerFill: paint a folder window's blank surface black
 	// FluidGlassTextColorDark and FluidGlassTextColorLight: the user's colour for the item and navigation pane text,
 	// 0x01000000 | COLORREF, or 0 for the system's own colour. Index 1 is light mode.
@@ -599,20 +601,60 @@ namespace
 	// then blends it onto the pane. A halo drawn into that buffer loses everything outside the rect, so the start of
 	// the first letter had no halo. Its open buffers are kept per thread, and the halo goes onto the DC underneath.
 	// The buffer uses the target's coordinates, and its clear pixels leave what is under them as it was.
+	// The folder view's DirectUI draws its labels the same way, each into a buffer that starts where the text starts,
+	// so the halo lost its left edge there too. Its buffers count only when they blend with per-pixel alpha: a buffer
+	// copied over its target would hide a halo drawn underneath.
 	struct OpenBuffer
 	{
 		HPAINTBUFFER buffer;
 		HDC bufferDc;
 		HDC targetDc;
 	};
-	thread_local OpenBuffer t_buffers[4]{};
+	thread_local OpenBuffer t_buffers[8]{};
 	thread_local int t_bufferCount{};
 
 	HPAINTBUFFER WINAPI BeginBufferedPaintHook(HDC target, const RECT* rect, BP_BUFFERFORMAT format, BP_PAINTPARAMS* params, HDC* bufferDc)
 	{
 		void* caller = _ReturnAddress();
 		const HPAINTBUFFER buffer = g_beginBufferedPaint(target, rect, format, params, bufferDc);
-		if (buffer && bufferDc && *bufferDc && t_bufferCount < static_cast<int>(std::size(t_buffers)) && InModule(caller, g_blurMica))
+		const bool blurMica = InModule(caller, g_blurMica);
+		const BLENDFUNCTION* blend = params ? params->pBlendFunction : nullptr;
+		const bool blended = blend && blend->BlendOp == AC_SRC_OVER && blend->AlphaFormat == AC_SRC_ALPHA && blend->SourceConstantAlpha == 255;
+#ifdef FLUIDGLASS_LOGS
+		if (buffer && !blurMica)
+		{
+			// Which other modules open buffers, and how they blend: once per module and kind, at most 24 lines.
+			static std::atomic<int> s_lines{};
+			static std::mutex s_lock;
+			static std::vector<std::pair<PVOID, DWORD>> s_seen;
+			PVOID base{};
+			RtlPcToFileHeader(caller, &base);
+			const DWORD kind = (params ? params->dwFlags : 0xFFFF) | (blend ? 0x10000u : 0u) | (blended ? 0x20000u : 0u) | static_cast<DWORD>(format) << 24;
+			bool fresh = false;
+			if (s_lines < 24)
+			{
+				std::lock_guard guard{ s_lock };
+				if (std::find(s_seen.begin(), s_seen.end(), std::make_pair(base, kind)) == s_seen.end())
+				{
+					s_seen.emplace_back(base, kind);
+					fresh = true;
+					++s_lines;
+				}
+			}
+			if (fresh)
+			{
+				wchar_t path[MAX_PATH]{};
+				if (base) GetModuleFileNameW(static_cast<HMODULE>(base), path, MAX_PATH);
+				const wchar_t* name = wcsrchr(path, L'\\');
+				wchar_t line[320];
+				swprintf_s(line, L"buffer from %s format %d flags %lx blend %d op %d alpha %d format %d, %ldx%ld, %s", name ? name + 1 : L"?", format,
+					params ? params->dwFlags : 0, blend != nullptr, blend ? blend->BlendOp : -1, blend ? blend->SourceConstantAlpha : -1, blend ? blend->AlphaFormat : -1,
+					rect ? rect->right - rect->left : 0, rect ? rect->bottom - rect->top : 0, blended ? L"halo goes under" : L"halo stays in the buffer");
+				Log(line);
+			}
+		}
+#endif
+		if (buffer && bufferDc && *bufferDc && t_bufferCount < static_cast<int>(std::size(t_buffers)) && (blurMica || blended))
 		{
 			t_buffers[t_bufferCount++] = { buffer, *bufferDc, target };
 		}
@@ -996,8 +1038,10 @@ namespace
 		const bool glow = !light && glowStrength > 0 && g_enabled;
 		const int outlineStrength = g_outlineStrength;
 		const bool outline = !light && outlineStrength > 0 && g_enabled;
+		const int outlineLightStrength = g_outlineLightStrength;
+		const bool outlineLight = light && outlineLightStrength > 0 && g_enabled;
 		const bool recolor = (custom || second) && (g_inExplorer || g_enabled);
-		if ((halo || glow || outline || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
+		if ((halo || glow || outline || outlineLight || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
 		{
 			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
 			if (!g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
@@ -1024,8 +1068,12 @@ namespace
 				}
 				TextEffect effects[2]{};
 				int effectCount = 0;
-				if (halo && known && (replaced ? IsDarkInk(color) : IsNeutralDark(color)))
-					effects[effectCount++] = { mode, g_grayStrength, g_graySize, RGB(255, 255, 255) };
+				// Light mode: a soft white halo, a crisp white outline, or both, behind the dark text. The halo goes lowest.
+				if ((halo || outlineLight) && known && (replaced ? IsDarkInk(color) : IsNeutralDark(color)))
+				{
+					if (halo) effects[effectCount++] = { mode, g_grayStrength, g_graySize, RGB(255, 255, 255) };
+					if (outlineLight) effects[effectCount++] = { 3, outlineLightStrength, g_outlineLightSize, RGB(255, 255, 255) };
+				}
 				// Dark mode: the light text, or a colour the user picked, glows in its own colour like neon, and a black
 				// outline under the letters keeps it readable over bright backdrops. The glow goes under the outline.
 				else if ((glow || outline) && known && (replaced || IsPlainText(color, false)))
@@ -1038,7 +1086,7 @@ namespace
 #ifdef FLUIDGLASS_LOGS
 					const uint64_t start = Ticks();
 #endif
-					HDC under = fromBlurMica ? TargetUnder(dc) : nullptr;
+					HDC under = TargetUnder(dc);
 					DrawTextEffects(theme, dc, under ? under : dc, part, state, text, count, flags, *rect, effects, effectCount);
 #ifdef FLUIDGLASS_LOGS
 					const uint64_t drawn = Ticks();
@@ -1527,6 +1575,8 @@ namespace
 		const DWORD glowSize = std::clamp<DWORD>((std::min<DWORD>(readDword(L"FluidGlassTextGlowSize", 400), 100000) + 50) / 100, 1, 10);
 		const DWORD outlineStrength = std::min<DWORD>(readDword(L"FluidGlassTextOutline", 0), 100);
 		const DWORD outlineSize = std::clamp<DWORD>((std::min<DWORD>(readDword(L"FluidGlassTextOutlineSize", 100), 100000) + 50) / 100, 1, 2);
+		const DWORD outlineLightStrength = std::min<DWORD>(readDword(L"FluidGlassTextOutlineLight", 0), 100);
+		const DWORD outlineLightSize = std::clamp<DWORD>((std::min<DWORD>(readDword(L"FluidGlassTextOutlineSizeLight", 100), 100000) + 50) / 100, 1, 2);
 		// BeginBufferedPaintHook needs this before the first label is drawn.
 		if (g_inExplorer && !g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
 		const DWORD textDark = ReadColor(L"FluidGlassTextColorDark"), textLight = ReadColor(L"FluidGlassTextColorLight");
@@ -1539,6 +1589,8 @@ namespace
 			(g_glowSize.exchange(static_cast<int>(glowSize)) != static_cast<int>(glowSize)) |
 			(g_outlineStrength.exchange(static_cast<int>(outlineStrength)) != static_cast<int>(outlineStrength)) |
 			(g_outlineSize.exchange(static_cast<int>(outlineSize)) != static_cast<int>(outlineSize)) |
+			(g_outlineLightStrength.exchange(static_cast<int>(outlineLightStrength)) != static_cast<int>(outlineLightStrength)) |
+			(g_outlineLightSize.exchange(static_cast<int>(outlineLightSize)) != static_cast<int>(outlineLightSize)) |
 			(g_textColor[0].exchange(textDark) != textDark) |
 			(g_textColor[1].exchange(textLight) != textLight) |
 			(g_secondColor[0].exchange(secondDark) != secondDark) |
@@ -1547,13 +1599,14 @@ namespace
 		if (g_inExplorer)
 			HeaderGlassSettings(enabled && grayText && grayStrength, static_cast<int>(grayStrength), static_cast<int>(graySize), textDark, textLight, secondDark, secondLight,
 				ReadColor(L"FluidGlassIconColorDark"), ReadColor(L"FluidGlassIconColorLight"), enabled ? static_cast<int>(glowStrength) : 0, static_cast<int>(glowSize),
-				enabled ? static_cast<int>(outlineStrength) : 0, static_cast<int>(outlineSize));
+				enabled ? static_cast<int>(outlineStrength) : 0, static_cast<int>(outlineSize),
+				enabled ? static_cast<int>(outlineLightStrength) : 0, static_cast<int>(outlineLightSize));
 #endif
 		if (grayTextChanged)
 		{
-			wchar_t line[144];
-			swprintf_s(line, L"grey text mode %lu strength %lu size %lu, glow %lu size %lu, outline %lu size %lu", grayText, grayStrength, graySize, glowStrength, glowSize,
-				outlineStrength, outlineSize);
+			wchar_t line[176];
+			swprintf_s(line, L"grey text mode %lu strength %lu size %lu, glow %lu size %lu, outline %lu size %lu, light outline %lu size %lu", grayText, grayStrength,
+				graySize, glowStrength, glowSize, outlineStrength, outlineSize, outlineLightStrength, outlineLightSize);
 			Log(line);
 		}
 		if (g_enabled.exchange(enabled) != enabled)

@@ -78,6 +78,8 @@ namespace
 		int glow{}, glowSize{ 4 };
 		// The dark mode black outline (FluidGlassTextOutline and its size): opacity in percent, 0 off, width 1 or 2 pixels.
 		int outline{}, outlineSize{ 1 };
+		// The light mode white outline (FluidGlassTextOutlineLight and its size), the same way.
+		int outlineLight{}, outlineLightSize{ 1 };
 		bool operator==(const Style&) const = default;
 	};
 
@@ -176,6 +178,7 @@ namespace
 		muc::LayerVisual strokeLayer{ nullptr };
 		std::vector<muc::SpriteVisual> strokes;
 		muc::CompositionMaskBrush strokeBrush{ nullptr };
+		muc::CompositionColorBrush strokeInk{ nullptr };
 		int strokeSize{};
 		bool sized{};	// the sprites follow the element visual's size through an expression
 		// A shadow without a mask is cast by the whole sprite, a white box the size of the text's slot. The halo only
@@ -570,7 +573,8 @@ namespace
 			if (!halo.strokeBrush)
 			{
 				halo.strokeBrush = compositor.CreateMaskBrush();
-				halo.strokeBrush.Source(compositor.CreateColorBrush(winrt::Windows::UI::Color{ 255, 0, 0, 0 }));
+				halo.strokeInk = compositor.CreateColorBrush(winrt::Windows::UI::Color{ 255, 0, 0, 0 });
+				halo.strokeBrush.Source(halo.strokeInk);
 				if (halo.mask) halo.strokeBrush.Mask(halo.mask);
 			}
 			const auto layer = compositor.CreateLayerVisual();
@@ -671,7 +675,9 @@ namespace
 			try
 			{
 				winrt::Windows::UI::Color ink{};
-				const bool dark = m_style.on && DarkInk(text, ink);
+				// Light mode: the dark text gets the white halo, a white outline, or both.
+				const bool whiteStroke = m_style.light && m_style.outlineLight > 0;
+				const bool dark = (m_style.on || whiteStroke) && DarkInk(text, ink);
 				// In dark mode the same visuals give the light text a glow of its own colour instead of a white halo.
 				// The black outline rides on the same visuals, under the redrawn letters.
 				const bool lit = !dark && (m_style.glow > 0 || m_style.outline > 0) && GlowInk(text, halo.tint != nullptr, ink);
@@ -698,7 +704,7 @@ namespace
 				}
 				if (!halo.masked) { halo.root.IsVisible(false); return; }
 				halo.ink.Color(ink);
-				const float strength = (lit ? m_style.glow : m_style.strength) / 100.f, size = static_cast<float>(lit ? m_style.glowSize : m_style.size);
+				const float strength = (lit ? m_style.glow : m_style.on ? m_style.strength : 0) / 100.f, size = static_cast<float>(lit ? m_style.glowSize : m_style.size);
 				const winrt::Windows::UI::Color shine = lit ? winrt::Windows::UI::Color{ 255, ink.R, ink.G, ink.B } : winrt::Windows::UI::Color{ 255, 255, 255, 255 };
 				// One glow of the header's thin strokes peaks at about erf(0.32 / sigma) of its opacity, with sigma
 				// near half the blur radius (measured twice on the breadcrumb). The stacked glows together aim at the
@@ -715,7 +721,8 @@ namespace
 					shadow.Opacity(core ? coreOpacity : strength * 0.45f);
 					halo.sprites[index].IsVisible(strength > 0.f);
 				}
-				const int stroke = lit && m_style.outline > 0 ? m_style.outlineSize : 0;
+				const int stroke = lit && m_style.outline > 0 ? m_style.outlineSize : dark && whiteStroke ? m_style.outlineLightSize : 0;
+				const int strokeOpacity = lit ? m_style.outline : m_style.outlineLight;
 				if (stroke && stroke != halo.strokeSize && !m_strokeFailed)
 				{
 					try
@@ -738,7 +745,12 @@ namespace
 				if (halo.strokeLayer)
 				{
 					halo.strokeLayer.IsVisible(stroke > 0);
-					if (stroke) halo.strokeLayer.Opacity(m_style.outline / 100.f);
+					if (stroke)
+					{
+						// Black around the light text of dark mode, white around the dark text of light mode.
+						halo.strokeInk.Color(lit ? winrt::Windows::UI::Color{ 255, 0, 0, 0 } : winrt::Windows::UI::Color{ 255, 255, 255, 255 });
+						halo.strokeLayer.Opacity(strokeOpacity / 100.f);
+					}
 				}
 				halo.root.IsVisible(true);
 			}
@@ -852,18 +864,18 @@ void HeaderGlassStart(HMODULE)
 // Called by itemglass once a second; a change reaches every window on its own thread.
 // The halo only shows on dark text, so light mode needs no switch of its own. The glow only shows in dark mode.
 void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
-	int glow, int glowSize, int outline, int outlineSize)
+	int glow, int glowSize, int outline, int outlineSize, int outlineLight, int outlineLightSize)
 {
 	std::lock_guard guard{ g_lock };
 	DWORD light = 1, lightSize = sizeof(light);
 	RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
 	const Style style{ on, strength, size, light != 0, { textDark, textLight }, { secondDark, secondLight }, { iconDark, iconLight }, glow, glowSize,
-		outline, std::clamp(outlineSize, 1, 2) };
+		outline, std::clamp(outlineSize, 1, 2), outlineLight, std::clamp(outlineLightSize, 1, 2) };
 	if (style == g_style) return;
 	g_style = style;
-	wchar_t colors[192];
-	swprintf_s(colors, L", text %08lX %08lX, secondary %08lX %08lX, icons %08lX %08lX, glow %d size %d, outline %d size %d", textDark, textLight, secondDark, secondLight,
-		iconDark, iconLight, glow, glowSize, outline, outlineSize);
+	wchar_t colors[224];
+	swprintf_s(colors, L", text %08lX %08lX, secondary %08lX %08lX, icons %08lX %08lX, glow %d size %d, outline %d size %d, light outline %d size %d", textDark,
+		textLight, secondDark, secondLight, iconDark, iconLight, glow, glowSize, outline, outlineSize, outlineLight, outlineLightSize);
 	Log(std::wstring(on ? L"on" : L"off") + L", strength " + std::to_wstring(strength) + L", size " + std::to_wstring(size) + (light ? L", light" : L", dark") + colors);
 	for (const auto& [thread, header] : g_threads)
 	{

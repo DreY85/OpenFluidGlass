@@ -12,6 +12,8 @@
 
 - In dark mode, File Explorer text can glow softly in its own color, like neon. Text glow in dark mode sets how bright it is and Glow size how far it reaches. It works with the colors you pick too. It is off by default, and disabled buttons never glow.
 - In dark mode, File Explorer text can also get a thin, crisp black outline, like a stroke in a photo editor, so light text stays readable over bright backgrounds. Text outline in dark mode sets how dark it is and Outline width picks 1 or 2 pixels. It is off by default.
+- In light mode, File Explorer text can get a thin white outline too. Text outline in light mode sets how strong it is and Outline width in light mode picks 1 or 2 pixels. It works with the halo or on its own. It is off by default.
+- The halo, glow and outline no longer stop in a straight line at the left of the text on This PC and in folders. They now follow the first letter, as they already did in the navigation pane.
 - The glow, the outline and the light mode halo are drawn together in one pass and only around the letters, so scrolling large folders stays smooth with them on.
 
 ### App

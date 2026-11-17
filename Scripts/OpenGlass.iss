@@ -595,7 +595,7 @@ begin
     'DisableGlassOnBattery', 'DisabledHooks', 'GlassSafetyZoneMode',
     'MINMAXBUTTONGLOWid', 'CLOSEBUTTONGLOWid', 'TOOLCLOSEBUTTONGLOWid',
     'FluidGlass', 'FluidGlassIor', 'FluidGlassBezel', 'FluidGlassThickness', 'FluidGlassGap', 'FluidGlassScale',
-    'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassReadabilityLight', 'FluidGlassGrayText', 'FluidGlassGrayTextStrength', 'FluidGlassGrayTextSize', 'FluidGlassTextGlow', 'FluidGlassTextGlowSize', 'FluidGlassTextOutline', 'FluidGlassTextOutlineSize', 'FluidGlassRim', 'FluidGlassShine',
+    'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassReadabilityLight', 'FluidGlassGrayText', 'FluidGlassGrayTextStrength', 'FluidGlassGrayTextSize', 'FluidGlassTextGlow', 'FluidGlassTextGlowSize', 'FluidGlassTextOutline', 'FluidGlassTextOutlineSize', 'FluidGlassTextOutlineLight', 'FluidGlassTextOutlineSizeLight', 'FluidGlassRim', 'FluidGlassShine',
     'FluidGlassLight', 'FluidGlassRadius', 'FluidGlassPillRadius', 'FluidGlassProfile', 'FluidGlassClarity',
     'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs',
     'FluidGlassTextColorLight', 'FluidGlassTextColorDark', 'FluidGlassIconColorLight', 'FluidGlassIconColorDark',

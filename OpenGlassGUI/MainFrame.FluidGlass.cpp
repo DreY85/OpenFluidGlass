@@ -53,6 +53,8 @@ namespace OpenGlass
 				{ L"FluidGlassReadabilityLight", L"Readability in light mode:", L"When apps use light mode, lightens backdrops that are too dark for black text. Over a dark wallpaper, apps in dark mode keep the glass clearer.", L"ReadabilityLight", 0.f, 1.f, 0.01f, 0.8f, L"" },
 				{ L"FluidGlassGrayTextStrength", L"Text halo in light mode:", L"When apps use light mode, draws a soft white halo behind the black and grey names in File Explorer so they stay readable on the glass. 0 turns it off.", L"TextHalo", 0.f, 1.f, 0.01f, 0.6f, L"" },
 				{ L"FluidGlassGrayTextSize", L"Halo size in light mode:", L"How far the text halo reaches past the letters. 3 is a tight outline, larger values give a wide soft glow like the Windows 7 title bars and can lighten nearby icons.", L"HaloSize", 1.f, 10.f, 1.f, 3.f, L"px" },
+				{ L"FluidGlassTextOutlineLight", L"Text outline in light mode:", L"When apps use light mode, draws a thin white outline around the dark text in File Explorer. It works with the halo or on its own: set Text halo to 0 for a clean outline only. 0 turns it off.", L"TextOutlineLight", 0.f, 1.f, 0.05f, 0.f, L"" },
+				{ L"FluidGlassTextOutlineSizeLight", L"Outline width in light mode:", L"How thick the white outline around the text is.", L"OutlineSizeLight", 1.f, 2.f, 1.f, 1.f, L"px" },
 				{ L"FluidGlassTextGlow", L"Text glow in dark mode:", L"When apps use dark mode, gives the light text in File Explorer a soft glow in its own color, like neon. 0 turns it off.", L"TextGlow", 0.f, 1.f, 0.01f, 0.f, L"" },
 				{ L"FluidGlassTextGlowSize", L"Glow size in dark mode:", L"How far the text glow reaches past the letters. Larger values give a wider, softer light.", L"GlowSize", 1.f, 10.f, 1.f, 4.f, L"px" },
 				{ L"FluidGlassTextOutline", L"Text outline in dark mode:", L"When apps use dark mode, draws a thin black outline around the light text in File Explorer so it stays readable over bright backdrops. 0 turns it off.", L"TextOutline", 0.f, 1.f, 0.05f, 0.f, L"" },
@@ -296,7 +298,8 @@ namespace OpenGlass
 		auto lightOnly = [](const FluidGlassParameter& parameter)
 		{
 			return wcscmp(parameter.name, L"FluidGlassReadabilityLight") == 0 || wcscmp(parameter.name, L"FluidGlassGrayTextStrength") == 0
-				|| wcscmp(parameter.name, L"FluidGlassGrayTextSize") == 0;
+				|| wcscmp(parameter.name, L"FluidGlassGrayTextSize") == 0 || wcscmp(parameter.name, L"FluidGlassTextOutlineLight") == 0
+				|| wcscmp(parameter.name, L"FluidGlassTextOutlineSizeLight") == 0;
 		};
 		auto darkOnly = [](const FluidGlassParameter& parameter)
 		{
