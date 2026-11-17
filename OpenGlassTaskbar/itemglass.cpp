@@ -591,6 +591,13 @@ namespace
 		return light ? r <= 0x10 : r >= 0xF0;
 	}
 
+	// The details view column headers (Name, Date modified, Type, Size) take a blue grey from the light theme
+	// (ItemsView::Header, #4C607A), which the grey-only checks above turn away. This exact ink counts as secondary text.
+	bool IsColumnHeaderInk(COLORREF color, bool light)
+	{
+		return light && (color & 0xFFFFFF) == RGB(0x4C, 0x60, 0x7A);
+	}
+
 	bool InModule(void* address, HMODULE module)
 	{
 		PVOID base{};
@@ -1054,7 +1061,8 @@ namespace
 				if (!known) known = SUCCEEDED(GetThemeColor(theme, part, state, TMT_TEXTCOLOR, &color));
 				DTTOPTS changed{};
 				bool replaced{};
-				const DWORD user = recolor && known && IsPlainText(color, light) ? (IsPrimaryText(color, light) ? custom : second) : 0;
+				const bool header = known && IsColumnHeaderInk(color, light);
+				const DWORD user = recolor && known && (header || IsPlainText(color, light)) ? (!header && IsPrimaryText(color, light) ? custom : second) : 0;
 				if (user)
 				{
 					// A copy, so the caller's options stay as they were. Older callers pass a shorter structure.
@@ -1069,7 +1077,7 @@ namespace
 				TextEffect effects[2]{};
 				int effectCount = 0;
 				// Light mode: a soft white halo, a crisp white outline, or both, behind the dark text. The halo goes lowest.
-				if ((halo || outlineLight) && known && (replaced ? IsDarkInk(color) : IsNeutralDark(color)))
+				if ((halo || outlineLight) && known && (replaced ? IsDarkInk(color) : header || IsNeutralDark(color)))
 				{
 					if (halo) effects[effectCount++] = { mode, g_grayStrength, g_graySize, RGB(255, 255, 255) };
 					if (outlineLight) effects[effectCount++] = { 3, outlineLightStrength, g_outlineLightSize, RGB(255, 255, 255) };
