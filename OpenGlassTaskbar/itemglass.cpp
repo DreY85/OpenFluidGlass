@@ -32,7 +32,7 @@
 // headerglass.cpp: the halo for File Explorer's WinUI 3 header.
 void HeaderGlassStart(HMODULE module);
 void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
-	int glow, int glowSize);
+	int glow, int glowSize, int outline, int outlineSize);
 #endif
 
 namespace
@@ -68,6 +68,8 @@ namespace
 	std::atomic<int> g_graySize{ 3 };	// FluidGlassGrayTextSize / 100: halo reach in pixels, 1 to 10
 	std::atomic<int> g_glowStrength{};	// FluidGlassTextGlow: dark mode glow in the text's own colour, peak opacity in percent, 0 off
 	std::atomic<int> g_glowSize{ 4 };	// FluidGlassTextGlowSize / 100: glow reach in pixels, 1 to 10
+	std::atomic<int> g_outlineStrength{};	// FluidGlassTextOutline: dark mode black outline around the text, opacity in percent, 0 off
+	std::atomic<int> g_outlineSize{ 1 };	// FluidGlassTextOutlineSize / 100: outline width in pixels, 1 or 2
 	std::atomic<bool> g_explorerFill{ true };	// FluidGlassExplorerFill: paint a folder window's blank surface black
 	// FluidGlassTextColorDark and FluidGlassTextColorLight: the user's colour for the item and navigation pane text,
 	// 0x01000000 | COLORREF, or 0 for the system's own colour. Index 1 is light mode.
@@ -685,63 +687,153 @@ namespace
 		bool m_changed{};
 	};
 
-	// The ink premultiplied by the given coverage, AlphaBlended onto the DC at the rect's place.
-	void BlendInk(HDC dc, const RECT& place, const std::vector<BYTE>& alpha, int width, int height, COLORREF ink)
+#ifdef FLUIDGLASS_LOGS
+	// Timing of the effects under the labels, per thread. One log line every 200 labels gives the average cost, the
+	// part spent drawing the text's shape, the cost of the label's own text as a yardstick, and how many labels came
+	// back unchanged among the last 512, which is the hit rate a mask cache would have.
+	struct EffectStats
 	{
-		const DWORD r = GetRValue(ink), g = GetGValue(ink), b = GetBValue(ink);
+		unsigned calls, repeats, next;
+		uint64_t effects, effectsMax, mask, draw, area, worked;
+		uint64_t keys[512];
+	};
+	thread_local EffectStats t_stats{};
+
+	uint64_t Ticks()
+	{
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		return static_cast<uint64_t>(now.QuadPart);
+	}
+
+	unsigned Micro(uint64_t ticks, unsigned divisor)
+	{
+		static const uint64_t frequency = [] { LARGE_INTEGER value; QueryPerformanceFrequency(&value); return static_cast<uint64_t>(value.QuadPart); }();
+		return static_cast<unsigned>(ticks * 1000000 / frequency / (divisor ? divisor : 1));
+	}
+
+	void EffectKey(LPCWSTR text, int count, const RECT& rect, int signature)
+	{
+		const int length = count < 0 ? lstrlenW(text) : count;
+		uint64_t hash = 1469598103934665603ull;
+		for (int i = 0; i < length; ++i) { hash ^= text[i]; hash *= 1099511628211ull; }
+		hash ^= static_cast<uint64_t>(rect.right - rect.left) << 32 ^ static_cast<uint64_t>(rect.bottom - rect.top) << 48 ^ static_cast<uint64_t>(signature);
+		hash *= 1099511628211ull;
+		for (const uint64_t key : t_stats.keys)
+			if (key == hash) { ++t_stats.repeats; return; }
+		t_stats.keys[t_stats.next++ % 512] = hash;
+	}
+
+	void EffectDrawn(uint64_t effects, uint64_t draw)
+	{
+		t_stats.effects += effects;
+		t_stats.effectsMax = std::max(t_stats.effectsMax, effects);
+		t_stats.draw += draw;
+		if (++t_stats.calls < 200) return;
+		const unsigned n = t_stats.calls;
+		wchar_t line[224];
+		swprintf_s(line, L"text effects over %u labels: %u us each (max %u), shape %u us, own text %u us, area %llu px, worked %llu px, repeats %u%%",
+			n, Micro(t_stats.effects, n), Micro(t_stats.effectsMax, 1), Micro(t_stats.mask, n), Micro(t_stats.draw, n), t_stats.area / n, t_stats.worked / n,
+			t_stats.repeats * 100 / n);
+		Log(line);
+		t_stats.calls = t_stats.repeats = 0;
+		t_stats.effects = t_stats.effectsMax = t_stats.mask = t_stats.draw = t_stats.area = t_stats.worked = 0;
+	}
+#endif
+
+	// Working buffers that only grow, one set per thread, so a scroll does not allocate for every label.
+	thread_local std::vector<BYTE> t_alpha, t_shape, t_work, t_grown, t_temp;
+	thread_local std::vector<DWORD> t_pixels;
+
+	// Premultiplied pixels AlphaBlended onto the DC at the given place.
+	void BlendPixels(HDC dc, int x, int y, const std::vector<DWORD>& source, int width, int height)
+	{
 		BITMAPINFO info{};
 		info.bmiHeader = { sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB };
 		void* bits{};
 		HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
 		if (!bitmap) return;
-		auto* pixels = static_cast<DWORD*>(bits);
-		for (size_t i = 0; i < alpha.size(); ++i)
-		{
-			const DWORD a = alpha[i];
-			pixels[i] = (a << 24) | ((r * a + 127) / 255 << 16) | ((g * a + 127) / 255 << 8) | ((b * a + 127) / 255);
-		}
+		memcpy(bits, source.data(), static_cast<size_t>(width) * height * sizeof(DWORD));
 		if (HDC memory = CreateCompatibleDC(dc))
 		{
 			const HGDIOBJ old = SelectObject(memory, bitmap);
 			const BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-			GdiAlphaBlend(dc, place.left, place.top, width, height, memory, 0, 0, width, height, blend);
+			GdiAlphaBlend(dc, x, y, width, height, memory, 0, 0, width, height, blend);
 			SelectObject(memory, old);
 			DeleteDC(memory);
 		}
 		DeleteObject(bitmap);
 	}
 
-	// Box blur of one channel in place, radius r, horizontal then vertical.
+	// Box blur of one channel in place, radius r, horizontal then vertical, with a running sum. The edges repeat the
+	// border pixel, as the old blur that summed every tap did, so the result is the same.
 	void Blur(std::vector<BYTE>& map, int width, int height, int r)
 	{
-		std::vector<BYTE> temp(map.size());
+		t_temp.resize(map.size());
+		const int span = 2 * r + 1;
 		for (int y = 0; y < height; ++y)
+		{
+			const BYTE* row = &map[static_cast<size_t>(y) * width];
+			int sum = 0;
+			for (int k = -r; k <= r; ++k) sum += row[std::clamp(k, 0, width - 1)];
 			for (int x = 0; x < width; ++x)
 			{
-				int sum = 0;
-				for (int k = -r; k <= r; ++k) sum += map[y * width + std::clamp(x + k, 0, width - 1)];
-				temp[y * width + x] = static_cast<BYTE>(sum / (2 * r + 1));
+				t_temp[static_cast<size_t>(y) * width + x] = static_cast<BYTE>(sum / span);
+				sum += row[std::min(x + r + 1, width - 1)] - row[std::max(x - r, 0)];
 			}
-		for (int y = 0; y < height; ++y)
-			for (int x = 0; x < width; ++x)
+		}
+		for (int x = 0; x < width; ++x)
+		{
+			int sum = 0;
+			for (int k = -r; k <= r; ++k) sum += t_temp[static_cast<size_t>(std::clamp(k, 0, height - 1)) * width + x];
+			for (int y = 0; y < height; ++y)
 			{
-				int sum = 0;
-				for (int k = -r; k <= r; ++k) sum += temp[std::clamp(y + k, 0, height - 1) * width + x];
-				map[y * width + x] = static_cast<BYTE>(sum / (2 * r + 1));
+				map[static_cast<size_t>(y) * width + x] = static_cast<BYTE>(sum / span);
+				sum += t_temp[static_cast<size_t>(std::min(y + r + 1, height - 1)) * width + x] - t_temp[static_cast<size_t>(std::max(y - r, 0)) * width + x];
 			}
+		}
 	}
 
-	// dc is where the text is drawn and gives its font, blendDc is where the halo or patch goes. The halo is drawn in
-	// ink: white for the light mode halo, the text's own colour for the dark mode glow.
-	void DrawGreyBackdrop(int mode, HTHEME theme, HDC dc, HDC blendDc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect,
-		int strength, int size, COLORREF ink)
+	// One effect under a label: mode 1 halo or glow, 2 frosted patch, 3 outline. The ink is white for the light mode
+	// halo and patch, the text's own colour for the dark mode glow, black for the outline.
+	struct TextEffect { int mode, strength, size; COLORREF ink; };
+
+	// The outline's shape for each width: a disk with an anti-aliased rim, weights out of 256, made once.
+	struct Tap { int dx, dy, weight; };
+	const std::vector<Tap>& OutlineTaps(int size)
 	{
-		size = std::clamp(size, 1, 10);
-		if (mode == 1 && strength <= 0) return;
-		// The halo reaches size pixels past the letters, the patch stays inside four.
-		const int Pad = mode == 1 ? size + 1 : 4;
+		static const std::vector<std::vector<Tap>> table = []
+		{
+			std::vector<std::vector<Tap>> taps(11);
+			for (int s = 1; s <= 10; ++s)
+				for (int dy = -s; dy <= s; ++dy)
+					for (int dx = -s; dx <= s; ++dx)
+					{
+						const float weight = std::clamp(s + 1.f - std::sqrt(static_cast<float>(dx * dx + dy * dy)), 0.f, 1.f);
+						if (weight > 0.f) taps[s].push_back({ dx, dy, static_cast<int>(std::lround(weight * 256)) });
+					}
+			return taps;
+		}();
+		return table[std::clamp(size, 1, 10)];
+	}
+
+	// dc is where the text is drawn and gives its font, blendDc is where the effects go. The text's shape is drawn once
+	// for all the effects, they are worked out only around the letters, composed in order (the first one lowest) and
+	// blended in one go.
+	void DrawTextEffects(HTHEME theme, HDC dc, HDC blendDc, int part, int state, LPCWSTR text, int count, DWORD flags, const RECT& rect,
+		const TextEffect* effects, int effectCount)
+	{
+		// The halo, glow and outline reach size pixels past the letters, the patch stays inside four.
+		int Pad = 0;
+		for (int i = 0; i < effectCount; ++i)
+			if (effects[i].mode == 2 || effects[i].strength > 0)
+				Pad = std::max(Pad, effects[i].mode == 2 ? 4 : std::clamp(effects[i].size, 1, 10) + 1);
+		if (!Pad) return;
 		const int width = rect.right - rect.left + 2 * Pad, height = rect.bottom - rect.top + 2 * Pad;
 		if (width <= 2 * Pad || height <= 2 * Pad || width > 4096 || height > 512) return;
+#ifdef FLUIDGLASS_LOGS
+		const uint64_t shapeStart = Ticks();
+#endif
 
 		// The text once, white, into a clear bitmap: its alpha is the exact shape and place of the letters.
 		BITMAPINFO info{};
@@ -759,7 +851,7 @@ namespace
 		options.crText = RGB(255, 255, 255);
 		g_drawThemeTextEx(theme, memory, part, state, text, count, flags & ~(DT_CALCRECT | DT_MODIFYSTRING), &local, &options);
 		GdiFlush();
-		std::vector<BYTE> alpha(static_cast<size_t>(width) * height);
+		t_alpha.resize(static_cast<size_t>(width) * height);
 		const auto* pixels = static_cast<const DWORD*>(bits);
 		int left = width, top = height, right = -1, bottom = -1;
 		for (int y = 0; y < height; ++y)
@@ -767,66 +859,126 @@ namespace
 			{
 				const DWORD p = pixels[y * width + x];
 				const BYTE a = static_cast<BYTE>(std::max({ p >> 24, (p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF }));
-				alpha[y * width + x] = a;
+				t_alpha[static_cast<size_t>(y) * width + x] = a;
 				if (a > 16) { left = std::min(left, x); right = std::max(right, x); top = std::min(top, y); bottom = std::max(bottom, y); }
 			}
 		SelectObject(memory, oldFont);
 		SelectObject(memory, oldBitmap);
 		DeleteDC(memory);
 		DeleteObject(bitmap);
+#ifdef FLUIDGLASS_LOGS
+		t_stats.mask += Ticks() - shapeStart;
+		t_stats.area += static_cast<uint64_t>(width) * height;
+#endif
 		if (right < 0) return;
 
-		if (mode == 1)
+		// Only the letters and what the effects reach past them are worked on. Pad covers the reach, two more pixels
+		// cover the patch's soft edge and the faint pixels the box test left out.
+		const int margin = Pad + 2;
+		const int cx = std::max(0, left - margin), cy = std::max(0, top - margin);
+		const int cw = std::min(width, right + margin + 1) - cx, ch = std::min(height, bottom + margin + 1) - cy;
+		const size_t cells = static_cast<size_t>(cw) * ch;
+		t_shape.resize(cells);
+		for (int y = 0; y < ch; ++y) memcpy(&t_shape[static_cast<size_t>(y) * cw], &t_alpha[static_cast<size_t>(cy + y) * width + cx], cw);
+		left -= cx; right -= cx; top -= cy; bottom -= cy;
+#ifdef FLUIDGLASS_LOGS
+		t_stats.worked += cells;
+#endif
+		t_pixels.assign(cells, 0);
+
+		static std::atomic<unsigned> s_logged{};
+		for (int i = 0; i < effectCount; ++i)
 		{
-			// Halo: the letters grown by a third of the size, then softened over the rest with two box blurs.
-			// Size 3 is one pixel grown and two softened. Larger sizes give the wide soft cloud of the Windows 7 glow.
-			const int grow = std::max(1, size / 3), soft = size - grow;
-			const int r1 = (soft + 1) / 2, r2 = soft - r1;
-			std::vector<BYTE> row(alpha.size()), grown(alpha.size());
-			for (int y = 0; y < height; ++y)
-				for (int x = 0; x < width; ++x)
-				{
-					BYTE m = 0;
-					for (int k = -grow; k <= grow; ++k) m = std::max(m, alpha[y * width + std::clamp(x + k, 0, width - 1)]);
-					row[y * width + x] = m;
-				}
-			for (int y = 0; y < height; ++y)
-				for (int x = 0; x < width; ++x)
-				{
-					BYTE m = 0;
-					for (int k = -grow; k <= grow; ++k) m = std::max(m, row[std::clamp(y + k, 0, height - 1) * width + x]);
-					grown[y * width + x] = m;
-				}
-			if (r1) Blur(grown, width, height, r1);
-			if (r2) Blur(grown, width, height, r2);
-			// A wider blur spreads the same white thinner, so the gain rises from 2 at size 3 to 4 at size 6.
-			const int gain3 = std::clamp(2 * size, 6, 12);
-			for (BYTE& a : grown) a = static_cast<BYTE>(std::min(255, a * gain3 / 3) * strength / 100);
-			alpha.swap(grown);
+			const TextEffect& effect = effects[i];
+			const int mode = effect.mode, strength = effect.strength, size = std::clamp(effect.size, 1, 10);
+			if (mode != 2 && strength <= 0) continue;
+			t_work.assign(t_shape.begin(), t_shape.end());
+			t_grown.resize(cells);
+			if (mode == 1)
+			{
+				// Halo: the letters grown by a third of the size, then softened over the rest with two box blurs.
+				// Size 3 is one pixel grown and two softened. Larger sizes give the wide soft cloud of the Windows 7 glow.
+				const int grow = std::max(1, size / 3), soft = size - grow;
+				const int r1 = (soft + 1) / 2, r2 = soft - r1;
+				for (int y = 0; y < ch; ++y)
+					for (int x = 0; x < cw; ++x)
+					{
+						BYTE m = 0;
+						for (int k = -grow; k <= grow; ++k) m = std::max(m, t_work[static_cast<size_t>(y) * cw + std::clamp(x + k, 0, cw - 1)]);
+						t_grown[static_cast<size_t>(y) * cw + x] = m;
+					}
+				for (int y = 0; y < ch; ++y)
+					for (int x = 0; x < cw; ++x)
+					{
+						BYTE m = 0;
+						for (int k = -grow; k <= grow; ++k) m = std::max(m, t_grown[static_cast<size_t>(std::clamp(y + k, 0, ch - 1)) * cw + x]);
+						t_work[static_cast<size_t>(y) * cw + x] = m;
+					}
+				if (r1) Blur(t_work, cw, ch, r1);
+				if (r2) Blur(t_work, cw, ch, r2);
+				// A wider blur spreads the same white thinner, so the gain rises from 2 at size 3 to 4 at size 6.
+				const int gain3 = std::clamp(2 * size, 6, 12);
+				for (BYTE& a : t_work) a = static_cast<BYTE>(std::min(255, a * gain3 / 3) * strength / 100);
+			}
+			else if (mode == 3)
+			{
+				// Outline: the letters grown by size pixels with a round, anti-aliased edge and no blur, like an outside
+				// stroke. The text drawn on top covers the inside, so only the rim shows.
+				const auto& taps = OutlineTaps(size);
+				for (int y = 0; y < ch; ++y)
+					for (int x = 0; x < cw; ++x)
+					{
+						int m = 0;
+						for (const auto& tap : taps)
+						{
+							const int sx = x + tap.dx, sy = y + tap.dy;
+							if (sx < 0 || sy < 0 || sx >= cw || sy >= ch) continue;
+							m = std::max(m, t_shape[static_cast<size_t>(sy) * cw + sx] * tap.weight >> 8);
+						}
+						t_work[static_cast<size_t>(y) * cw + x] = static_cast<BYTE>(std::min(255, m) * strength / 100);
+					}
+			}
+			else
+			{
+				// Frosted patch: a rounded rectangle around the text, 60 % white, with a one pixel soft edge.
+				const float x0 = left - 3.0f, x1 = right + 4.0f, y0 = top - 1.0f, y1 = bottom + 2.0f, radius = 4.0f;
+				for (int y = 0; y < ch; ++y)
+					for (int x = 0; x < cw; ++x)
+					{
+						const float px = x + 0.5f, py = y + 0.5f;
+						const float qx = std::max(std::max(x0 + radius - px, px - (x1 - radius)), 0.0f);
+						const float qy = std::max(std::max(y0 + radius - py, py - (y1 - radius)), 0.0f);
+						const float outside = std::sqrt(qx * qx + qy * qy) - radius;
+						const float cover = std::clamp(0.5f - outside, 0.0f, 1.0f);
+						t_work[static_cast<size_t>(y) * cw + x] = static_cast<BYTE>(std::lround(cover * 153));
+					}
+			}
+
+			// This effect over the ones before it, premultiplied.
+			const COLORREF ink = mode == 2 ? RGB(255, 255, 255) : effect.ink;
+			const DWORD r = GetRValue(ink), g = GetGValue(ink), b = GetBValue(ink);
+			for (size_t c = 0; c < cells; ++c)
+			{
+				const DWORD a = t_work[c];
+				if (!a) continue;
+				const DWORD under = t_pixels[c], keep = 255 - a;
+				const DWORD oa = a + (((under >> 24) * keep + 127) / 255);
+				const DWORD orr = (r * a + 127) / 255 + ((((under >> 16) & 0xFF) * keep + 127) / 255);
+				const DWORD og = (g * a + 127) / 255 + ((((under >> 8) & 0xFF) * keep + 127) / 255);
+				const DWORD ob = (b * a + 127) / 255 + (((under & 0xFF) * keep + 127) / 255);
+				t_pixels[c] = (std::min<DWORD>(oa, 255) << 24) | (std::min<DWORD>(orr, 255) << 16) | (std::min<DWORD>(og, 255) << 8) | std::min<DWORD>(ob, 255);
+			}
+
+			// Each kind is logged the first time only. A bit per kind, so glow and outline drawn in turn stay quiet.
+			const int kind = mode == 1 && ink != RGB(255, 255, 255) ? 4 : mode;
+			const unsigned bit = 1u << kind;
+			if (!(s_logged.fetch_or(bit) & bit))
+				Log(kind == 4 ? L"text glow: first glow drawn" : kind == 3 ? L"text outline: first outline drawn" : kind == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
 		}
-		else
-		{
-			// Frosted patch: a rounded rectangle around the text, 60 % white, with a one pixel soft edge.
-			const float x0 = left - 3.0f, x1 = right + 4.0f, y0 = top - 1.0f, y1 = bottom + 2.0f, radius = 4.0f;
-			for (int y = 0; y < height; ++y)
-				for (int x = 0; x < width; ++x)
-				{
-					const float px = x + 0.5f, py = y + 0.5f;
-					const float qx = std::max(std::max(x0 + radius - px, px - (x1 - radius)), 0.0f);
-					const float qy = std::max(std::max(y0 + radius - py, py - (y1 - radius)), 0.0f);
-					const float outside = std::sqrt(qx * qx + qy * qy) - radius;
-					const float cover = std::clamp(0.5f - outside, 0.0f, 1.0f);
-					alpha[y * width + x] = static_cast<BYTE>(std::lround(cover * 153));
-				}
-		}
-		const RECT place{ rect.left - Pad, rect.top - Pad, rect.right + Pad, rect.bottom + Pad };
-		{
-			WiderClip clip{ blendDc, place };
-			BlendInk(blendDc, place, alpha, width, height, mode == 1 ? ink : RGB(255, 255, 255));
-		}
-		static std::atomic<int> s_logged{};
-		const int kind = mode == 1 && ink != RGB(255, 255, 255) ? 3 : mode;
-		if (s_logged.exchange(kind) != kind) Log(kind == 3 ? L"text glow: first glow drawn" : kind == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
+
+		const RECT place{ rect.left - Pad + cx, rect.top - Pad + cy, rect.left - Pad + cx + cw, rect.top - Pad + cy + ch };
+		WiderClip clip{ blendDc, place };
+		BlendPixels(blendDc, place.left, place.top, t_pixels, cw, ch);
 	}
 
 	HRESULT WINAPI DrawThemeTextExHook(HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
@@ -842,8 +994,10 @@ namespace
 		const bool halo = mode && g_enabled && light;
 		const int glowStrength = g_glowStrength;
 		const bool glow = !light && glowStrength > 0 && g_enabled;
+		const int outlineStrength = g_outlineStrength;
+		const bool outline = !light && outlineStrength > 0 && g_enabled;
 		const bool recolor = (custom || second) && (g_inExplorer || g_enabled);
-		if ((halo || glow || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
+		if ((halo || glow || outline || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
 		{
 			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
 			if (!g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
@@ -868,16 +1022,31 @@ namespace
 					color = changed.crText;
 					replaced = true;
 				}
+				TextEffect effects[2]{};
+				int effectCount = 0;
 				if (halo && known && (replaced ? IsDarkInk(color) : IsNeutralDark(color)))
+					effects[effectCount++] = { mode, g_grayStrength, g_graySize, RGB(255, 255, 255) };
+				// Dark mode: the light text, or a colour the user picked, glows in its own colour like neon, and a black
+				// outline under the letters keeps it readable over bright backdrops. The glow goes under the outline.
+				else if ((glow || outline) && known && (replaced || IsPlainText(color, false)))
 				{
-					HDC under = fromBlurMica ? TargetUnder(dc) : nullptr;
-					DrawGreyBackdrop(mode, theme, dc, under ? under : dc, part, state, text, count, flags, *rect, g_grayStrength, g_graySize, RGB(255, 255, 255));
+					if (glow) effects[effectCount++] = { 1, glowStrength, g_glowSize, color & 0xFFFFFF };
+					if (outline) effects[effectCount++] = { 3, outlineStrength, g_outlineSize, RGB(0, 0, 0) };
 				}
-				// Dark mode: the light text, or a colour the user picked, glows in its own colour like neon.
-				else if (glow && known && (replaced || IsPlainText(color, false)))
+				if (effectCount)
 				{
+#ifdef FLUIDGLASS_LOGS
+					const uint64_t start = Ticks();
+#endif
 					HDC under = fromBlurMica ? TargetUnder(dc) : nullptr;
-					DrawGreyBackdrop(1, theme, dc, under ? under : dc, part, state, text, count, flags, *rect, glowStrength, g_glowSize, color & 0xFFFFFF);
+					DrawTextEffects(theme, dc, under ? under : dc, part, state, text, count, flags, *rect, effects, effectCount);
+#ifdef FLUIDGLASS_LOGS
+					const uint64_t drawn = Ticks();
+					EffectKey(text, count, *rect, effects[0].mode | effectCount << 4);
+					const HRESULT result = g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, replaced ? &changed : options);
+					EffectDrawn(drawn - start, Ticks() - drawn);
+					return result;
+#endif
 				}
 				if (replaced) return g_drawThemeTextEx(theme, dc, part, state, text, count, flags, rect, &changed);
 			}
@@ -1356,6 +1525,8 @@ namespace
 		};
 		const DWORD glowStrength = std::min<DWORD>(readDword(L"FluidGlassTextGlow", 0), 100);
 		const DWORD glowSize = std::clamp<DWORD>((std::min<DWORD>(readDword(L"FluidGlassTextGlowSize", 400), 100000) + 50) / 100, 1, 10);
+		const DWORD outlineStrength = std::min<DWORD>(readDword(L"FluidGlassTextOutline", 0), 100);
+		const DWORD outlineSize = std::clamp<DWORD>((std::min<DWORD>(readDword(L"FluidGlassTextOutlineSize", 100), 100000) + 50) / 100, 1, 2);
 		// BeginBufferedPaintHook needs this before the first label is drawn.
 		if (g_inExplorer && !g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
 		const DWORD textDark = ReadColor(L"FluidGlassTextColorDark"), textLight = ReadColor(L"FluidGlassTextColorLight");
@@ -1366,6 +1537,8 @@ namespace
 			(g_graySize.exchange(static_cast<int>(graySize)) != static_cast<int>(graySize)) |
 			(g_glowStrength.exchange(static_cast<int>(glowStrength)) != static_cast<int>(glowStrength)) |
 			(g_glowSize.exchange(static_cast<int>(glowSize)) != static_cast<int>(glowSize)) |
+			(g_outlineStrength.exchange(static_cast<int>(outlineStrength)) != static_cast<int>(outlineStrength)) |
+			(g_outlineSize.exchange(static_cast<int>(outlineSize)) != static_cast<int>(outlineSize)) |
 			(g_textColor[0].exchange(textDark) != textDark) |
 			(g_textColor[1].exchange(textLight) != textLight) |
 			(g_secondColor[0].exchange(secondDark) != secondDark) |
@@ -1373,12 +1546,14 @@ namespace
 #ifdef FLUIDGLASS_HEADER
 		if (g_inExplorer)
 			HeaderGlassSettings(enabled && grayText && grayStrength, static_cast<int>(grayStrength), static_cast<int>(graySize), textDark, textLight, secondDark, secondLight,
-				ReadColor(L"FluidGlassIconColorDark"), ReadColor(L"FluidGlassIconColorLight"), enabled ? static_cast<int>(glowStrength) : 0, static_cast<int>(glowSize));
+				ReadColor(L"FluidGlassIconColorDark"), ReadColor(L"FluidGlassIconColorLight"), enabled ? static_cast<int>(glowStrength) : 0, static_cast<int>(glowSize),
+				enabled ? static_cast<int>(outlineStrength) : 0, static_cast<int>(outlineSize));
 #endif
 		if (grayTextChanged)
 		{
-			wchar_t line[112];
-			swprintf_s(line, L"grey text mode %lu strength %lu size %lu, glow %lu size %lu", grayText, grayStrength, graySize, glowStrength, glowSize);
+			wchar_t line[144];
+			swprintf_s(line, L"grey text mode %lu strength %lu size %lu, glow %lu size %lu, outline %lu size %lu", grayText, grayStrength, graySize, glowStrength, glowSize,
+				outlineStrength, outlineSize);
 			Log(line);
 		}
 		if (g_enabled.exchange(enabled) != enabled)

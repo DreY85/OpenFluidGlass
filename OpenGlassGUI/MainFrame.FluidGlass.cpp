@@ -55,6 +55,8 @@ namespace OpenGlass
 				{ L"FluidGlassGrayTextSize", L"Halo size in light mode:", L"How far the text halo reaches past the letters. 3 is a tight outline, larger values give a wide soft glow like the Windows 7 title bars and can lighten nearby icons.", L"HaloSize", 1.f, 10.f, 1.f, 3.f, L"px" },
 				{ L"FluidGlassTextGlow", L"Text glow in dark mode:", L"When apps use dark mode, gives the light text in File Explorer a soft glow in its own color, like neon. 0 turns it off.", L"TextGlow", 0.f, 1.f, 0.01f, 0.f, L"" },
 				{ L"FluidGlassTextGlowSize", L"Glow size in dark mode:", L"How far the text glow reaches past the letters. Larger values give a wider, softer light.", L"GlowSize", 1.f, 10.f, 1.f, 4.f, L"px" },
+				{ L"FluidGlassTextOutline", L"Text outline in dark mode:", L"When apps use dark mode, draws a thin black outline around the light text in File Explorer so it stays readable over bright backdrops. 0 turns it off.", L"TextOutline", 0.f, 1.f, 0.05f, 0.f, L"" },
+				{ L"FluidGlassTextOutlineSize", L"Outline width in dark mode:", L"How thick the black outline around the text is.", L"OutlineSize", 1.f, 2.f, 1.f, 1.f, L"px" },
 			} },
 			{ L"Rim light", {
 				{ L"FluidGlassRim", L"Rim light:", L"How brightly the edge catches the light.", L"Rim", 0.f, 5.f, 0.05f, 1.f, L"" },
@@ -298,7 +300,8 @@ namespace OpenGlass
 		};
 		auto darkOnly = [](const FluidGlassParameter& parameter)
 		{
-			return wcscmp(parameter.name, L"FluidGlassTextGlow") == 0 || wcscmp(parameter.name, L"FluidGlassTextGlowSize") == 0;
+			return wcscmp(parameter.name, L"FluidGlassTextGlow") == 0 || wcscmp(parameter.name, L"FluidGlassTextGlowSize") == 0 ||
+				wcscmp(parameter.name, L"FluidGlassTextOutline") == 0 || wcscmp(parameter.name, L"FluidGlassTextOutlineSize") == 0;
 		};
 		for (const auto& group : c_fluidGlassGroups)
 		{

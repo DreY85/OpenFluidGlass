@@ -8,14 +8,16 @@
 - Each mode has a palette list with ten matched sets. Choosing one fills in all three colors at once.
 - Use System Colors puts every color back to the Windows default. Hover, pressed and disabled buttons keep their usual look.
 
-### Text glow
+### Text glow and outline
 
 - In dark mode, File Explorer text can glow softly in its own color, like neon. Text glow in dark mode sets how bright it is and Glow size how far it reaches. It works with the colors you pick too. It is off by default, and disabled buttons never glow.
+- In dark mode, File Explorer text can also get a thin, crisp black outline, like a stroke in a photo editor, so light text stays readable over bright backgrounds. Text outline in dark mode sets how dark it is and Outline width picks 1 or 2 pixels. It is off by default.
+- The glow, the outline and the light mode halo are drawn together in one pass and only around the letters, so scrolling large folders stays smooth with them on.
 
 ### App
 
 - Card titles are bold.
-- Readability in light mode, Text halo and Halo size are locked while Windows uses dark mode for apps, since they only change light mode. The two glow settings are locked in light mode the same way.
+- Readability in light mode, Text halo and Halo size are locked while Windows uses dark mode for apps, since they only change light mode. The glow and outline settings are locked in light mode the same way.
 
 ## 1.0.3
 

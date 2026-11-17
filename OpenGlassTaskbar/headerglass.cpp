@@ -76,6 +76,8 @@ namespace
 		DWORD text[2]{}, second[2]{}, icon[2]{};
 		// The dark mode glow in the text's own colour (FluidGlassTextGlow and its size): peak opacity in percent, 0 off.
 		int glow{}, glowSize{ 4 };
+		// The dark mode black outline (FluidGlassTextOutline and its size): opacity in percent, 0 off, width 1 or 2 pixels.
+		int outline{}, outlineSize{ 1 };
 		bool operator==(const Style&) const = default;
 	};
 
@@ -168,6 +170,13 @@ namespace
 		std::vector<muc::SpriteVisual> sprites;	// the glows, then the letters
 		muc::CompositionColorBrush ink{ nullptr };
 		muc::CompositionMaskBrush letters{ nullptr };
+		muc::CompositionBrush mask{ nullptr };	// the text's alpha mask, kept for an outline made later
+		// The outline: black copies of the letters set in rings around them, under the redrawn letters. A layer fades
+		// them as one, so where the copies overlap they do not add up to a darker core.
+		muc::LayerVisual strokeLayer{ nullptr };
+		std::vector<muc::SpriteVisual> strokes;
+		muc::CompositionMaskBrush strokeBrush{ nullptr };
+		int strokeSize{};
 		bool sized{};	// the sprites follow the element visual's size through an expression
 		// A shadow without a mask is cast by the whole sprite, a white box the size of the text's slot. The halo only
 		// shows once the text gave its mask.
@@ -538,6 +547,72 @@ namespace
 			if (halo.sized) return;
 			const winrt::Windows::Foundation::Numerics::float2 size{ static_cast<float>(text.ActualWidth()), static_cast<float>(text.ActualHeight()) };
 			for (auto& sprite : halo.sprites) sprite.Size(size);
+			for (auto& sprite : halo.strokes) sprite.Size(size);
+			if (halo.strokeLayer) halo.strokeLayer.Size({ size.x + 2 * StrokePad, size.y + 2 * StrokePad });
+		}
+
+		// The outline's copies reach two pixels past the slot, so their layer is a little larger than the text.
+		static constexpr float StrokePad = 3.f;
+
+		// The outline, made the first time the text needs one and made again when its width changes. Eight copies on a
+		// circle one pixel out, and sixteen more two pixels out for the wider one, give a round, crisp rim with no blur.
+		void BuildStroke(Halo& halo, const mux::Controls::TextBlock& text, int width)
+		{
+			const auto host = mux::Hosting::ElementCompositionPreview::GetElementVisual(text);
+			const auto compositor = host.Compositor();
+			if (halo.strokeLayer)
+			{
+				halo.root.Children().Remove(halo.strokeLayer);
+				halo.strokeLayer = nullptr;
+				halo.strokes.clear();
+				halo.strokeSize = 0;
+			}
+			if (!halo.strokeBrush)
+			{
+				halo.strokeBrush = compositor.CreateMaskBrush();
+				halo.strokeBrush.Source(compositor.CreateColorBrush(winrt::Windows::UI::Color{ 255, 0, 0, 0 }));
+				if (halo.mask) halo.strokeBrush.Mask(halo.mask);
+			}
+			const auto layer = compositor.CreateLayerVisual();
+			layer.Offset({ -StrokePad, -StrokePad, 0 });
+			for (int ring = 1; ring <= width; ++ring)
+			{
+				const int points = 8 * ring;
+				for (int index = 0; index < points; ++index)
+				{
+					const float angle = 6.2831853f * index / points;
+					const auto sprite = compositor.CreateSpriteVisual();
+					sprite.Brush(halo.strokeBrush);
+					sprite.Offset({ StrokePad + ring * std::cos(angle), StrokePad + ring * std::sin(angle), 0 });
+					layer.Children().InsertAtTop(sprite);
+					halo.strokes.push_back(sprite);
+				}
+			}
+			bool followed = false;
+			if (halo.sized)
+			{
+				try
+				{
+					const auto follow = compositor.CreateExpressionAnimation(L"host.Size");
+					follow.SetReferenceParameter(L"host", host);
+					for (auto& sprite : halo.strokes) sprite.StartAnimation(L"Size", follow);
+					const auto grow = compositor.CreateExpressionAnimation(L"host.Size + Vector2(6, 6)");
+					grow.SetReferenceParameter(L"host", host);
+					layer.StartAnimation(L"Size", grow);
+					followed = true;
+				}
+				catch (...) {}
+			}
+			halo.strokeLayer = layer;
+			halo.strokeSize = width;
+			if (!followed)
+			{
+				const winrt::Windows::Foundation::Numerics::float2 size{ static_cast<float>(text.ActualWidth()), static_cast<float>(text.ActualHeight()) };
+				for (auto& sprite : halo.strokes) sprite.Size(size);
+				layer.Size({ size.x + 2 * StrokePad, size.y + 2 * StrokePad });
+			}
+			// Above the glows and below the letters drawn again on top.
+			halo.root.Children().InsertBelow(layer, halo.sprites.back());
 		}
 
 		// The user's colours, before the halo, so the halo judges and redraws the colour the text ends up with.
@@ -598,7 +673,8 @@ namespace
 				winrt::Windows::UI::Color ink{};
 				const bool dark = m_style.on && DarkInk(text, ink);
 				// In dark mode the same visuals give the light text a glow of its own colour instead of a white halo.
-				const bool lit = !dark && m_style.glow > 0 && GlowInk(text, halo.tint != nullptr, ink);
+				// The black outline rides on the same visuals, under the redrawn letters.
+				const bool lit = !dark && (m_style.glow > 0 || m_style.outline > 0) && GlowInk(text, halo.tint != nullptr, ink);
 				if (!dark && !lit)
 				{
 					if (halo.root) halo.root.IsVisible(false);
@@ -616,6 +692,8 @@ namespace
 					}
 					for (size_t index = 0; index < HaloGlows; ++index) halo.sprites[index].Shadow().as<muc::DropShadow>().Mask(mask);
 					halo.letters.Mask(mask);
+					halo.mask = mask;
+					if (halo.strokeBrush) halo.strokeBrush.Mask(mask);
 					halo.masked = true;
 				}
 				if (!halo.masked) { halo.root.IsVisible(false); return; }
@@ -635,6 +713,32 @@ namespace
 					shadow.Color(shine);
 					shadow.BlurRadius(core ? coreBlur : size * 1.5f + 1.f);
 					shadow.Opacity(core ? coreOpacity : strength * 0.45f);
+					halo.sprites[index].IsVisible(strength > 0.f);
+				}
+				const int stroke = lit && m_style.outline > 0 ? m_style.outlineSize : 0;
+				if (stroke && stroke != halo.strokeSize && !m_strokeFailed)
+				{
+					try
+					{
+						BuildStroke(halo, text, stroke);
+						if (!m_strokeLogged) Log(stroke > 1 ? L"outline: first 2 px outline built" : L"outline: first 1 px outline built");
+						m_strokeLogged = true;
+					}
+					catch (...)
+					{
+						// Without the outline the glow and the letters still stand, so only the outline is given up.
+						try { if (halo.strokeLayer) halo.root.Children().Remove(halo.strokeLayer); } catch (...) {}
+						halo.strokeLayer = nullptr;
+						halo.strokes.clear();
+						halo.strokeSize = 0;
+						m_strokeFailed = true;
+						Log(L"outline threw");
+					}
+				}
+				if (halo.strokeLayer)
+				{
+					halo.strokeLayer.IsVisible(stroke > 0);
+					if (stroke) halo.strokeLayer.Opacity(m_style.outline / 100.f);
 				}
 				halo.root.IsVisible(true);
 			}
@@ -660,7 +764,7 @@ namespace
 
 		winrt::Microsoft::UI::Dispatching::DispatcherQueue m_queue;
 		std::atomic<bool> m_closed{};
-		bool m_flushQueued{}, m_paintFailed{};
+		bool m_flushQueued{}, m_paintFailed{}, m_strokeFailed{}, m_strokeLogged{};
 		int m_tintFailed{};
 		bool m_busy{};	// our own Foreground change, which the callback leaves alone
 		Style m_style;
@@ -748,17 +852,18 @@ void HeaderGlassStart(HMODULE)
 // Called by itemglass once a second; a change reaches every window on its own thread.
 // The halo only shows on dark text, so light mode needs no switch of its own. The glow only shows in dark mode.
 void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
-	int glow, int glowSize)
+	int glow, int glowSize, int outline, int outlineSize)
 {
 	std::lock_guard guard{ g_lock };
 	DWORD light = 1, lightSize = sizeof(light);
 	RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
-	const Style style{ on, strength, size, light != 0, { textDark, textLight }, { secondDark, secondLight }, { iconDark, iconLight }, glow, glowSize };
+	const Style style{ on, strength, size, light != 0, { textDark, textLight }, { secondDark, secondLight }, { iconDark, iconLight }, glow, glowSize,
+		outline, std::clamp(outlineSize, 1, 2) };
 	if (style == g_style) return;
 	g_style = style;
-	wchar_t colors[160];
-	swprintf_s(colors, L", text %08lX %08lX, secondary %08lX %08lX, icons %08lX %08lX, glow %d size %d", textDark, textLight, secondDark, secondLight, iconDark, iconLight,
-		glow, glowSize);
+	wchar_t colors[192];
+	swprintf_s(colors, L", text %08lX %08lX, secondary %08lX %08lX, icons %08lX %08lX, glow %d size %d, outline %d size %d", textDark, textLight, secondDark, secondLight,
+		iconDark, iconLight, glow, glowSize, outline, outlineSize);
 	Log(std::wstring(on ? L"on" : L"off") + L", strength " + std::to_wstring(strength) + L", size " + std::to_wstring(size) + (light ? L", light" : L", dark") + colors);
 	for (const auto& [thread, header] : g_threads)
 	{
