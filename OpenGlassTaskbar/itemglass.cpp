@@ -699,8 +699,9 @@ namespace
 	class WiderClip
 	{
 	public:
-		WiderClip(HDC dc, const RECT& place) : m_dc{ dc }
+		WiderClip(HDC dc, const RECT& place, bool widen) : m_dc{ dc }
 		{
+			if (!widen) return;
 			m_saved = CreateRectRgn(0, 0, 0, 0);
 			if (!m_saved) return;
 			if (GetClipRgn(dc, m_saved) != 1)
@@ -1026,7 +1027,27 @@ namespace
 		}
 
 		const RECT place{ rect.left - Pad + cx, rect.top - Pad + cy, rect.left - Pad + cx + cw, rect.top - Pad + cy + ch };
-		WiderClip clip{ blendDc, place };
+		// Under a paint buffer the target's clip is the list's own visible area, which leaves out the column header bar
+		// over a scrolled list. Widening it there brought back the effect of the row hidden under the header, as a dark
+		// ghost of its text. Only a direct draw is widened.
+		const bool direct = blendDc == dc;
+#ifdef FLUIDGLASS_LOGS
+		if (!direct)
+		{
+			// Which clip the target carries, against the text: the first few times only.
+			static std::atomic<int> s_clipLines{};
+			if (s_clipLines.fetch_add(1) < 12)
+			{
+				RECT box{};
+				const int kind = GetClipBox(blendDc, &box);
+				wchar_t line[200];
+				swprintf_s(line, L"effect under buffer: clip %ld,%ld-%ld,%ld kind %d, text %ld,%ld-%ld,%ld", box.left, box.top, box.right, box.bottom, kind,
+					rect.left, rect.top, rect.right, rect.bottom);
+				Log(line);
+			}
+		}
+#endif
+		WiderClip clip{ blendDc, place, direct };
 		BlendPixels(blendDc, place.left, place.top, t_pixels, cw, ch);
 	}
 
