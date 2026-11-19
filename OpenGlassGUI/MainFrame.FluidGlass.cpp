@@ -234,6 +234,10 @@ namespace OpenGlass
 		dialogs->SetToolTip(L"Loads the same glass into any app that opens a file dialog. It runs inside that app, so leave it off if an app or game complains about injected code.");
 		generalGroup->Add(dialogs, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
+		auto* clearLight = new wxCheckBox(panel, wxID_ANY, L"Clear glass in light mode");
+		clearLight->SetToolTip(L"Light mode apps get the same glass color as dark mode apps, without the milky white layer. Readability in light mode and the text halo and outline still apply.");
+		generalGroup->Add(clearLight, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
 		wxChoice* profile{};
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
@@ -533,7 +537,7 @@ namespace OpenGlass
 			row.value->SetLabel(FormatFluidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step));
 		};
 
-		auto load = [rows, enabled, items, dialogs, profile, showValue]()
+		auto load = [rows, enabled, items, dialogs, clearLight, profile, showValue]()
 		{
 			for (auto& row : *rows)
 			{
@@ -545,6 +549,7 @@ namespace OpenGlass
 			enabled->SetValue(ReadFluidGlassDword(L"FluidGlass", 0) != 0);
 			items->SetValue(ReadFluidGlassDword(L"FluidGlassItems", 1) != 0);
 			dialogs->SetValue(ReadFluidGlassDword(L"FluidGlassDialogs", 0) != 0);
+			clearLight->SetValue(ReadFluidGlassDword(L"FluidGlassClearLight", 0) != 0);
 			profile->SetSelection(static_cast<int>(std::min(ReadFluidGlassDword(L"FluidGlassProfile", 0), 2ul)));
 		};
 		load();
@@ -589,6 +594,13 @@ namespace OpenGlass
 		{
 			WriteFluidGlassDword(L"FluidGlassDialogs", dialogs->GetValue() ? 1 : 0);
 			SetStatusText(dialogs->GetValue() ? L"Dialog glass: on for dialogs opened from now on" : L"Dialog glass: off");
+		});
+
+		clearLight->Bind(wxEVT_CHECKBOX, [this, clearLight](wxCommandEvent&)
+		{
+			WriteFluidGlassDword(L"FluidGlassClearLight", clearLight->GetValue() ? 1 : 0);
+			NotifyFluidGlassChange();
+			SetStatusText(clearLight->GetValue() ? L"Clear glass in light mode: on" : L"Clear glass in light mode: off");
 		});
 
 		profile->Bind(wxEVT_CHOICE, [this, profile](wxCommandEvent&)

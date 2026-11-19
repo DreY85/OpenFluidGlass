@@ -397,7 +397,7 @@ D2D1_COLOR_F GlassKernel::GetSourceColor(bool active, bool light)
 {
 	if (Shared::g_type == Shared::GlassType::Blur)
 	{
-		const auto color = light ? GlassEngine::ForLightWindow(active ? Shared::g_color : Shared::g_colorInactive) : (active ? Shared::g_color : Shared::g_colorInactive);
+		const auto color = light && !Shared::g_fluidGlass.clearLight ? GlassEngine::ForLightWindow(active ? Shared::g_color : Shared::g_colorInactive) : (active ? Shared::g_color : Shared::g_colorInactive);
 		return
 		{
 			color.r,
@@ -408,7 +408,7 @@ D2D1_COLOR_F GlassKernel::GetSourceColor(bool active, bool light)
 	}
 	else if (Shared::g_type == Shared::GlassType::Aero)
 	{
-		const auto color = light ? GlassEngine::ForLightWindow(Shared::g_color) : Shared::g_color;
+		const auto color = light && !Shared::g_fluidGlass.clearLight ? GlassEngine::ForLightWindow(Shared::g_color) : Shared::g_color;
 		return
 		{
 			color.r,
@@ -502,7 +502,7 @@ GlassKernel::CRealizedGlassColorizationParameters GlassKernel::RealizeWindowColo
 		parameters.afterglowBalance = Shared::g_afterglowBalance * (1.f - baseColor.a);
 		parameters.blurBalance = Shared::g_blurBalance * (1.f - baseColor.a);
 
-		parameters.afterglow = light ? GlassEngine::ForLightWindow(Shared::g_afterglow) : Shared::g_afterglow;
+		parameters.afterglow = light && !Shared::g_fluidGlass.clearLight ? GlassEngine::ForLightWindow(Shared::g_afterglow) : Shared::g_afterglow;
 		parameters.color = srcColor;
 
 		float colorBalance = Shared::g_colorBalance * colorizationOpacity;
@@ -647,6 +647,7 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		fg.profile = std::min(GlassEngine::GetDwordFromRegistry(L"FluidGlassProfile", 0), 2ul);
 		fg.clarity = std::clamp(fgValue(L"FluidGlassClarity", 0.75f), 0.f, 1.f);
 		fg.softness = std::clamp(fgValue(L"FluidGlassSoftness", 1.5f), 0.f, 20.f);
+		fg.clearLight = GlassEngine::GetDwordFromRegistry(L"FluidGlassClearLight", 0) != 0;
 	}
 }
 

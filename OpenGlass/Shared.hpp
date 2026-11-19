@@ -42,6 +42,7 @@ namespace OpenGlass::Shared
 		float pillRadius{ 1000.f };	// corners of pill-marked glass (the floating taskbar); beyond half its height it is fully round
 		float clarity{ 0.75f }, softness{ 1.5f };
 		UINT profile{ 0 };
+		bool clearLight{ false };	// light windows keep the glass colour of dark ones, without the milky white lift
 	} g_fluidGlass{};
 
 	inline D2D1_COLOR_F g_color{};
