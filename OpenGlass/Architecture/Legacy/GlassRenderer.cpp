@@ -417,11 +417,12 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 
 			const auto realizedGlassColorizationParameters = GlassKernel::RealizeWindowColorization(
 				GlassKernel::GetBaseColor(Shared::IsTransparencyDisabled(), maximized),
-				GlassKernel::GetSourceColor(active, reinterpreter.GetIsLight()),
+				GlassKernel::GetSourceColor(active, reinterpreter.GetIsLight(), reinterpreter.UsesClearLightMaterial()),
 				GlassKernel::GetColorizationOpacity(active, maximized),
 				Shared::IsTransparencyDisabled(),
 				false,
-				reinterpreter.GetIsLight()
+				reinterpreter.GetIsLight(),
+				reinterpreter.UsesClearLightMaterial()
 			);
 			color = realizedGlassColorizationParameters.GetEffectivescRGBBlendColor(sdrBoost);
 			if (!colorSpaceIsScRGB)
@@ -447,6 +448,7 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 				g_params.optimization = Shared::g_blurOptimization;
 				g_params.pill = reinterpreter.GetIsPill();
 				g_params.light = reinterpreter.GetIsLight();
+				g_params.explorerClearPane = GlassKernel::ReadExplorerPane(reinterpreter.PaneSlot());
 				if (colorSpaceIsScRGB)
 				{
 					g_params.color = Color::sRGBToscRGB(realizedGlassColorizationParameters.color, sdrBoost);

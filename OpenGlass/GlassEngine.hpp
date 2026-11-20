@@ -41,10 +41,9 @@ namespace OpenGlass::GlassEngine
 	}
 
 	// Light windows draw dark text and icons, which a dark tint would hide. Behind them the tint keeps its hue but is
-	// lifted most of the way to white.
-	inline D2D1_COLOR_F ForLightWindow(D2D1_COLOR_F color) noexcept
+	// lifted toward white, by default most of the way (the Glass tint in light mode setting).
+	inline D2D1_COLOR_F ForLightWindow(D2D1_COLOR_F color, float lift = 0.9f) noexcept
 	{
-		constexpr float lift = 0.9f;
 		color.r += (1.f - color.r) * lift;
 		color.g += (1.f - color.g) * lift;
 		color.b += (1.f - color.b) * lift;

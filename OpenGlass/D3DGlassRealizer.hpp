@@ -28,6 +28,7 @@ namespace OpenGlass
 		D2D1_VECTOR_4F fgLook;		// dispersion, saturation, readability, glass-to-background gap
 		D2D1_VECTOR_4F fgRim;		// rim light strength, shine exponent, light angle in radians, bezel profile
 		D2D1_VECTOR_4F fgFull;		// uv per pixel of the full-resolution copy (x, y), clarity, softness in pixels
+		D2D1_VECTOR_4F fgClearPane;
 		D2D1_VECTOR_4F fgLimit;		// longest refraction shift in pixels, unused
 	};
 

@@ -597,9 +597,10 @@ begin
     'FluidGlass', 'FluidGlassIor', 'FluidGlassBezel', 'FluidGlassThickness', 'FluidGlassGap', 'FluidGlassScale',
     'FluidGlassChroma', 'FluidGlassSaturation', 'FluidGlassReadability', 'FluidGlassReadabilityLight', 'FluidGlassGrayText', 'FluidGlassGrayTextStrength', 'FluidGlassGrayTextSize', 'FluidGlassTextGlow', 'FluidGlassTextGlowSize', 'FluidGlassTextOutline', 'FluidGlassTextOutlineSize', 'FluidGlassTextOutlineLight', 'FluidGlassTextOutlineSizeLight', 'FluidGlassRim', 'FluidGlassShine',
     'FluidGlassLight', 'FluidGlassRadius', 'FluidGlassPillRadius', 'FluidGlassProfile', 'FluidGlassClarity',
-    'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs', 'FluidGlassClearLight',
+    'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs', 'FluidGlassClearLight', 'FluidGlassLightTint', 'FluidGlassGrain', 'FluidGlassGrainLight', 'FluidGlassShadowLift', 'FluidGlassExplorerClearPane', 'FluidGlassEngravedText', 'FluidGlassTitleTextStyle',
     'FluidGlassTextColorLight', 'FluidGlassTextColorDark', 'FluidGlassIconColorLight', 'FluidGlassIconColorDark',
-    'FluidGlassSecondaryTextColorLight', 'FluidGlassSecondaryTextColorDark'
+    'FluidGlassSecondaryTextColorLight', 'FluidGlassSecondaryTextColorDark',
+    'FluidGlassTaskbarCustom', 'FluidGlassTaskbarBlur', 'FluidGlassTaskbarReadabilityDark', 'FluidGlassTaskbarReadabilityLight'
   ];
 
   DeleteConfigValues(HKEY_CURRENT_USER, 'SOFTWARE\Microsoft\Windows\DWM', OpenGlassKeys);

@@ -164,16 +164,18 @@ void GlassFrameHandler::MyCGlassColorizationParameters_AdjustWindowColorization(
 	const auto active = (flag & 1) != 0;
 	const auto maximized = GlassKernel::g_window ? GlassKernel::g_window->TreatAsMaximized() : false;
 	const auto light = GlassKernel::IsLightWindow(GlassKernel::g_window ? GlassKernel::g_window->GetData() : nullptr);
+	const auto clear = light && GlassKernel::IsClearLightWindow(GlassKernel::g_window ? GlassKernel::g_window->GetData() : nullptr);
 
 	This->color = Color::ToArgb(
 		Color::scRGBTosRGB(
 			GlassKernel::RealizeWindowColorization(
 				GlassKernel::GetBaseColor(Shared::IsTransparencyDisabled(), maximized),
-				GlassKernel::GetSourceColor(active, light),
+				GlassKernel::GetSourceColor(active, light, clear),
 				GlassKernel::GetColorizationOpacity(active, maximized),
 				Shared::IsTransparencyDisabled(),
 				false,
-				light
+				light,
+				clear
 			).GetEffectivescRGBBlendColor(0.f),
 			0.f
 		)
@@ -297,6 +299,8 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateNCAreaBackground(uDWM::CTopLe
 		auto color = This->GetCaptionColorizationParameters()->getArgbcolor();
 		GlassKernel::AlphaChannelReinterpreter marker{ active, maximized };
 		marker.SetIsLight(GlassKernel::IsLightWindow(This->GetData()));
+		marker.SetIsClear(marker.GetIsLight() && GlassKernel::IsClearLightWindow(This->GetData()));
+		if (marker.GetIsLight()) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(This->GetData()));
 		color.a = marker.ToFloat();
 		RETURN_IF_FAILED(effectBrush->Update(1.0, color));
 	}
@@ -417,6 +421,8 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateClientBlur(uDWM::CTopLevelWin
 		auto color = This->GetCaptionColorizationParameters()->getArgbcolor();
 		GlassKernel::AlphaChannelReinterpreter marker{ active, maximized };
 		marker.SetIsLight(GlassKernel::IsLightWindow(This->GetData()));
+		marker.SetIsClear(marker.GetIsLight() && GlassKernel::IsClearLightWindow(This->GetData()));
+		if (marker.GetIsLight()) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(This->GetData()));
 		color.a = marker.ToFloat();
 		RETURN_IF_FAILED(effectBrush->Update(1.0, color));
 	}

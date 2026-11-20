@@ -6,7 +6,8 @@ minfloat4 main(PS_INPUT input) : SV_Target0
 
 	float4 fgBackground;
 	float3 fgRimLight;
-	LgCompose(input, fgBackground, fgRimLight);
+	LgPaneSample pane;
+	LgCompose(input, fgBackground, fgRimLight, pane);
 	background = minfloat4(fgBackground);
 
 	minfloat coverage = saturate(background.a);
@@ -17,8 +18,9 @@ minfloat4 main(PS_INPUT input) : SV_Target0
 
 	minfloat4 fallbackColor = minfloat4(fallback);
 	result += minfloat(1.0f - coverage) * fallbackColor.rgb;
-	return minfloat4(
-		result + minfloat3(fgRimLight),
+	minfloat4 material = minfloat4(
+		result + minfloat3(fgRimLight) + coverage * minfloat(LgGrain(input.pos.xy)),
 		coverage + minfloat(1.0f - coverage) * fallbackColor.a
-	) * minfloat(LgMask(input.pos.xy));
+	);
+	return minfloat4(lerp(float4(material), pane.backdrop, pane.amount)) * minfloat(LgMask(input.pos.xy));
 }

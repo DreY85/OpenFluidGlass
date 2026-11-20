@@ -655,18 +655,21 @@ HRESULT CD3DGlassRealizer::Render(
 		cbPS.color.z = params.color.b;
 		cbPS.color.w = params.color.a;
 	}
+	const auto& fg = Shared::g_fluidGlass;
+	const auto material = TaskbarGlass::Resolve(Shared::g_taskbarGlass, params.pill && fg.enabled, params.light,
+		{ fg.clarity, fg.softness, params.light ? -fg.readabilityLight : fg.readability, fg.shadowLift });
 	{
-		const auto& fg = Shared::g_fluidGlass;
 		cbPS.fgRect = { geometryBounds.left, geometryBounds.top, geometryBounds.right, geometryBounds.bottom };
 		// Pass 2 samples the quarter-width buffer: u advances by 0.25 / quarterWidth per back-buffer pixel.
 		// A pill takes its own corner radius; by default more than any glass can hold, which the shader clamps to half the height.
 		cbPS.fgTex = { 0.25f / static_cast<float>(quarterWidth), 1.f / static_cast<float>(backBufferDesc.Height), params.pill ? fg.pillRadius : fg.radius, fg.enabled ? 1.f : 0.f };
 		cbPS.fgOptics = { fg.ior, fg.bezel, fg.thickness, fg.scale };
 		// Negative readability tells the shader the text is dark, so it lightens dark backdrops instead.
-		cbPS.fgLook = { fg.chroma, fg.saturation, params.light ? -fg.readabilityLight : fg.readability, fg.gap };
+		cbPS.fgLook = { fg.chroma, fg.saturation, material.readability, fg.gap };
 		cbPS.fgRim = { fg.rim, fg.shine, fg.lightDegrees * 3.14159265f / 180.f, static_cast<float>(fg.profile) };
-		cbPS.fgLimit = { GetFluidGlassReach(), params.pill ? 1.f : 0.f, 0.f, 0.f };
-		cbPS.fgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), fg.enabled ? fg.clarity : 0.f, fg.softness };
+		cbPS.fgClearPane = params.explorerClearPane;
+		cbPS.fgLimit = { GetFluidGlassReach(), params.pill ? 1.f : 0.f, fg.enabled ? (params.light ? fg.grainLight : fg.grain) : 0.f, material.shadowLift ? 1.f : 0.f };
+		cbPS.fgFull = { 1.f / static_cast<float>(backBufferDesc.Width), 1.f / static_cast<float>(backBufferDesc.Height), fg.enabled ? material.clarity : 0.f, material.blur };
 	}
 	if (memcmp(&m_cbPS, &cbPS, sizeof(cbPS)) != 0)
 	{
@@ -716,7 +719,9 @@ HRESULT CD3DGlassRealizer::Render(
 	//
 	// https://github.com/ALTaleX531/OpenGlass/issues/257#issuecomment-3856945555
 	ID3D11ShaderResourceView* pass1InputSRV = backBufferSRV;
-	const bool fluidGlassSharp = Shared::g_fluidGlass.enabled && Shared::g_fluidGlass.clarity > 0.f;
+	const bool hasClearPane = params.light && params.explorerClearPane.z > params.explorerClearPane.x &&
+		params.explorerClearPane.w > params.explorerClearPane.y;
+	const bool fluidGlassSharp = fg.enabled && (material.clarity > 0.f || hasClearPane);
 	if (!pass1InputSRV || fluidGlassSharp)
 	{
 		RETURN_IF_FAILED(
@@ -745,17 +750,27 @@ HRESULT CD3DGlassRealizer::Render(
 
 		if (fluidGlassSharp)
 		{
-			// Refraction samples the sharp copy anywhere under the glass, not only inside the
-			// rectangles being redrawn, so copy the whole glass plus the blur reach.
-			const float margin = GetBlurExpansion();
-			const auto copyRegionRect = RectF::ToRectU(
-				D2D1::RectF(
-					std::max(drawingWorldBounds.left - margin, 0.f),
-					std::max(drawingWorldBounds.top - margin, 0.f),
-					std::min(drawingWorldBounds.right + margin, static_cast<float>(backBufferDesc.Width)),
-					std::min(drawingWorldBounds.bottom + margin, static_cast<float>(backBufferDesc.Height))
-				)
-			);
+			const float margin = std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f) + GetFluidGlassReach() + std::ceil(material.blur) + 2.f;
+			D2D1_RECT_F copyBounds{
+				std::max(drawingWorldBounds.left - margin, 0.f),
+				std::max(drawingWorldBounds.top - margin, 0.f),
+				std::min(drawingWorldBounds.right + margin, static_cast<float>(backBufferDesc.Width)),
+				std::min(drawingWorldBounds.bottom + margin, static_cast<float>(backBufferDesc.Height))
+			};
+			// With a direct blur input and zero clarity, only the clear pane samples this texture.
+			if (backBufferSRV && hasClearPane && material.clarity == 0.f)
+			{
+				const auto& pane = params.explorerClearPane;
+				const float w = geometryBounds.right - geometryBounds.left;
+				const float h = geometryBounds.bottom - geometryBounds.top;
+				const float guard = GetFluidGlassReach() + 1.f; // bilinear footprint beyond the clamped displacement
+				copyBounds.left = std::max(copyBounds.left, geometryBounds.left + pane.x * w - guard);
+				copyBounds.top = std::max(copyBounds.top, geometryBounds.top + pane.y * h - guard);
+				copyBounds.right = std::min(copyBounds.right, geometryBounds.left + pane.z * w + guard);
+				copyBounds.bottom = std::min(copyBounds.bottom, geometryBounds.top + pane.w * h + guard);
+			}
+			const auto copyRegionRect = copyBounds.right > copyBounds.left && copyBounds.bottom > copyBounds.top
+				? RectF::ToRectU(copyBounds) : D2D1_RECT_U{};
 			if (copyRegionRect.right > copyRegionRect.left && copyRegionRect.bottom > copyRegionRect.top)
 			{
 				Util::CopyTextureRegion(
@@ -936,7 +951,9 @@ float CD3DGlassRealizer::GetBlurExpansion()
 	// Fluid Glass samples up to its reach plus the blur disc away, so DWM must redraw that much around changes.
 	if (Shared::g_fluidGlass.enabled)
 	{
-		return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f) + GetFluidGlassReach() + std::ceil(Shared::g_fluidGlass.softness) + 2.f;
+		const auto& tray = Shared::g_taskbarGlass;
+		const float radius = tray.custom ? std::max(Shared::g_fluidGlass.softness, tray.blur100 / 100.f) : Shared::g_fluidGlass.softness;
+		return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f) + GetFluidGlassReach() + std::ceil(radius) + 2.f;
 	}
 	// Keep the existing conservative capture margin; the pass-local DWM kernel radius is ceil(σ × 2.3).
 	return std::ceil(BlurSettings::Direct3DStandardDeviation * 2.3f + 0.5f);

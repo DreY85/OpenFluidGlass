@@ -1021,11 +1021,12 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 				color.a = 1.f,
 				realizedGlassColorizationParameters = GlassKernel::RealizeWindowColorization(
 					GlassKernel::GetBaseColor(Shared::IsTransparencyDisabled(), maximized),
-					GlassKernel::GetSourceColor(active, reinterpreter.GetIsLight()),
+					GlassKernel::GetSourceColor(active, reinterpreter.GetIsLight(), reinterpreter.UsesClearLightMaterial()),
 					GlassKernel::GetColorizationOpacity(active, maximized),
 					Shared::IsTransparencyDisabled(),
 					false,
-					reinterpreter.GetIsLight()
+					reinterpreter.GetIsLight(),
+					reinterpreter.UsesClearLightMaterial()
 				),
 				Shared::IsTransparencyDisabled() ||
 				Shared::IsGlassFullyOpaque(

@@ -56,6 +56,25 @@ namespace OpenGlass::GlassKernel
 		{
 			m_flag.set(4, value);
 		}
+		// Clear light glass: a light File Explorer window without the white lift (GlassKernel::IsClearLightWindow).
+		bool GetIsClear() const
+		{
+			return m_flag.test(5);
+		}
+		bool UsesClearLightMaterial() const
+		{
+			return GetIsClear() || (GetIsPill() && Shared::g_useD3DRendering && Shared::g_fluidGlass.enabled && Shared::g_taskbarGlass.custom);
+		}
+		void SetIsClear(bool value)
+		{
+			m_flag.set(5, value);
+		}
+
+		unsigned PaneSlot() const { return static_cast<unsigned>(m_flag.to_ulong() >> 6); }
+		void SetPaneSlot(unsigned slot)
+		{
+			m_flag = (m_flag.to_ulong() & 63u) | ((slot & 511u) << 6);
+		}
 
 		float ToFloat() const
 		{
@@ -95,15 +114,20 @@ namespace OpenGlass::GlassKernel
 	};
 	float GetColorizationOpacity(bool active, bool maximized);
 	D2D1_COLOR_F GetBaseColor(bool opaque, bool maximized);
+	unsigned ExplorerPaneSlot(const uDWM::CWindowData* data);
+	D2D1_VECTOR_4F ReadExplorerPane(unsigned slot);
 	bool IsLightWindow(const uDWM::CWindowData* data);
-	D2D1_COLOR_F GetSourceColor(bool active, bool light);
+	bool IsClearLightWindow(const uDWM::CWindowData* data);
+	float GetLightLift(bool light, bool clear);
+	D2D1_COLOR_F GetSourceColor(bool active, bool light, bool clear = false);
 	CRealizedGlassColorizationParameters RealizeWindowColorization(
 		const D2D1_COLOR_F& baseColor,
 		const D2D1_COLOR_F& srcColor,
 		float colorizationOpacity,
 		bool opaque,
 		bool livePreview,
-		bool light
+		bool light,
+		bool clear = false
 	);
 	float GetAdjustedReflectionIntensity(bool active, bool maximized);
 

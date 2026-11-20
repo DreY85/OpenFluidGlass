@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "MsstyleInternals.hpp"
 #include "GlassKernel.hpp"
+#include "ExplorerPaneRect.hpp"
+#include <atomic>
 #include "uDwmProjection.hpp"
 #include "Shared.hpp"
 #include "dwmcoreProjection.hpp"
@@ -389,15 +391,65 @@ D2D1_COLOR_F GlassKernel::GetBaseColor(bool opaque, bool maximized)
 
 	return color;
 }
+namespace
+{
+	// The material brush carries a small window token. No accessibility calls on the render path.
+	// Bit 15 of the marker would push the encoded alpha above 1.0.
+	std::atomic<HWND> s_paneWindows[512]{};
+	SRWLOCK s_paneLock = SRWLOCK_INIT;
+}
+unsigned GlassKernel::ExplorerPaneSlot(const uDWM::CWindowData* data)
+{
+	if (!Shared::g_fluidGlass.explorerClearPane || !Shared::g_fluidGlass.shadowLift || !data) return 0;
+	const HWND window = data->GetHwnd();
+	wchar_t name[32]{};
+	if (!window || !GetClassNameW(window, name, ARRAYSIZE(name)) || wcscmp(name, L"CabinetWClass")) return 0;
+	AcquireSRWLockExclusive(&s_paneLock);
+	auto unlock = wil::scope_exit([] { ReleaseSRWLockExclusive(&s_paneLock); });
+	unsigned freeSlot = 0;
+	for (unsigned i = 1; i < ARRAYSIZE(s_paneWindows); ++i)
+	{
+		const HWND old = s_paneWindows[i].load(std::memory_order_relaxed);
+		if (old == window) return i;
+		if (!old) { if (!freeSlot) freeSlot = i; break; }
+		if (!freeSlot && !IsWindow(old)) freeSlot = i;
+	}
+	if (freeSlot) s_paneWindows[freeSlot].store(window);
+	return freeSlot;
+}
+D2D1_VECTOR_4F GlassKernel::ReadExplorerPane(unsigned slot)
+{
+	if (!slot || slot >= ARRAYSIZE(s_paneWindows) || !Shared::g_fluidGlass.explorerClearPane || !Shared::g_fluidGlass.shadowLift) return {};
+	const auto window = s_paneWindows[slot].load();
+	if (!window) return {};
+	const auto packed = static_cast<std::uint32_t>(reinterpret_cast<ULONG_PTR>(GetPropW(window, ExplorerPane::Property)));
+	const auto r = ExplorerPane::Unpack(packed);
+	return { r.left, r.top, r.right, r.bottom };
+}
 bool GlassKernel::IsLightWindow(const uDWM::CWindowData* data)
 {
 	return Shared::g_appsUseLightTheme && !(data && data->UsesDarkModeColors());
 }
-D2D1_COLOR_F GlassKernel::GetSourceColor(bool active, bool light)
+// File Explorer draws its own halo, outline and text colours on the glass, so with Clear glass for File Explorer its
+// light windows can skip the white lift. Other apps and the shell (Start) keep it, because their dark text has no halo.
+bool GlassKernel::IsClearLightWindow(const uDWM::CWindowData* data)
+{
+	if (!Shared::g_fluidGlass.clearLight || !data || !data->GetHwnd())
+	{
+		return false;
+	}
+	WCHAR className[16]{};
+	return GetClassNameW(data->GetHwnd(), className, ARRAYSIZE(className)) && !wcscmp(className, L"CabinetWClass");
+}
+float GlassKernel::GetLightLift(bool light, bool clear)
+{
+	return light ? (clear ? 0.f : Shared::g_fluidGlass.lightTint) : 0.f;
+}
+D2D1_COLOR_F GlassKernel::GetSourceColor(bool active, bool light, bool clear)
 {
 	if (Shared::g_type == Shared::GlassType::Blur)
 	{
-		const auto color = light && !Shared::g_fluidGlass.clearLight ? GlassEngine::ForLightWindow(active ? Shared::g_color : Shared::g_colorInactive) : (active ? Shared::g_color : Shared::g_colorInactive);
+		const auto color = GlassEngine::ForLightWindow(active ? Shared::g_color : Shared::g_colorInactive, GetLightLift(light, clear));
 		return
 		{
 			color.r,
@@ -408,7 +460,7 @@ D2D1_COLOR_F GlassKernel::GetSourceColor(bool active, bool light)
 	}
 	else if (Shared::g_type == Shared::GlassType::Aero)
 	{
-		const auto color = light && !Shared::g_fluidGlass.clearLight ? GlassEngine::ForLightWindow(Shared::g_color) : Shared::g_color;
+		const auto color = GlassEngine::ForLightWindow(Shared::g_color, GetLightLift(light, clear));
 		return
 		{
 			color.r,
@@ -475,7 +527,8 @@ GlassKernel::CRealizedGlassColorizationParameters GlassKernel::RealizeWindowColo
 	float colorizationOpacity,
 	bool opaque,
 	bool livePreview,
-	bool light
+	bool light,
+	bool clear
 )
 {
 	CRealizedGlassColorizationParameters parameters{};
@@ -502,7 +555,7 @@ GlassKernel::CRealizedGlassColorizationParameters GlassKernel::RealizeWindowColo
 		parameters.afterglowBalance = Shared::g_afterglowBalance * (1.f - baseColor.a);
 		parameters.blurBalance = Shared::g_blurBalance * (1.f - baseColor.a);
 
-		parameters.afterglow = light && !Shared::g_fluidGlass.clearLight ? GlassEngine::ForLightWindow(Shared::g_afterglow) : Shared::g_afterglow;
+		parameters.afterglow = GlassEngine::ForLightWindow(Shared::g_afterglow, GetLightLift(light, clear));
 		parameters.color = srcColor;
 
 		float colorBalance = Shared::g_colorBalance * colorizationOpacity;
@@ -648,6 +701,14 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		fg.clarity = std::clamp(fgValue(L"FluidGlassClarity", 0.75f), 0.f, 1.f);
 		fg.softness = std::clamp(fgValue(L"FluidGlassSoftness", 1.5f), 0.f, 20.f);
 		fg.clearLight = GlassEngine::GetDwordFromRegistry(L"FluidGlassClearLight", 0) != 0;
+		fg.lightTint = std::clamp(fgValue(L"FluidGlassLightTint", 0.9f), 0.f, 0.9f);
+		fg.grain = std::clamp(fgValue(L"FluidGlassGrain", 0.f), 0.f, 1.f);
+		fg.grainLight = std::clamp(fgValue(L"FluidGlassGrainLight", 0.f), 0.f, 1.f);
+		fg.explorerClearPane = GlassEngine::GetDwordFromRegistry(L"FluidGlassExplorerClearPane", 0) != 0;
+		fg.shadowLift = GlassEngine::GetDwordFromRegistry(L"FluidGlassShadowLift", 0) != 0;
+		Shared::g_taskbarGlass = TaskbarGlass::Load([](PCWSTR name, DWORD fallback) {
+			return GlassEngine::GetDwordFromRegistry(name, fallback);
+		});
 	}
 }
 

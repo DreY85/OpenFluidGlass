@@ -2,6 +2,7 @@
 #include "MainFrame.hpp"
 #include "UiControls.hpp"
 #include "DwmSettings.hpp"
+#include "TaskbarGlass.hpp"
 #include "ShellLaunch.hpp"
 #include "WindowsBuild.hpp"
 #include "..\OpenGlassTaskbar\pillshare.h"
@@ -93,6 +94,89 @@ namespace OpenGlass
 			wxSlider* control;
 			wxStaticText* value;
 		};
+
+		std::function<void()> AddTaskbarGlassControls(wxWindow* panel, wxSizer* page)
+		{
+			auto* card = ModernTheme::MakeCard(panel, L"Taskbar glass");
+			auto* custom = new wxCheckBox(panel, wxID_ANY, L"Use separate blur and readability");
+			custom->SetToolTip(L"Adjust the glass behind the apps, system tray and clock on the floating taskbar.");
+			card->Add(custom, 0, wxALL, 4);
+
+			wil::unique_hkey user, machine;
+			RegOpenKeyExW(HKEY_CURRENT_USER, DwmSettings::g_keyPath, 0, KEY_READ, user.put());
+			RegOpenKeyExW(HKEY_LOCAL_MACHINE, DwmSettings::g_keyPath, 0, KEY_READ, machine.put());
+			const auto saved = TaskbarGlass::Load([&](PCWSTR name, DWORD fallback) {
+				return DwmSettings::GetDword(user.get(), machine.get(), name, fallback);
+			});
+			auto write = [](PCWSTR name, DWORD value) {
+				RegSetKeyValueW(HKEY_CURRENT_USER, DwmSettings::g_keyPath, name, REG_DWORD, &value, sizeof(value));
+			};
+			auto notify = [] { DwmSettings::NotifyChange(FindWindowW(L"Dwm", nullptr), DwmSettings::UpdateType::Backdrop); };
+			auto* timer = PanelTimer(panel);
+			auto pending = std::make_shared<bool>(false);
+			panel->Bind(wxEVT_TIMER, [pending, notify](wxTimerEvent&) { *pending = false; notify(); }, timer->GetId());
+			// Persist each edit immediately. Coalesce DWM notifications during a drag and flush the last one on close.
+			panel->Bind(wxEVT_DESTROY, [panel, pending, notify](wxWindowDestroyEvent& e) {
+				if (e.GetEventObject() == panel && *pending) notify();
+				e.Skip();
+			});
+			struct Row { wxSlider* slider; wxStaticText* label; wxStaticText* value; };
+			std::vector<Row> rows;
+			auto add = [&](PCWSTR label, PCWSTR key, int initial, bool blur) {
+				auto* line = new wxBoxSizer(wxHORIZONTAL);
+				auto* name = new wxStaticText(panel, wxID_ANY, label, wxDefaultPosition, panel->FromDIP(wxSize(160, -1)));
+				const int step = blur ? 50 : 1;
+				auto* slider = new NativeSlider(panel, wxID_ANY, (initial + step / 2) / step, 0, blur ? 40 : 100);
+				slider->SetName(label);
+				auto format = [blur](int position) { return blur ? wxString::Format(L"%.1f px", position / 2.) : wxString::Format(L"%d%%", position); };
+				auto* value = new wxStaticText(panel, wxID_ANY, format(slider->GetValue()), wxDefaultPosition, panel->FromDIP(wxSize(64, -1)), wxALIGN_RIGHT | wxST_NO_AUTORESIZE);
+				line->Add(name, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+				line->Add(slider, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+				line->Add(value, 0, wxALIGN_CENTER_VERTICAL);
+				card->Add(line, 0, wxEXPAND | wxALL, 4);
+				rows.push_back({ slider, name, value });
+				slider->Bind(wxEVT_SLIDER, [=](wxCommandEvent&) {
+					value->SetLabel(format(slider->GetValue()));
+					write(key, static_cast<DWORD>(step * slider->GetValue()));
+					*pending = true;
+					if (!timer->IsRunning()) timer->StartOnce(90);
+				});
+			};
+			add(L"Backdrop blur", TaskbarGlass::BlurKey, saved.blur100, true);
+			add(L"Readability in Light", TaskbarGlass::LightKey, saved.light, false);
+			add(L"Readability in Dark", TaskbarGlass::DarkKey, saved.dark, false);
+			auto enable = [rows](bool on) {
+				for (const auto& row : rows) { row.label->Enable(on); row.slider->Enable(on); row.value->Enable(on); }
+			};
+			custom->SetValue(saved.custom);
+			enable(saved.custom);
+			custom->Bind(wxEVT_CHECKBOX, [=](wxCommandEvent&) {
+				write(TaskbarGlass::CustomKey, custom->GetValue());
+				enable(custom->GetValue());
+				timer->Stop();
+				*pending = false;
+				notify();
+			});
+			page->Add(card, 0, wxEXPAND | wxALL, 2);
+			return [=] {
+				const TaskbarGlass::Settings defaults;
+				write(TaskbarGlass::CustomKey, 0);
+				write(TaskbarGlass::BlurKey, defaults.blur100);
+				write(TaskbarGlass::LightKey, defaults.light);
+				write(TaskbarGlass::DarkKey, defaults.dark);
+				custom->SetValue(false);
+				rows[0].slider->SetValue(defaults.blur100 / 50);
+				rows[0].value->SetLabel(wxString::Format(L"%.1f px", defaults.blur100 / 100.));
+				rows[1].slider->SetValue(defaults.light);
+				rows[1].value->SetLabel(wxString::Format(L"%u%%", defaults.light));
+				rows[2].slider->SetValue(defaults.dark);
+				rows[2].value->SetLabel(wxString::Format(L"%u%%", defaults.dark));
+				enable(false);
+				timer->Stop();
+				*pending = false;
+				notify();
+			};
+		}
 	}
 
 	void MainFrame::CreateTaskbarTab()
@@ -135,6 +219,17 @@ namespace OpenGlass
 		enabled->SetToolTip(L"Turning it off brings the normal taskbar back at once.");
 		generalGroup->Add(enabled, 0, wxALL, 4);
 
+		auto* trayTextStyle = new wxChoice(panel, wxID_ANY);
+		trayTextStyle->Append(L"Standard");
+		trayTextStyle->Append(L"Engraved");
+		trayTextStyle->Append(L"Etched");
+		trayTextStyle->SetName(L"Tray text style");
+		trayTextStyle->SetToolTip(L"Style the clock, date and system icon glyphs on the floating taskbar.");
+		auto* textStyleRow = new wxBoxSizer(wxHORIZONTAL);
+		textStyleRow->Add(new wxStaticText(panel, wxID_ANY, L"Tray text style", wxDefaultPosition, FromDIP(wxSize(160, -1))), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+		textStyleRow->Add(trayTextStyle, 0, wxALIGN_CENTER_VERTICAL);
+		generalGroup->Add(textStyleRow, 0, wxEXPAND | wxALL, 4);
+
 		wxStaticText* status{};
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
@@ -145,6 +240,9 @@ namespace OpenGlass
 		}
 		sizer->Add(generalGroup, 0, wxEXPAND | wxALL, 2);
 
+		// Only the Legacy renderer currently identifies floating taskbar pills during composition.
+		std::function<void()> resetGlass;
+		if (WindowsBuild() < 28000) resetGlass = AddTaskbarGlassControls(panel, sizer);
 		auto* pillsGroup = ModernTheme::MakeCard(panel, L"Pills");
 		auto rows = std::make_shared<std::vector<TaskbarSliderRow>>();
 		for (const auto& slider : c_taskbarSliders)
@@ -251,7 +349,7 @@ namespace OpenGlass
 			}
 		};
 
-		auto load = [rows, enabled, join, animate, startGlass, corners, cornersValue, showValue, findGapRow, showStatus]()
+		auto load = [rows, enabled, trayTextStyle, join, animate, startGlass, corners, cornersValue, showValue, findGapRow, showStatus]()
 		{
 			for (auto& row : *rows)
 			{
@@ -261,6 +359,7 @@ namespace OpenGlass
 			corners->SetValue(ReadCornerPosition());
 			cornersValue->SetLabel(FormatCornerPosition(corners->GetValue()));
 			enabled->SetValue(ReadPillSetting(PillEnabled) != 0);
+			trayTextStyle->SetSelection(static_cast<int>(ReadPillSetting(PillTrayTextStyle)));
 			join->SetValue(ReadPillSetting(PillJoin) != 0);
 			animate->SetValue(ReadPillSetting(PillAnimate) != 0);
 			startGlass->SetValue(ReadPillSetting(PillStartGlass) != 0);
@@ -271,6 +370,12 @@ namespace OpenGlass
 			showStatus();
 		};
 		load();
+
+		trayTextStyle->Bind(wxEVT_CHOICE, [this, trayTextStyle](wxCommandEvent&)
+		{
+			WriteTaskbarSetting(PillTrayTextStyle, static_cast<DWORD>(trayTextStyle->GetSelection()));
+			SetStatusText(wxString(L"Tray text style: ") + trayTextStyle->GetStringSelection());
+		});
 
 		for (auto& row : *rows)
 		{
@@ -363,16 +468,18 @@ namespace OpenGlass
 			showStatus();
 		});
 
-		resetButton->Bind(wxEVT_BUTTON, [this, rows, load](wxCommandEvent&)
+		resetButton->Bind(wxEVT_BUTTON, [this, rows, resetGlass, load](wxCommandEvent&)
 		{
 			for (const auto& row : *rows)
 			{
 				WriteTaskbarSetting(*row.slider->setting, row.slider->setting->fallback);
 			}
 			WriteTaskbarSetting(PillJoin, PillJoin.fallback);
+			WriteTaskbarSetting(PillTrayTextStyle, PillTrayTextStyle.fallback);
 			WriteTaskbarSetting(PillAnimate, PillAnimate.fallback);
 			WriteTaskbarSetting(PillStartGlass, PillStartGlass.fallback);
 			WriteCornerPosition(c_roundCorners);
+			if (resetGlass) resetGlass();
 			load();
 			SetStatusText(L"Taskbar: defaults applied");
 		});

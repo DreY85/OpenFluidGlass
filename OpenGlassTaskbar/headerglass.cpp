@@ -10,6 +10,7 @@
 // and passes every call on unchanged.
 #include <windows.h>
 #include <ocidl.h>
+#include "engraving.h"
 #include <xamlOM.h>
 #undef GetCurrentTime	// windows.h macro clashes with C++/WinRT
 #include <algorithm>
@@ -80,6 +81,7 @@ namespace
 		int outline{}, outlineSize{ 1 };
 		// The light mode white outline (FluidGlassTextOutlineLight and its size), the same way.
 		int outlineLight{}, outlineLightSize{ 1 };
+		int engraved{};
 		bool operator==(const Style&) const = default;
 	};
 
@@ -677,11 +679,24 @@ namespace
 				winrt::Windows::UI::Color ink{};
 				// Light mode: the dark text gets the white halo, a white outline, or both.
 				const bool whiteStroke = m_style.light && m_style.outlineLight > 0;
-				const bool dark = (m_style.on || whiteStroke) && DarkInk(text, ink);
+				bool etched = false;
+				const bool lightText = text.ActualTheme() == mux::ElementTheme::Light;
+				if (m_style.engraved && !halo.glyph)
+				{
+					const auto owner = halo.owner.get();
+					const auto brush = text.Foreground().try_as<mux::Media::SolidColorBrush>();
+					if (brush && (!owner || owner.IsEnabled()))
+					{
+						ink = brush.Color();
+						ink.A = static_cast<uint8_t>(ink.A * std::clamp(brush.Opacity(), 0.0, 1.0));
+						etched = ink.A >= 0x80 && (halo.tint || PlainInk(ink, lightText));
+					}
+				}
+				const bool dark = !etched && (m_style.on || whiteStroke) && DarkInk(text, ink);
 				// In dark mode the same visuals give the light text a glow of its own colour instead of a white halo.
 				// The black outline rides on the same visuals, under the redrawn letters.
-				const bool lit = !dark && (m_style.glow > 0 || m_style.outline > 0) && GlowInk(text, halo.tint != nullptr, ink);
-				if (!dark && !lit)
+				const bool lit = !etched && !dark && (m_style.glow > 0 || m_style.outline > 0) && GlowInk(text, halo.tint != nullptr, ink);
+				if (!etched && !dark && !lit)
 				{
 					if (halo.root) halo.root.IsVisible(false);
 					return;
@@ -704,6 +719,32 @@ namespace
 				}
 				if (!halo.masked) { halo.root.IsVisible(false); return; }
 				halo.ink.Color(ink);
+				if (etched)
+				{
+					// A single sharp translated mask aligned to one physical pixel: under the letters in light mode,
+					// above them in dark mode.
+					const bool darkInk = Engraving::LightEdge(ink.R, ink.G, ink.B);
+					const auto root = text.XamlRoot();
+					const float scale = root ? static_cast<float>(root.RasterizationScale()) : 1.f;
+					const float pixel = 1.f / (std::max)(1.f, scale);
+					const bool twoEdges = m_style.engraved == 2;
+					for (size_t i = 0; i < HaloGlows; ++i)
+					{
+						const bool active = i == 0 || (twoEdges && i == 1);
+						halo.sprites[i].IsVisible(active);
+						if (!active) continue;
+						const bool white = twoEdges ? i == 1 : darkInk;
+						const auto shadow = halo.sprites[i].Shadow().as<muc::DropShadow>();
+						shadow.Color(white ? winrt::Windows::UI::Color{ 255, 255, 255, 255 } : winrt::Windows::UI::Color{ 255, 0, 0, 0 });
+						shadow.BlurRadius(0.f);
+						shadow.Offset({ 0.f, (twoEdges ? white : lightText) ? pixel : -pixel, 0.f });
+						const int strength = twoEdges ? (white ? Engraving::LowerStrength(darkInk, m_style.light) : Engraving::UpperStrength(darkInk)) : Engraving::Strength;
+						shadow.Opacity(strength / 100.f);
+					}
+					if (halo.strokeLayer) halo.strokeLayer.IsVisible(false);
+					halo.root.IsVisible(true);
+					return;
+				}
 				const float strength = (lit ? m_style.glow : m_style.on ? m_style.strength : 0) / 100.f, size = static_cast<float>(lit ? m_style.glowSize : m_style.size);
 				const winrt::Windows::UI::Color shine = lit ? winrt::Windows::UI::Color{ 255, ink.R, ink.G, ink.B } : winrt::Windows::UI::Color{ 255, 255, 255, 255 };
 				// One glow of the header's thin strokes peaks at about erf(0.32 / sigma) of its opacity, with sigma
@@ -715,6 +756,7 @@ namespace
 				for (size_t index = 0; index < HaloGlows; ++index)
 				{
 					const auto shadow = halo.sprites[index].Shadow().as<muc::DropShadow>();
+					if (index < 2) shadow.Offset({ 0, 0, 0 });
 					const bool core = index < HaloCores;
 					shadow.Color(shine);
 					shadow.BlurRadius(core ? coreBlur : size * 1.5f + 1.f);
@@ -864,13 +906,13 @@ void HeaderGlassStart(HMODULE)
 // Called by itemglass once a second; a change reaches every window on its own thread.
 // The halo only shows on dark text, so light mode needs no switch of its own. The glow only shows in dark mode.
 void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
-	int glow, int glowSize, int outline, int outlineSize, int outlineLight, int outlineLightSize)
+	int glow, int glowSize, int outline, int outlineSize, int outlineLight, int outlineLightSize, int engraved)
 {
 	std::lock_guard guard{ g_lock };
 	DWORD light = 1, lightSize = sizeof(light);
 	RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &lightSize);
 	const Style style{ on, strength, size, light != 0, { textDark, textLight }, { secondDark, secondLight }, { iconDark, iconLight }, glow, glowSize,
-		outline, std::clamp(outlineSize, 1, 2), outlineLight, std::clamp(outlineLightSize, 1, 2) };
+		outline, std::clamp(outlineSize, 1, 2), outlineLight, std::clamp(outlineLightSize, 1, 2), engraved };
 	if (style == g_style) return;
 	g_style = style;
 	wchar_t colors[224];

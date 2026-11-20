@@ -27,12 +27,15 @@
 #include <intrin.h>
 #include <KNSoft/SlimDetours/SlimDetours.h>
 #include "pilllog.h"
+#include "explorerpane.h"
+#include "engraving.h"
+#include "textmaskcache.h"
 
 #ifdef FLUIDGLASS_HEADER
 // headerglass.cpp: the halo for File Explorer's WinUI 3 header.
 void HeaderGlassStart(HMODULE module);
 void HeaderGlassSettings(bool on, int strength, int size, DWORD textDark, DWORD textLight, DWORD secondDark, DWORD secondLight, DWORD iconDark, DWORD iconLight,
-	int glow, int glowSize, int outline, int outlineSize, int outlineLight, int outlineLightSize);
+	int glow, int glowSize, int outline, int outlineSize, int outlineLight, int outlineLightSize, int engraved);
 #endif
 
 namespace
@@ -72,6 +75,8 @@ namespace
 	std::atomic<int> g_outlineSize{ 1 };	// FluidGlassTextOutlineSize / 100: outline width in pixels, 1 or 2
 	std::atomic<int> g_outlineLightStrength{};	// FluidGlassTextOutlineLight: light mode white outline around the dark text, percent, 0 off
 	std::atomic<int> g_outlineLightSize{ 1 };	// FluidGlassTextOutlineSizeLight / 100: its width in pixels, 1 or 2
+	std::atomic<int> g_engraved{};
+	bool g_observePane{}; // settings worker only
 	std::atomic<bool> g_explorerFill{ true };	// FluidGlassExplorerFill: paint a folder window's blank surface black
 	// FluidGlassTextColorDark and FluidGlassTextColorLight: the user's colour for the item and navigation pane text,
 	// 0x01000000 | COLORREF, or 0 for the system's own colour. Index 1 is light mode.
@@ -591,11 +596,13 @@ namespace
 		return light ? r <= 0x10 : r >= 0xF0;
 	}
 
-	// The details view column headers (Name, Date modified, Type, Size) take a blue grey from the light theme
-	// (ItemsView::Header, #4C607A), which the grey-only checks above turn away. This exact ink counts as secondary text.
+	// Two blue greys of the light theme that the grey-only checks above turn away: the details view column headers
+	// (Name, Date modified, Type, Size, ItemsView::Header, #4C607A) and the status bar text ("5 items", #1E395B).
+	// These exact inks count as secondary text.
 	bool IsColumnHeaderInk(COLORREF color, bool light)
 	{
-		return light && (color & 0xFFFFFF) == RGB(0x4C, 0x60, 0x7A);
+		const COLORREF ink = color & 0xFFFFFF;
+		return light && (ink == RGB(0x4C, 0x60, 0x7A) || ink == RGB(0x1E, 0x39, 0x5B));
 	}
 
 	bool InModule(void* address, HMODULE module)
@@ -885,37 +892,67 @@ namespace
 		const uint64_t shapeStart = Ticks();
 #endif
 
-		// The text once, white, into a clear bitmap: its alpha is the exact shape and place of the letters.
-		BITMAPINFO info{};
-		info.bmiHeader = { sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB };
-		void* bits{};
-		HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
-		if (!bitmap) return;
-		HDC memory = CreateCompatibleDC(dc);
-		if (!memory) { DeleteObject(bitmap); return; }
-		const HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
-		const HGDIOBJ oldFont = SelectObject(memory, GetCurrentObject(dc, OBJ_FONT));
-		RECT local{ Pad, Pad, width - Pad, height - Pad };
-		DTTOPTS options{ sizeof(options) };
-		options.dwFlags = DTT_TEXTCOLOR | DTT_COMPOSITED;
-		options.crText = RGB(255, 255, 255);
-		g_drawThemeTextEx(theme, memory, part, state, text, count, flags & ~(DT_CALCRECT | DT_MODIFYSTRING), &local, &options);
-		GdiFlush();
-		t_alpha.resize(static_cast<size_t>(width) * height);
-		const auto* pixels = static_cast<const DWORD*>(bits);
 		int left = width, top = height, right = -1, bottom = -1;
-		for (int y = 0; y < height; ++y)
-			for (int x = 0; x < width; ++x)
+		TextMaskCache::Key key{};
+		std::wstring_view label;
+		RECT bounds{};
+		bool cacheable = g_inExplorer && size_t(width) * height <= TextMaskCache::MaxPixels && GetDeviceCaps(dc, TECHNOLOGY) == DT_RASDISPLAY;
+		if (cacheable)
+		{
+			const size_t length = count < 0 ? wcsnlen_s(text, TextMaskCache::MaxLetters + 1) : static_cast<size_t>(count);
+			key.font = GetCurrentObject(dc, OBJ_FONT);
+			cacheable = length > 0 && length <= TextMaskCache::MaxLetters && key.font &&
+				GetObjectW(key.font, sizeof(key.description), &key.description) == sizeof(key.description);
+			if (cacheable)
 			{
-				const DWORD p = pixels[y * width + x];
-				const BYTE a = static_cast<BYTE>(std::max({ p >> 24, (p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF }));
-				t_alpha[static_cast<size_t>(y) * width + x] = a;
-				if (a > 16) { left = std::min(left, x); right = std::max(right, x); top = std::min(top, y); bottom = std::max(bottom, y); }
+				label = std::wstring_view(text, length);
+				key.theme = theme; key.part = part; key.state = state; key.flags = flags;
+				key.width = width; key.height = height; key.pad = Pad;
+				key.dpiX = GetDeviceCaps(dc, LOGPIXELSX); key.dpiY = GetDeviceCaps(dc, LOGPIXELSY);
+				key.layout = GetLayout(dc);
+				key.display = TextMaskCache::displayEpoch.load(std::memory_order_relaxed);
+				key.generation = TextMaskCache::ThemeEpoch(theme).load(std::memory_order_relaxed);
 			}
-		SelectObject(memory, oldFont);
-		SelectObject(memory, oldBitmap);
-		DeleteDC(memory);
-		DeleteObject(bitmap);
+		}
+		if (cacheable && TextMaskCache::Find(key, label, bounds, t_alpha))
+		{
+			left = bounds.left; top = bounds.top; right = bounds.right; bottom = bounds.bottom;
+		}
+		else
+		{
+			// The text once, white, into a clear bitmap: its alpha is the exact shape and place of the letters.
+			BITMAPINFO info{};
+			info.bmiHeader = { sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB };
+			void* bits{};
+			HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+			if (!bitmap) return;
+			HDC memory = CreateCompatibleDC(dc);
+			if (!memory) { DeleteObject(bitmap); return; }
+			const HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
+			const HGDIOBJ oldFont = SelectObject(memory, GetCurrentObject(dc, OBJ_FONT));
+			RECT local{ Pad, Pad, width - Pad, height - Pad };
+			DTTOPTS options{ sizeof(options) };
+			options.dwFlags = DTT_TEXTCOLOR | DTT_COMPOSITED;
+			options.crText = RGB(255, 255, 255);
+			const HRESULT raster = g_drawThemeTextEx(theme, memory, part, state, text, count, flags & ~(DT_CALCRECT | DT_MODIFYSTRING), &local, &options);
+			GdiFlush();
+			t_alpha.resize(static_cast<size_t>(width) * height);
+			const auto* pixels = static_cast<const DWORD*>(bits);
+			for (int y = 0; y < height; ++y)
+				for (int x = 0; x < width; ++x)
+				{
+					const DWORD p = pixels[y * width + x];
+					const BYTE a = static_cast<BYTE>(std::max({ p >> 24, (p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF }));
+					t_alpha[static_cast<size_t>(y) * width + x] = a;
+					if (a > 16) { left = std::min(left, x); right = std::max(right, x); top = std::min(top, y); bottom = std::max(bottom, y); }
+				}
+			SelectObject(memory, oldFont);
+			SelectObject(memory, oldBitmap);
+			DeleteDC(memory);
+			DeleteObject(bitmap);
+			if (cacheable && SUCCEEDED(raster) && right >= 0)
+				TextMaskCache::Store(key, label, { left, top, right, bottom }, t_alpha);
+		}
 #ifdef FLUIDGLASS_LOGS
 		t_stats.mask += Ticks() - shapeStart;
 		t_stats.area += static_cast<uint64_t>(width) * height;
@@ -970,6 +1007,16 @@ namespace
 				const int gain3 = std::clamp(2 * size, 6, 12);
 				for (BYTE& a : t_work) a = static_cast<BYTE>(std::min(255, a * gain3 / 3) * strength / 100);
 			}
+			else if (mode == 5 || mode == 6)
+			{
+				// Only the exposed edge of the native glyph mask contributes: under the letters for 5, above them for 6.
+				const size_t row = static_cast<size_t>(cw);
+				for (size_t c = 0; c < cells; ++c)
+				{
+					const int neighbour = mode == 5 ? (c >= row ? t_shape[c - row] : 0) : (c + row < cells ? t_shape[c + row] : 0);
+					t_work[c] = Engraving::Edge(neighbour, t_shape[c], strength);
+				}
+			}
 			else if (mode == 3)
 			{
 				// Outline: the letters grown by size pixels with a round, anti-aliased edge and no blur, like an outside
@@ -1023,7 +1070,7 @@ namespace
 			const int kind = mode == 1 && ink != RGB(255, 255, 255) ? 4 : mode;
 			const unsigned bit = 1u << kind;
 			if (!(s_logged.fetch_or(bit) & bit))
-				Log(kind == 4 ? L"text glow: first glow drawn" : kind == 3 ? L"text outline: first outline drawn" : kind == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
+				Log(kind == 5 ? L"text engraving: first lower edge drawn" : kind == 4 ? L"text glow: first glow drawn" : kind == 3 ? L"text outline: first outline drawn" : kind == 1 ? L"grey text: first halo drawn" : L"grey text: first frosted patch drawn");
 		}
 
 		const RECT place{ rect.left - Pad + cx, rect.top - Pad + cy, rect.left - Pad + cx + cw, rect.top - Pad + cy + ch };
@@ -1067,9 +1114,10 @@ namespace
 		const int outlineStrength = g_outlineStrength;
 		const bool outline = !light && outlineStrength > 0 && g_enabled;
 		const int outlineLightStrength = g_outlineLightStrength;
+		const int engraved = g_engraved;
 		const bool outlineLight = light && outlineLightStrength > 0 && g_enabled;
 		const bool recolor = (custom || second) && (g_inExplorer || g_enabled);
-		if ((halo || glow || outline || outlineLight || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
+		if ((engraved || halo || glow || outline || outlineLight || recolor) && rect && dc && text && !(flags & DT_CALCRECT) && options)
 		{
 			if (!g_dui) g_dui = GetModuleHandleW(L"DUI70.dll");
 			if (!g_blurMica) g_blurMica = GetModuleHandleW(L"ExplorerBlurMica.dll");
@@ -1097,11 +1145,29 @@ namespace
 				}
 				TextEffect effects[2]{};
 				int effectCount = 0;
+				// Engraved text in light mode: a one-pixel edge under the letters, white under dark ink.
+				if (engraved == 2 && known && (replaced || header || IsPlainText(color, light)))
+				{
+					const bool dark = Engraving::LightEdge(GetRValue(color), GetGValue(color), GetBValue(color));
+					effects[effectCount++] = { 6, Engraving::UpperStrength(dark), 1, RGB(0, 0, 0) };
+					effects[effectCount++] = { 5, Engraving::LowerStrength(dark, light), 1, RGB(255, 255, 255) };
+				}
+				else if (engraved && light && known && (replaced || header || IsPlainText(color, true)))
+				{
+					const bool dark = Engraving::LightEdge(GetRValue(color), GetGValue(color), GetBValue(color));
+					effects[effectCount++] = { 5, Engraving::Strength, 1, dark ? RGB(255, 255, 255) : RGB(0, 0, 0) };
+				}
 				// Light mode: a soft white halo, a crisp white outline, or both, behind the dark text. The halo goes lowest.
-				if ((halo || outlineLight) && known && (replaced ? IsDarkInk(color) : header || IsNeutralDark(color)))
+				else if ((halo || outlineLight) && known && (replaced ? IsDarkInk(color) : header || IsNeutralDark(color)))
 				{
 					if (halo) effects[effectCount++] = { mode, g_grayStrength, g_graySize, RGB(255, 255, 255) };
 					if (outlineLight) effects[effectCount++] = { 3, outlineLightStrength, g_outlineLightSize, RGB(255, 255, 255) };
+				}
+				// Engraved text in dark mode: the edge sits above the letters, black over light ink, like a cut in the glass.
+				else if (engraved && !light && known && (replaced || IsPlainText(color, false)))
+				{
+					const bool dark = Engraving::LightEdge(GetRValue(color), GetGValue(color), GetBValue(color));
+					effects[effectCount++] = { 6, Engraving::Strength, 1, dark ? RGB(255, 255, 255) : RGB(0, 0, 0) };
 				}
 				// Dark mode: the light text, or a colour the user picked, glows in its own colour like neon, and a black
 				// outline under the letters keeps it readable over bright backdrops. The glow goes under the outline.
@@ -1181,6 +1247,12 @@ namespace
 	{
 		switch (message)
 		{
+		case WM_THEMECHANGED:
+		case WM_SETTINGCHANGE:
+		case WM_FONTCHANGE:
+		case WM_DPICHANGED:
+			TextMaskCache::displayEpoch.fetch_add(1, std::memory_order_relaxed);
+			break;
 		case WM_SIZE:
 			if (wParam == SIZE_MINIMIZED) SetPropW(window, kFillMinimized, reinterpret_cast<HANDLE>(1));
 			break;
@@ -1285,6 +1357,7 @@ namespace
 			std::lock_guard guard{ g_lock };
 			g_themes.erase(theme);
 		}
+		TextMaskCache::ThemeEpoch(theme).fetch_add(1, std::memory_order_relaxed);
 		return g_closeThemeData(theme);
 	}
 
@@ -1567,6 +1640,10 @@ namespace
 		DWORD lightTheme{}, size = sizeof(lightTheme);
 		RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &lightTheme, &size);
 		const bool light = lightTheme != 0;
+		HIGHCONTRASTW contrast{ sizeof(contrast) };
+		const bool highContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) && (contrast.dwFlags & HCF_HIGHCONTRASTON);
+		g_observePane = g_inExplorer && light && !highContrast && ReadSwitch(L"FluidGlassExplorerClearPane", 0) &&
+			ReadSwitch(L"FluidGlassShadowLift", 0) && ReadSwitch(L"FluidGlass", 0);
 		const bool lightChanged = g_light.exchange(light) != light;
 		DWORD grayText = 1, grayTextSize = sizeof(grayText);
 		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM", L"FluidGlassGrayText", RRF_RT_REG_DWORD, nullptr, &grayText, &grayTextSize) != ERROR_SUCCESS)
@@ -1600,6 +1677,8 @@ namespace
 			}
 			return value;
 		};
+		const DWORD textStyle = g_inExplorer && !highContrast ? readDword(L"FluidGlassEngravedText", 0) : 0;
+		const int engraved = textStyle == 2 ? 2 : textStyle != 0 ? 1 : 0;
 		const DWORD glowStrength = std::min<DWORD>(readDword(L"FluidGlassTextGlow", 0), 100);
 		const DWORD glowSize = std::clamp<DWORD>((std::min<DWORD>(readDword(L"FluidGlassTextGlowSize", 400), 100000) + 50) / 100, 1, 10);
 		const DWORD outlineStrength = std::min<DWORD>(readDword(L"FluidGlassTextOutline", 0), 100);
@@ -1611,6 +1690,7 @@ namespace
 		const DWORD textDark = ReadColor(L"FluidGlassTextColorDark"), textLight = ReadColor(L"FluidGlassTextColorLight");
 		const DWORD secondDark = ReadColor(L"FluidGlassSecondaryTextColorDark"), secondLight = ReadColor(L"FluidGlassSecondaryTextColorLight");
 		const bool grayTextChanged =
+			(g_engraved.exchange(engraved) != engraved) |
 			(g_grayText.exchange(static_cast<int>(grayText)) != static_cast<int>(grayText)) |
 			(g_grayStrength.exchange(static_cast<int>(grayStrength)) != static_cast<int>(grayStrength)) |
 			(g_graySize.exchange(static_cast<int>(graySize)) != static_cast<int>(graySize)) |
@@ -1629,7 +1709,7 @@ namespace
 			HeaderGlassSettings(enabled && grayText && grayStrength, static_cast<int>(grayStrength), static_cast<int>(graySize), textDark, textLight, secondDark, secondLight,
 				ReadColor(L"FluidGlassIconColorDark"), ReadColor(L"FluidGlassIconColorLight"), enabled ? static_cast<int>(glowStrength) : 0, static_cast<int>(glowSize),
 				enabled ? static_cast<int>(outlineStrength) : 0, static_cast<int>(outlineSize),
-				enabled ? static_cast<int>(outlineLightStrength) : 0, static_cast<int>(outlineLightSize));
+				enabled ? static_cast<int>(outlineLightStrength) : 0, static_cast<int>(outlineLightSize), engraved);
 #endif
 		if (grayTextChanged)
 		{
@@ -1731,9 +1811,13 @@ namespace
 			Sleep(300);
 			EnumWindows(RefreshFolder, TRUE);
 		}
+		ExplorerPaneObserver::Observer panes;
+#ifdef FLUIDGLASS_LOGS
+		panes.SetLog(Log);
+#endif
 		for (;;)
 		{
-			Sleep(1000);
+			panes.WaitForLayoutChanges(g_observePane);
 			ReadSettings();
 		}
 	}

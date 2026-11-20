@@ -2,6 +2,7 @@
 #include "framework.hpp"
 #include "cpprt.hpp"
 #include "DwmSettings.hpp"
+#include "TaskbarGlass.hpp"
 
 
 namespace OpenGlass::Shared
@@ -42,8 +43,14 @@ namespace OpenGlass::Shared
 		float pillRadius{ 1000.f };	// corners of pill-marked glass (the floating taskbar); beyond half its height it is fully round
 		float clarity{ 0.75f }, softness{ 1.5f };
 		UINT profile{ 0 };
-		bool clearLight{ false };	// light windows keep the glass colour of dark ones, without the milky white lift
+		bool clearLight{ false };	// light File Explorer windows keep the glass colour of dark ones, without the milky white lift
+		float lightTint{ 0.9f };	// how far the glass of other light windows is lifted toward white, 0 to 0.9
+		float grain{ 0.f };		// strength of the static noise over the glass, 0 to 1
+		float grainLight{ 0.f };	// the same for windows in light mode
+		bool explorerClearPane{ false };
+		bool shadowLift{ false };	// light mode readability lifts only dark backdrops, tinted toward the wallpaper
 	} g_fluidGlass{};
+	inline TaskbarGlass::Settings g_taskbarGlass{};
 
 	inline D2D1_COLOR_F g_color{};
 	inline D2D1_COLOR_F g_colorInactive{};

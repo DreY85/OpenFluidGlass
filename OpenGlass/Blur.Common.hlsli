@@ -22,7 +22,9 @@ cbuffer BlurPSConstants : register(b0)
 	float4 fgLook;		// dispersion, saturation, readability, glass-to-background gap
 	float4 fgRim;		// rim light strength, shine exponent, light angle in radians, bezel profile
 	float4 fgFull;		// uv per pixel of the full-resolution copy (x, y), clarity, softness in pixels
-	float4 fgLimit;		// longest refraction shift in pixels, 1 for a pill cut to its rounded outline
+	float4 fgClearPane;  // normalized empty part of the file view, or zeros
+	float4 fgLimit;		// longest refraction shift in pixels, 1 for a pill cut to its rounded outline, grain strength,
+						// 1 for the shadow lift in light mode
 };
 
 Texture2D<float4> texture0 : register(t0);
@@ -170,10 +172,49 @@ float4 LgSharpAt(float2 uv)
 }
 
 // The blurred background seen through the glass, plus the light caught by the rim.
-void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
+// Grain: a fine static noise, like frosted glass. It is tied to the glass, not to the screen, so it moves with the
+// window instead of the window sliding over a fixed pattern. Returns a signed brightness offset, 0 when grain is off.
+float LgGrain(float2 p)
+{
+	uint2 q = uint2(max(p - fgRect.xy, 0.0f));
+	uint h = q.x * 1973u + q.y * 9277u + 0x68E31DA4u;
+	h = (h ^ (h >> 15)) * 0x2C1B3C6Du;
+	h = (h ^ (h >> 12)) * 0x297A2D39u;
+	h ^= h >> 15;
+	return ((h & 0xFFFFu) / 65535.0f - 0.5f) * 0.16f * fgLimit.z;
+}
+
+struct LgPaneSample
+{
+	float4 backdrop;
+	float amount;
+};
+
+// Only the file-view layout determines where the ordinary material yields to clear glass.
+// Bezel width changes the optics of both materials, never the size of the empty space.
+float LgPaneWeight(float2 p)
+{
+	float weight = 0.0f;
+	[branch] if (fgLimit.w > 0.5f && all(fgClearPane.zw > fgClearPane.xy))
+	{
+		float2 extent = fgRect.zw - fgRect.xy;
+		float2 start = fgRect.xy + fgClearPane.xy * extent;
+		float2 end = fgRect.xy + fgClearPane.zw * extent;
+		float side = min(p.x - start.x, end.x - p.x);
+		float rowFade = clamp(extent.y * 0.14f, 32.0f, 96.0f);
+		float edgeFade = clamp(extent.y * 0.065f, 16.0f, 48.0f);
+		weight = smoothstep(0.0f, rowFade, p.y - start.y)
+			* smoothstep(0.0f, edgeFade, side)
+			* smoothstep(0.0f, edgeFade, end.y - p.y);
+	}
+	return weight;
+}
+
+void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight, out LgPaneSample pane)
 {
 	background = 0;
 	rimLight = 0;
+	pane = (LgPaneSample)0;
 	if (fgTex.w < 0.5f)
 	{
 		background = LgBlurAt(input, 0);
@@ -215,12 +256,26 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	// The three channels bend alike on the flat top and without dispersion. There one set of taps serves them all.
 	// The taps use SampleLevel to stay legal inside the branch. The textures have a single mip, so they read the same.
 	bool split = any(pr != pg) || any(pb != pg);
+	float paneWeight = LgPaneWeight(p);
+	[branch] if (paneWeight > 0.0f)
+	{
+		// Take the clear sample at the same refracted coordinates as the ordinary glass.
+		pane.backdrop = texture1.SampleLevel(sampler0, (p + pg) * fgFull.xy, 0.0f);
+		[branch] if (split)
+		{
+			pane.backdrop.r = texture1.SampleLevel(sampler0, (p + pr) * fgFull.xy, 0.0f).r;
+			pane.backdrop.b = texture1.SampleLevel(sampler0, (p + pb) * fgFull.xy, 0.0f).b;
+		}
+		pane.amount = paneWeight * saturate(pane.backdrop.a);
+	}
 	background = LgBlurAt(input, pg * fgTex.xy);
 	[branch] if (split)
 	{
 		background.r = LgBlurAt(input, pr * fgTex.xy).r;
 		background.b = LgBlurAt(input, pb * fgTex.xy).b;
 	}
+	// Keep the broad backdrop colour for the shadow lift before mixing in sharp detail.
+	float3 neighborhood = background.rgb;
 	if (fgFull.z > 0.0f)
 	{
 		float2 uv = p * fgFull.xy;
@@ -241,6 +296,36 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	if (fgLook.z >= 0.0f)
 	{
 		background.rgb *= lerp(1.0f, min(1.0f, 0.22f / max(luminance, 1e-3f)), fgLook.z);
+	}
+	else if (fgLimit.w > 0.5f)
+	{
+		// Shadow lift: only the dark parts of the backdrop get light, tinted toward the surrounding wallpaper, so the
+		// glass stays clear over bright areas instead of turning milky. The lift fades across the curved bezel and
+		// the flat interior receives its full strength.
+		// The strength comes from Readability in light mode. Higher values lift more and reach further into the mid
+		// tones: at 0.5 the lift is 0.4 on black, at 1 it reaches white on black and most of the way on mid tones.
+		const float localTintStrength = 0.32f;
+		float strength = saturate(-fgLook.z);
+		float interior = smoothstep(0.0f, 1.0f, u);
+		float coverage = saturate(background.a);
+		float backdropLuma = luminance / max(coverage, 1e-4f);
+		float shadow = saturate(1.0f - backdropLuma / 0.95f);
+		float lift = strength * (0.6f + 0.4f * strength) * interior * pow(shadow, 1.5f - strength);
+
+		// Steer the added light towards the surrounding wallpaper. On a grey the bias is zero.
+		float localLuma = dot(neighborhood, float3(0.2126f, 0.7152f, 0.0722f));
+		float localPeak = max(neighborhood.r, max(neighborhood.g, neighborhood.b));
+		float3 localChroma = (neighborhood - localLuma) / max(localPeak, 0.12f);
+		float3 addedLight = coverage * lift * (1.0f + localTintStrength * clamp(localChroma, -1.0f, 1.0f));
+
+		// Limit only the addition: transparent pixels get no light, existing HDR highlights keep their range.
+		background.rgb += min(addedLight, max(coverage - background.rgb, 0.0f));
+
+		// Near the top of the slider the glass turns almost opaque: the backdrop fades into a light frost tinted
+		// toward the wallpaper, up to 90% at 1. Below 0.6 nothing changes here.
+		float frost = 0.9f * smoothstep(0.6f, 1.0f, strength) * interior;
+		float3 frostColor = coverage * saturate(0.9f + 0.1f * clamp(localChroma, -1.0f, 1.0f));
+		background.rgb = lerp(background.rgb, frostColor, frost);
 	}
 	else
 	{
@@ -275,6 +360,7 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight)
 	float farFace = 0.4f * pow(clamp(max(-toLight, turn), 0.0f, sideFacing), fgRim.y);
 	float facing = lerp(farFace, litFace, smoothstep(-turn, turn, toLight));
 	rimLight = ((1.0f - N.y) * facing * fgRim.x).xxx;
+	pane.backdrop.rgb += rimLight * saturate(pane.backdrop.a);
 }
 
 #endif // BLUR_COMMON_HLSLI

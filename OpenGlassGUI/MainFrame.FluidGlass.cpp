@@ -45,12 +45,15 @@ namespace OpenGlass
 			{ L"Blur", {
 				{ L"FluidGlassSoftness", L"Blur radius:", L"Blur of the backdrop seen through the glass. 0 is perfectly clear.", L"Softness", 0.f, 20.f, 0.5f, 1.5f, L"px" },
 				{ L"FluidGlassClarity", L"Clarity:", L"How much clear view, softened by the radius above, shows over the heavy blur.", L"Clarity", 0.f, 1.f, 0.01f, 0.75f, L"" },
+				{ L"FluidGlassGrain", L"Grain:", L"A fine static noise over the glass, like frosted or sandblasted glass. Light mode has its own value below. 0 turns it off.", L"Grain", 0.f, 1.f, 0.05f, 0.f, L"" },
+				{ L"FluidGlassGrainLight", L"Grain in light mode:", L"The grain while apps use light mode. 0 turns it off.", L"GrainLight", 0.f, 1.f, 0.05f, 0.f, L"" },
 			} },
 			{ L"Color", {
 				{ L"FluidGlassChroma", L"Dispersion:", L"Red and blue split at the edges, like a prism.", L"Chroma", 0.f, 0.5f, 0.01f, 0.03f, L"" },
 				{ L"FluidGlassSaturation", L"Saturation:", L"0 is grayscale, 1 leaves colors unchanged.", L"Saturation", 0.f, 4.f, 0.05f, 1.4f, L"×" },
 				{ L"FluidGlassReadability", L"Text readability:", L"Darkens backdrops that are too bright for white text.", L"Readability", 0.f, 1.f, 0.01f, 0.5f, L"" },
 				{ L"FluidGlassReadabilityLight", L"Readability in light mode:", L"When apps use light mode, lightens backdrops that are too dark for black text. Over a dark wallpaper, apps in dark mode keep the glass clearer.", L"ReadabilityLight", 0.f, 1.f, 0.01f, 0.8f, L"" },
+				{ L"FluidGlassLightTint", L"Glass tint in light mode:", L"Lifts the glass toward white in light mode so dark text stays readable. 0 keeps the dark mode color.", L"LightTint", 0.f, 0.9f, 0.01f, 0.9f, L"" },
 				{ L"FluidGlassGrayTextStrength", L"Text halo in light mode:", L"When apps use light mode, draws a soft white halo behind the black and grey names in File Explorer so they stay readable on the glass. 0 turns it off.", L"TextHalo", 0.f, 1.f, 0.01f, 0.6f, L"" },
 				{ L"FluidGlassGrayTextSize", L"Halo size in light mode:", L"How far the text halo reaches past the letters. 3 is a tight outline, larger values give a wide soft glow like the Windows 7 title bars and can lighten nearby icons.", L"HaloSize", 1.f, 10.f, 1.f, 3.f, L"px" },
 				{ L"FluidGlassTextOutlineLight", L"Text outline in light mode:", L"When apps use light mode, draws a thin white outline around the dark text in File Explorer. It works with the halo or on its own: set Text halo to 0 for a clean outline only. 0 turns it off.", L"TextOutlineLight", 0.f, 1.f, 0.05f, 0.f, L"" },
@@ -113,6 +116,12 @@ namespace OpenGlass
 		void NotifyFluidGlassChange()
 		{
 			DwmSettings::NotifyChange(FindWindowW(L"Dwm", nullptr), DwmSettings::UpdateType::Backdrop);
+		}
+
+		// DWM draws the window titles again only after a theme change, like the classic caption colour settings.
+		void NotifyFluidGlassTitles()
+		{
+			DwmSettings::NotifyChange(FindWindowW(L"Dwm", nullptr), DwmSettings::UpdateType::Theme);
 		}
 
 		wxString FormatFluidGlassValue(const FluidGlassParameter& parameter, float value)
@@ -234,9 +243,27 @@ namespace OpenGlass
 		dialogs->SetToolTip(L"Loads the same glass into any app that opens a file dialog. It runs inside that app, so leave it off if an app or game complains about injected code.");
 		generalGroup->Add(dialogs, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
-		auto* clearLight = new wxCheckBox(panel, wxID_ANY, L"Clear glass in light mode");
-		clearLight->SetToolTip(L"Light mode apps get the same glass color as dark mode apps, without the milky white layer. Readability in light mode and the text halo and outline still apply.");
+		auto* clearLight = new wxCheckBox(panel, wxID_ANY, L"Clear glass for File Explorer in light mode");
+		clearLight->SetToolTip(L"File Explorer windows in light mode get the same glass color as in dark mode, without the milky white layer. Its text halo, outline and colors keep the names readable. Other apps and Start follow Glass tint in light mode.");
 		generalGroup->Add(clearLight, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
+		auto* shadowLift = new wxCheckBox(panel, wxID_ANY, L"Shadow lift for light mode readability");
+		shadowLift->SetToolTip(L"Readability in light mode brightens only the dark parts of the backdrop, tinted toward the wallpaper around them, and fades out across the curved edge. Bright areas stay clear instead of milky. Off uses the classic lift.");
+		generalGroup->Add(shadowLift, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
+		auto* clearPane = new wxCheckBox(panel, wxID_ANY, L"Clear empty space below Explorer items");
+		clearPane->SetToolTip(L"With Shadow lift enabled, the last visible row fades into clear glass. The navigation pane and status bar keep their material.");
+		generalGroup->Add(clearPane, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
+		auto* textStyleLabel = new wxStaticText(panel, wxID_ANY, L"File Explorer text style");
+		generalGroup->Add(textStyleLabel, 0, wxLEFT | wxRIGHT, 4);
+		auto* engrave = new wxChoice(panel, wxID_ANY);
+		engrave->Append(L"Standard");
+		engrave->Append(L"Engraved");
+		engrave->Append(L"Etched");
+		engrave->SetName(L"File Explorer text style");
+		engrave->SetToolTip(L"Engraved adds a single edge. Etched adds a fine upper shadow and a lower reflection while keeping your text colour. Standard uses the individual halo, glow and outline settings.");
+		generalGroup->Add(engrave, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
 		wxChoice* profile{};
 		{
@@ -303,12 +330,25 @@ namespace OpenGlass
 		{
 			return wcscmp(parameter.name, L"FluidGlassReadabilityLight") == 0 || wcscmp(parameter.name, L"FluidGlassGrayTextStrength") == 0
 				|| wcscmp(parameter.name, L"FluidGlassGrayTextSize") == 0 || wcscmp(parameter.name, L"FluidGlassTextOutlineLight") == 0
-				|| wcscmp(parameter.name, L"FluidGlassTextOutlineSizeLight") == 0;
+				|| wcscmp(parameter.name, L"FluidGlassTextOutlineSizeLight") == 0 || wcscmp(parameter.name, L"FluidGlassLightTint") == 0
+				|| wcscmp(parameter.name, L"FluidGlassGrainLight") == 0;
 		};
+		// Engraved text replaces the halo, the glow and the outlines on the labels it covers, so their rows hide while it is on.
+		auto textEffect = [](const FluidGlassParameter& parameter)
+		{
+			for (PCWSTR name : { L"FluidGlassGrayTextStrength", L"FluidGlassGrayTextSize", L"FluidGlassTextOutlineLight",
+				L"FluidGlassTextOutlineSizeLight", L"FluidGlassTextGlow", L"FluidGlassTextGlowSize", L"FluidGlassTextOutline",
+				L"FluidGlassTextOutlineSize" })
+				if (wcscmp(parameter.name, name) == 0) return true;
+			return false;
+		};
+		struct EffectRow { wxSizer* group; wxSizer* row; wxWindow* hint; };
+		auto effectRows = std::make_shared<std::vector<EffectRow>>();
 		auto darkOnly = [](const FluidGlassParameter& parameter)
 		{
 			return wcscmp(parameter.name, L"FluidGlassTextGlow") == 0 || wcscmp(parameter.name, L"FluidGlassTextGlowSize") == 0 ||
-				wcscmp(parameter.name, L"FluidGlassTextOutline") == 0 || wcscmp(parameter.name, L"FluidGlassTextOutlineSize") == 0;
+				wcscmp(parameter.name, L"FluidGlassTextOutline") == 0 || wcscmp(parameter.name, L"FluidGlassTextOutlineSize") == 0 ||
+				wcscmp(parameter.name, L"FluidGlassGrain") == 0;
 		};
 		for (const auto& group : c_fluidGlassGroups)
 		{
@@ -351,6 +391,7 @@ namespace OpenGlass
 				}
 
 				rows->push_back({ &parameter, slider, value });
+				if (textEffect(parameter)) effectRows->push_back({ groupSizer, row, hint });
 			}
 			sizer->Add(groupSizer, 0, wxEXPAND | wxALL, 2);
 		}
@@ -392,6 +433,7 @@ namespace OpenGlass
 		auto toColour = [](unsigned value) { return wxColour((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF); };
 		auto colorRows = std::make_shared<std::vector<ColorRow>>();
 		wxButton* systemColorsButton{};
+		wxChoice* titleStyle{};
 		auto paletteChoices = std::make_shared<std::vector<wxChoice*>>();
 		// Shows the palette the three colours of a mode match, or the prompt when they are a mix of the user's own.
 		auto syncPalettes = [colorRows, paletteChoices, toColour]()
@@ -413,18 +455,19 @@ namespace OpenGlass
 			}
 		};
 		{
-			auto* colorGroup = ModernTheme::MakeCard(panel, L"File Explorer colors");
+			auto* colorGroup = ModernTheme::MakeCard(panel, L"Text colors and title bars");
 			auto* colorNote = new wxStaticText(panel, wxID_ANY,
 				L"Your own color for the text and the icons of File Explorer: the file list, the navigation pane, the address bar, the tabs and "
 				L"the command bar. Details are the softer grey text: descriptions, sizes, dates and hints. File icons keep their pictures. "
-				L"Colored names, such as compressed or encrypted files, keep their color.");
+				L"Colored names, such as compressed or encrypted files, keep their color. The title bars that Windows draws for other apps "
+				L"take the Text color of their mode while the window is active.");
 			colorNote->SetForegroundColour(hintColour);
 			colorNote->SetFont(hintFont);
 			colorNote->Wrap(FromDIP(560));
 			wxBoxSizer* noteRow = new wxBoxSizer(wxHORIZONTAL);
 			noteRow->Add(colorNote, 1, wxALIGN_TOP | wxRIGHT, FromDIP(12));
 			systemColorsButton = new wxButton(panel, wxID_ANY, L"Use System Colors");
-			systemColorsButton->SetToolTip(L"Sets all six File Explorer colors back to the system's. Other Fluid Glass settings stay as they are.");
+			systemColorsButton->SetToolTip(L"Sets all six text and icon colors back to the system's. The title bar text style and the other Fluid Glass settings stay as they are.");
 			noteRow->Add(systemColorsButton, 0, wxALIGN_TOP);
 			colorGroup->Add(noteRow, 0, wxEXPAND | wxALL, 4);
 			const struct { PCWSTR title; PCWSTR names[3]; unsigned initial[3]; } modes[]
@@ -467,10 +510,24 @@ namespace OpenGlass
 				columns->Add(column, 1, wxEXPAND | (mode == 0 ? wxRIGHT : 0), FromDIP(24));
 			}
 			colorGroup->Add(columns, 0, wxEXPAND | wxALL, 0);
+
+			wxBoxSizer* titleRow = new wxBoxSizer(wxHORIZONTAL);
+			titleRow->Add(new wxStaticText(panel, wxID_ANY, L"Title bar text style:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+			titleStyle = new wxChoice(panel, wxID_ANY);
+			titleStyle->Append(L"Standard");
+			titleStyle->Append(L"Engraved");
+			titleStyle->Append(L"Etched");
+			titleStyle->SetName(L"Title bar text style");
+			titleStyle->SetToolTip(L"The style of the window titles that Windows draws for other apps, such as Notepad, Registry Editor or "
+				L"Control Panel. Engraved adds a single edge. Etched adds a fine upper shadow and a lower reflection. Apps that draw their "
+				L"own title bar keep their own text.");
+			titleRow->Add(titleStyle, 0, wxALIGN_CENTER_VERTICAL);
+			colorGroup->Add(titleRow, 0, wxALL, 4);
 			sizer->Add(colorGroup, 0, wxEXPAND | wxALL, 2);
 		}
-		auto loadColors = [colorRows, syncPalettes]()
+		auto loadColors = [colorRows, syncPalettes, titleStyle]()
 		{
+			titleStyle->SetSelection(static_cast<int>(std::min(ReadFluidGlassDword(L"FluidGlassTitleTextStyle", 0), 2ul)));
 			for (const auto& row : *colorRows)
 			{
 				const DWORD value = ReadFluidGlassDword(row.name, 0);
@@ -491,7 +548,8 @@ namespace OpenGlass
 				const wxColour colour = row.picker->GetColour();
 				WriteFluidGlassDword(row.name, custom ? 0x01000000 | RGB(colour.Red(), colour.Green(), colour.Blue()) : 0);
 				syncPalettes();
-				SetStatusText(L"File Explorer colors: applied " + wxDateTime::Now().FormatISOTime());
+				NotifyFluidGlassTitles();
+				SetStatusText(L"Text colors: applied " + wxDateTime::Now().FormatISOTime());
 			};
 			row.choice->Bind(wxEVT_CHOICE, [update](wxCommandEvent&) { update(); });
 			row.picker->Bind(wxEVT_COLOURPICKER_CHANGED, [update](wxColourPickerEvent&) { update(); });
@@ -500,7 +558,14 @@ namespace OpenGlass
 		{
 			for (const auto& row : *colorRows) WriteFluidGlassDword(row.name, 0);
 			loadColors();
-			SetStatusText(L"File Explorer colors: system colors applied " + wxDateTime::Now().FormatISOTime());
+			NotifyFluidGlassTitles();
+			SetStatusText(L"Text colors: system colors applied " + wxDateTime::Now().FormatISOTime());
+		});
+		titleStyle->Bind(wxEVT_CHOICE, [this, titleStyle](wxCommandEvent&)
+		{
+			WriteFluidGlassDword(L"FluidGlassTitleTextStyle", static_cast<DWORD>(titleStyle->GetSelection()));
+			NotifyFluidGlassTitles();
+			SetStatusText(wxString(L"Title bar text style: ") + titleStyle->GetStringSelection());
 		});
 		for (size_t mode = 0; mode < paletteChoices->size(); ++mode)
 		{
@@ -518,13 +583,14 @@ namespace OpenGlass
 					row.picker->Enable(true);
 					WriteFluidGlassDword(row.name, 0x01000000 | RGB(colour.Red(), colour.Green(), colour.Blue()));
 				}
-				SetStatusText(wxString::Format(L"File Explorer colors: %s palette applied %s", palette.name, wxDateTime::Now().FormatISOTime()));
+				NotifyFluidGlassTitles();
+				SetStatusText(wxString::Format(L"Text colors: %s palette applied %s", palette.name, wxDateTime::Now().FormatISOTime()));
 			});
 		}
 
 		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
 		auto* resetButton = new wxButton(panel, wxID_ANY, L"Reset to defaults");
-		resetButton->SetToolTip(L"Write the default value of every Fluid Glass setting on this page to HKCU and apply them, File Explorer colors included.");
+		resetButton->SetToolTip(L"Write the default value of every Fluid Glass setting on this page to HKCU and apply them, the text colors and the title bar text style included.");
 		auto* copyButton = new wxButton(panel, wxID_ANY, L"Copy values");
 		copyButton->SetToolTip(L"Copy the current values as set-fluid-glass.ps1 arguments.");
 		buttons->AddStretchSpacer();
@@ -537,7 +603,17 @@ namespace OpenGlass
 			row.value->SetLabel(FormatFluidGlassValue(*row.parameter, static_cast<float>(row.slider->GetValue()) * row.parameter->step));
 		};
 
-		auto load = [rows, enabled, items, dialogs, clearLight, profile, showValue]()
+		auto showTextEffects = [panel, effectRows](bool show)
+		{
+			for (const auto& item : *effectRows)
+			{
+				item.group->Show(item.row, show);
+				item.group->Show(item.hint, show);
+			}
+			LayoutWrappingPage(panel);
+		};
+
+		auto load = [rows, enabled, items, dialogs, clearLight, shadowLift, clearPane, engrave, profile, showValue, showTextEffects]()
 		{
 			for (auto& row : *rows)
 			{
@@ -550,6 +626,12 @@ namespace OpenGlass
 			items->SetValue(ReadFluidGlassDword(L"FluidGlassItems", 1) != 0);
 			dialogs->SetValue(ReadFluidGlassDword(L"FluidGlassDialogs", 0) != 0);
 			clearLight->SetValue(ReadFluidGlassDword(L"FluidGlassClearLight", 0) != 0);
+			shadowLift->SetValue(ReadFluidGlassDword(L"FluidGlassShadowLift", 0) != 0);
+			clearPane->SetValue(ReadFluidGlassDword(L"FluidGlassExplorerClearPane", 0) != 0);
+			clearPane->Enable(shadowLift->GetValue());
+			const DWORD style = ReadFluidGlassDword(L"FluidGlassEngravedText", 0);
+			engrave->SetSelection(style == 2 ? 2 : style != 0 ? 1 : 0);
+			showTextEffects(engrave->GetSelection() == 0);
 			profile->SetSelection(static_cast<int>(std::min(ReadFluidGlassDword(L"FluidGlassProfile", 0), 2ul)));
 		};
 		load();
@@ -596,11 +678,30 @@ namespace OpenGlass
 			SetStatusText(dialogs->GetValue() ? L"Dialog glass: on for dialogs opened from now on" : L"Dialog glass: off");
 		});
 
+		clearPane->Bind(wxEVT_CHECKBOX, [this, clearPane](wxCommandEvent&)
+		{
+			WriteFluidGlassDword(L"FluidGlassExplorerClearPane", clearPane->GetValue() ? 1 : 0);
+			NotifyFluidGlassChange();
+		});
+		engrave->Bind(wxEVT_CHOICE, [this, engrave, showTextEffects](wxCommandEvent&)
+		{
+			WriteFluidGlassDword(L"FluidGlassEngravedText", static_cast<DWORD>(engrave->GetSelection()));
+			showTextEffects(engrave->GetSelection() == 0);
+			SetStatusText(wxString(L"Explorer text style: ") + engrave->GetStringSelection());
+		});
+		shadowLift->Bind(wxEVT_CHECKBOX, [this, shadowLift, clearPane](wxCommandEvent&)
+		{
+			clearPane->Enable(shadowLift->GetValue());
+			WriteFluidGlassDword(L"FluidGlassShadowLift", shadowLift->GetValue() ? 1 : 0);
+			NotifyFluidGlassChange();
+			SetStatusText(shadowLift->GetValue() ? L"Shadow lift for light mode: on" : L"Shadow lift for light mode: off");
+		});
+
 		clearLight->Bind(wxEVT_CHECKBOX, [this, clearLight](wxCommandEvent&)
 		{
 			WriteFluidGlassDword(L"FluidGlassClearLight", clearLight->GetValue() ? 1 : 0);
 			NotifyFluidGlassChange();
-			SetStatusText(clearLight->GetValue() ? L"Clear glass in light mode: on" : L"Clear glass in light mode: off");
+			SetStatusText(clearLight->GetValue() ? L"Clear glass for File Explorer: on" : L"Clear glass for File Explorer: off");
 		});
 
 		profile->Bind(wxEVT_CHOICE, [this, profile](wxCommandEvent&)
@@ -617,8 +718,12 @@ namespace OpenGlass
 				WriteFluidGlassDword(row.parameter->name, EncodeFluidGlassValue(*row.parameter, row.parameter->defaultValue));
 			}
 			WriteFluidGlassDword(L"FluidGlassProfile", 0);
+			WriteFluidGlassDword(L"FluidGlassExplorerClearPane", 0);
+			WriteFluidGlassDword(L"FluidGlassEngravedText", 0);
+			WriteFluidGlassDword(L"FluidGlassTitleTextStyle", 0);
 			for (const auto& row : *colorRows) WriteFluidGlassDword(row.name, 0);
 			NotifyFluidGlassChange();
+			NotifyFluidGlassTitles();
 			load();
 			loadColors();
 			SetStatusText(L"Fluid Glass: defaults applied");
@@ -649,7 +754,7 @@ namespace OpenGlass
 		};
 		refreshUserPresets(wxEmptyString);
 
-		saveUserPreset->Bind(wxEVT_BUTTON, [this, rows, profile, refreshUserPresets](wxCommandEvent&)
+		saveUserPreset->Bind(wxEVT_BUTTON, [this, rows, profile, engrave, refreshUserPresets](wxCommandEvent&)
 		{
 			wxTextEntryDialog dialog(this, L"Name for this preset:", L"Save Fluid Glass preset");
 			if (dialog.ShowModal() != wxID_OK)
@@ -680,6 +785,8 @@ namespace OpenGlass
 			}
 			const DWORD shape = static_cast<DWORD>(std::max(profile->GetSelection(), 0));
 			RegSetValueExW(key.get(), L"FluidGlassProfile", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&shape), sizeof(shape));
+			const DWORD style = static_cast<DWORD>(engrave->GetSelection());
+			RegSetValueExW(key.get(), L"FluidGlassEngravedText", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&style), sizeof(style));
 			refreshUserPresets(name);
 			SetStatusText(L"Fluid Glass: saved preset " + name);
 		});
@@ -703,6 +810,8 @@ namespace OpenGlass
 				WriteFluidGlassDword(row.parameter->name, read(row.parameter->name, EncodeFluidGlassValue(*row.parameter, row.parameter->defaultValue)));
 			}
 			WriteFluidGlassDword(L"FluidGlassProfile", std::min(read(L"FluidGlassProfile", 0), 2ul));
+			const DWORD style = read(L"FluidGlassEngravedText", MAXDWORD);
+			if (style <= 2) WriteFluidGlassDword(L"FluidGlassEngravedText", style);
 			NotifyFluidGlassChange();
 			load();
 			SetStatusText(L"Fluid Glass: " + name + L" applied");

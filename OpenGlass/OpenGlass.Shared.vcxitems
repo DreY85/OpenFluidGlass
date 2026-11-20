@@ -28,6 +28,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)DxgiPrivates.hpp"><Link>Header Files\DxgiPrivates.hpp</Link></ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)framework.hpp"><Link>Header Files\framework.hpp</Link></ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)GlassEngine.hpp"><Link>Header Files\GlassEngine.hpp</Link></ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)ExplorerPaneRect.hpp"><Link>Header Files\ExplorerPaneRect.hpp</Link></ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)GlassFrameDemodernizer.hpp"><Link>Header Files\GlassFrameDemodernizer.hpp</Link></ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)GlassFrameEnhancer.hpp"><Link>Header Files\GlassFrameEnhancer.hpp</Link></ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)GlassFrameHandler.hpp"><Link>Header Files\GlassFrameHandler.hpp</Link></ClInclude>

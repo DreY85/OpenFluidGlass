@@ -8,6 +8,8 @@
 #include "dwmcoreProjection.hpp"
 #include "dcompPrivates.hpp"
 #include "CustomThemeAtlasLoader.hpp"
+// Header only: the File Explorer labels and the window titles share the same engraving strengths.
+#include "../../../OpenGlassTaskbar/engraving.h"
 
 using namespace OpenGlass;
 namespace OpenGlass::CaptionTextHandler
@@ -124,6 +126,7 @@ namespace OpenGlass::CaptionTextHandler
 		uDWM::CVisual* sourceVisual{};
 		bool active{};
 		bool maximized{};
+		bool light{ true };
 		LONG windowRectLeft{};
 	};
 	using CWindowStatePtr = winrt::com_ptr<CWindowState>;
@@ -167,6 +170,11 @@ namespace OpenGlass::CaptionTextHandler
 	int g_textGlowIntensity{};
 	int g_centerCaption{ 0 };
 	bool g_boldCaption{ false };
+	// Fluid Glass: the title text style (0 standard, 1 engraved, 2 etched) and the File Explorer text colour of each
+	// mode, 0xFFFFFFFF while the user keeps the system colour.
+	int g_titleTextStyle{ 0 };
+	COLORREF g_titleColorLight{ 0xFFFFFFFF };
+	COLORREF g_titleColorDark{ 0xFFFFFFFF };
 	// Bold glyphs are a little wider than the regular ones uDWM measured the title with.
 	constexpr float c_boldWidening{ 1.08f };
 
@@ -491,6 +499,7 @@ HRESULT CaptionTextHandler::MyCText_ValidateResources(uDWM::CText* This)
 		{
 			windowState->active = g_window->TreatAsActiveWindow();
 			windowState->maximized = g_window->TreatAsMaximized();
+			windowState->light = GlassKernel::IsLightWindow(g_window->GetData());
 
 			RECT windowRect{};
 			g_window->GetActualWindowRect(&windowRect, true, false, true);
@@ -594,8 +603,55 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 	{
 		solidColorBrush->SetColor(Color::FromAbgr(textColorOverride));
 	}
+	// Fluid Glass: the active window's title takes the File Explorer text colour of its mode. An inactive title keeps
+	// the dimmed colour, so the active window stays easy to spot.
+	const bool fluidGlass = Shared::g_fluidGlass.enabled;
+	const COLORREF fluidGlassColor = windowState.light ? g_titleColorLight : g_titleColorDark;
+	if (fluidGlass && windowState.active && fluidGlassColor != 0xFFFFFFFF)
+	{
+		solidColorBrush->SetColor(Color::FromAbgr(fluidGlassColor));
+	}
 	const auto drawnColor = solidColorBrush->GetColor();
 	const bool lightText = 0.2126f * drawnColor.r + 0.7152f * drawnColor.g + 0.0722f * drawnColor.b > 0.55f;
+
+	// Fluid Glass text style, drawn behind the letters one physical pixel away, like the File Explorer labels.
+	// Engraved: one edge, under the letters in light mode and above them in dark mode, light under dark ink.
+	// Etched: a dark edge above and a light edge under the letters.
+	const auto drawTextStyle = [&](D2D1_POINT_2F at)
+	{
+		if (!fluidGlass || !g_titleTextStyle)
+		{
+			return;
+		}
+		float dpiX{ 96.f }, dpiY{ 96.f };
+		This->GetDpi(&dpiX, &dpiY);
+		const float pixel = dpiY > 0.f ? 96.f / dpiY : 1.f;
+		// The dimmed grey of an inactive title says little about its mode, so the window's mode decides there.
+		const bool darkInk = windowState.active ?
+			Engraving::LightEdge(static_cast<int>(drawnColor.r * 255.f), static_cast<int>(drawnColor.g * 255.f), static_cast<int>(drawnColor.b * 255.f)) :
+			windowState.light;
+		// Colour fonts would draw their pictures again at the edge, so the edges use the plain glyph shapes.
+		const auto edgeOptions = options & ~D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
+		const auto edge = [&](float rows, bool white, int percent)
+		{
+			const float value = white ? 1.f : 0.f;
+			winrt::com_ptr<ID2D1SolidColorBrush> brush{};
+			if (FAILED(This->CreateSolidColorBrush(D2D1::ColorF(value, value, value, static_cast<float>(percent) / 100.f), brush.put())))
+			{
+				return;
+			}
+			g_ID2D1DeviceContext_DrawTextLayout_Org(This, D2D1::Point2F(at.x, at.y + rows * pixel), textLayout, brush.get(), edgeOptions);
+		};
+		if (g_titleTextStyle == 2)
+		{
+			edge(-1.f, false, Engraving::UpperStrength(darkInk));
+			edge(1.f, true, Engraving::LowerStrength(darkInk, windowState.light));
+		}
+		else
+		{
+			edge(windowState.light ? 1.f : -1.f, darkInk, Engraving::Strength);
+		}
+	};
 
 	// uDWM may draw the same layout again; only widen it the first time it turns bold.
 	DWRITE_FONT_WEIGHT weight{};
@@ -618,6 +674,7 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 
 	if (!g_textGlowSize)
 	{
+		drawTextStyle(origin);
 		return g_ID2D1DeviceContext_DrawTextLayout_Org(
 			This,
 			origin,
@@ -743,6 +800,7 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 			D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
 			D2D1_COMPOSITE_MODE_SOURCE_COPY
 		);
+		drawTextStyle(origin);
 		This->DrawImage(
 			bitmap.get(),
 			&origin,
@@ -850,6 +908,7 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		}*/
 	}
 
+	drawTextStyle(origin);
 	return g_ID2D1DeviceContext_DrawTextLayout_Org(
 		This,
 		origin,
@@ -979,6 +1038,7 @@ HRESULT CaptionTextHandler::MyCDWriteText_ValidateVisual(uDWM::CDWriteText* This
 		{
 			windowState->active = g_window->TreatAsActiveWindow();
 			windowState->maximized = g_window->TreatAsMaximized();
+			windowState->light = GlassKernel::IsLightWindow(g_window->GetData());
 
 			RECT windowRect{};
 			g_window->GetActualWindowRect(&windowRect, true, false, true);
@@ -1141,6 +1201,15 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 	{
 		g_centerCaption = std::clamp(static_cast<int>(GlassEngine::GetDwordFromRegistry(L"CenterCaption", FALSE)), 0, 2);
 		g_boldCaption = GlassEngine::GetDwordFromRegistry(L"CaptionTextBold", 0) != 0;
+		g_titleTextStyle = std::clamp(static_cast<int>(GlassEngine::GetDwordFromRegistry(L"FluidGlassTitleTextStyle", 0)), 0, 2);
+		// The GUI marks a colour the user picked with 0x01 in the top byte. 0 keeps the system colour.
+		const auto fluidGlassColor = [](PCWSTR name)
+		{
+			const DWORD value = GlassEngine::GetDwordFromRegistry(name, 0);
+			return (value & 0xFF000000) == 0x01000000 ? static_cast<COLORREF>(value & 0x00FFFFFF) : static_cast<COLORREF>(0xFFFFFFFF);
+		};
+		g_titleColorLight = fluidGlassColor(L"FluidGlassTextColorLight");
+		g_titleColorDark = fluidGlassColor(L"FluidGlassTextColorDark");
 		g_captionActiveColor = GlassEngine::GetDwordFromRegistry(L"ColorizationColorCaption", 0xFFFFFFFD);
 		g_captionInactiveColor = GlassEngine::GetDwordFromRegistry(L"ColorizationColorCaptionInactive", g_captionActiveColor);
 		g_captionActiveColorMaximized = GlassEngine::GetDwordFromRegistry(L"ColorizationColorCaptionMaximized", g_captionActiveColor);

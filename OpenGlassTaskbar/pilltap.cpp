@@ -27,6 +27,7 @@
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include "pilllog.h"
 #include "pillshare.h"
+#include "engraving.h"
 #include "fillboost.h"
 
 namespace wux = winrt::Windows::UI::Xaml;
@@ -182,11 +183,9 @@ namespace
 					m_published = false;
 				}
 				Update();
-				m_halo = ReadHalo();
 				ScanHalos(m_published);
 			});
 			m_timer.Start();
-			m_halo = ReadHalo();
 			Update();
 			ScanHalos(m_published);
 		}
@@ -293,6 +292,9 @@ namespace
 		struct HaloStyle
 		{
 			DWORD mode{}, strength{}, size{};
+			DWORD textStyle{};
+			bool lightTheme{};
+			float pixel{ 1.f };
 			bool operator==(const HaloStyle&) const = default;
 		};
 
@@ -308,8 +310,17 @@ namespace
 			return value;
 		}
 
-		static HaloStyle ReadHalo()
+		HaloStyle ReadHalo() const
 		{
+			const DWORD style = ReadPillSetting(PillTrayTextStyle);
+			if (style)
+			{
+				HIGHCONTRASTW contrast{ sizeof(contrast) };
+				if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) && (contrast.dwFlags & HCF_HIGHCONTRASTON)) return {};
+				const auto root = m_trayGrid.XamlRoot();
+				const double scale = root ? root.RasterizationScale() : 1.0;
+				return { 0, 0, 0, style, m_trayGrid.ActualTheme() == wux::ElementTheme::Light, static_cast<float>(scale > 0 ? 1.0 / scale : 1.0) };
+			}
 			const DWORD size = ReadDwm(L"FluidGlassGrayTextSize", 300);
 			return { (std::min<DWORD>)(ReadDwm(L"FluidGlassGrayText", 1), 2), (std::min<DWORD>)(ReadDwm(L"FluidGlassGrayTextStrength", 60), 100),
 				std::clamp<DWORD>(((std::min<DWORD>)(size, 100000) + 50) / 100, 1, 10) };
@@ -324,14 +335,15 @@ namespace
 		{
 			// What the last paint saw. A switch between light and dark mode recolours the tray without a Foreground
 			// change on the TextBlock, so the scan compares the colour itself.
-			bool dark{};
 			winrt::Windows::UI::Color inkSeen{};
 			winrt::weak_ref<wux::Controls::TextBlock> text;
 			winrt::Windows::UI::Composition::ContainerVisual root{ nullptr };
 			std::vector<winrt::Windows::UI::Composition::SpriteVisual> sprites;	// the glows, then the four letter copies
 			winrt::Windows::UI::Composition::CompositionColorBrush ink{ nullptr };
 			winrt::Windows::UI::Composition::CompositionMaskBrush letters{ nullptr };
+			winrt::Windows::UI::Composition::CompositionMaskBrush edges[2]{ nullptr, nullptr }; // black, white
 			HaloStyle style{};
+			bool masked{};
 			bool sizeBound{ false };	// the sprites follow the element visual's size through an expression
 			int64_t textToken{ -1 }, foregroundToken{ -1 };
 			winrt::event_token sizeToken{};
@@ -362,14 +374,18 @@ namespace
 			return pinned;
 		}
 
-		// The text's colour when it is dark enough to need the halo: light mode only.
-		static bool DarkInk(const wux::Controls::TextBlock& text, winrt::Windows::UI::Color& out)
+		static winrt::Windows::UI::Color TextInk(const wux::Controls::TextBlock& text)
 		{
 			const auto brush = text.Foreground().try_as<wux::Media::SolidColorBrush>();
-			if (!brush) return false;
-			out = brush.Color();
-			out.A = static_cast<uint8_t>(out.A * std::clamp(brush.Opacity(), 0.0, 1.0));
-			return out.A > 0 && out.R * 299 + out.G * 587 + out.B * 114 < 128 * 1000;
+			if (!brush) return {};
+			auto ink = brush.Color();
+			ink.A = static_cast<uint8_t>(ink.A * std::clamp(brush.Opacity(), 0.0, 1.0));
+			return ink;
+		}
+
+		static bool VisibleInk(winrt::Windows::UI::Color ink, const HaloStyle& style)
+		{
+			return ink.A && (style.textStyle || Engraving::LightEdge(ink.R, ink.G, ink.B));
 		}
 
 		// The alpha mask covers the element's layout slot, not its ActualWidth. The clock's time is a right-aligned
@@ -398,23 +414,49 @@ namespace
 		void PaintHalo(Halo& halo, const wux::Controls::TextBlock& text, bool newMask)
 		{
 			namespace wuc = winrt::Windows::UI::Composition;
-			winrt::Windows::UI::Color ink{};
-			const bool dark = DarkInk(text, ink);
-			halo.dark = dark;
+			const auto ink = TextInk(text);
 			halo.inkSeen = ink;
-			halo.root.IsVisible(dark);
-			if (dark) halo.ink.Color(ink);
-			const auto mask = newMask ? PinMask(text.GetAlphaMask()) : nullptr;
+			if (newMask || !halo.masked)
+			{
+				const auto mask = PinMask(text.GetAlphaMask());
+				halo.masked = static_cast<bool>(mask);
+				if (mask)
+				{
+					halo.letters.Mask(mask);
+					if (halo.style.textStyle)
+						for (auto& edge : halo.edges) edge.Mask(mask);
+					else
+						for (size_t i = 0; i < HaloGlows; ++i) halo.sprites[i].Shadow().as<wuc::DropShadow>().Mask(mask);
+				}
+			}
+			const bool visible = halo.masked && VisibleInk(ink, halo.style);
+			halo.root.IsVisible(visible);
+			if (!visible) return;
+			halo.ink.Color(ink);
+			if (halo.style.textStyle)
+			{
+				const bool darkInk = Engraving::LightEdge(ink.R, ink.G, ink.B);
+				const bool etched = halo.style.textStyle == 2;
+				for (int i = 0; i < 2; ++i)
+				{
+					const bool white = i == 1;
+					auto& edge = halo.sprites[i];
+					edge.IsVisible(etched || white == darkInk);
+					const bool below = etched ? white : halo.style.lightTheme;
+					edge.Offset({ 0.f, below ? halo.style.pixel : -halo.style.pixel, 0.f });
+					const int strength = etched ? (white ? Engraving::LowerStrength(darkInk, halo.style.lightTheme) : Engraving::UpperStrength(darkInk)) : Engraving::Strength;
+					edge.Opacity((strength / 100.f) * (ink.A / 255.f));
+				}
+				return;
+			}
 			const float strength = halo.style.strength / 100.f, size = static_cast<float>(halo.style.size);
 			for (size_t index = 0; index < HaloGlows; ++index)
 			{
 				const auto shadow = halo.sprites[index].Shadow().as<wuc::DropShadow>();
-				if (mask) shadow.Mask(mask);
 				const bool core = index < HaloCores;
 				shadow.BlurRadius(core ? (std::max)(1.f, size * 0.75f) : size * 2.f + 1.f);
 				shadow.Opacity(core ? strength : strength * 0.8f);
 			}
-			if (mask) halo.letters.Mask(mask);
 		}
 
 		// Logs builds only: what a tray text and its alpha mask look like, to line the halo up with odd texts (the clock).
@@ -489,22 +531,40 @@ namespace
 
 		void AddHalo(void* key, const wux::Controls::TextBlock& text)
 		{
-			DescribeText(L"add", text);
+			if (wux::Hosting::ElementCompositionPreview::GetElementChildVisual(text)) return;
+			if (!m_halo.textStyle) DescribeText(L"add", text);
 			namespace wuc = winrt::Windows::UI::Composition;
 			const auto compositor = wux::Hosting::ElementCompositionPreview::GetElementVisual(text).Compositor();
 			Halo halo;
 			halo.text = winrt::make_weak(text);
 			halo.style = m_halo;
 			halo.root = compositor.CreateContainerVisual();
-			for (int index = 0; index <= HaloCores; ++index)
+			if (m_halo.textStyle)
 			{
-				const auto glow = compositor.CreateSpriteVisual();
-				const auto shadow = compositor.CreateDropShadow();
-				shadow.Color(winrt::Windows::UI::Color{ 255, 255, 255, 255 });
-				shadow.Offset({ 0, 0, 0 });
-				glow.Shadow(shadow);
-				halo.root.Children().InsertAtTop(glow);
-				halo.sprites.push_back(glow);
+				for (int i = 0; i < 2; ++i)
+				{
+					const uint8_t channel = i == 0 ? 0 : 255;
+					auto& brush = halo.edges[i];
+					brush = compositor.CreateMaskBrush();
+					brush.Source(compositor.CreateColorBrush({ 255, channel, channel, channel }));
+					const auto edge = compositor.CreateSpriteVisual();
+					edge.Brush(brush);
+					halo.root.Children().InsertAtTop(edge);
+					halo.sprites.push_back(edge);
+				}
+			}
+			else
+			{
+				for (size_t i = 0; i < HaloGlows; ++i)
+				{
+					const auto glow = compositor.CreateSpriteVisual();
+					const auto shadow = compositor.CreateDropShadow();
+					shadow.Color(winrt::Windows::UI::Color{ 255, 255, 255, 255 });
+					shadow.Offset({ 0, 0, 0 });
+					glow.Shadow(shadow);
+					halo.root.Children().InsertAtTop(glow);
+					halo.sprites.push_back(glow);
+				}
 			}
 			halo.ink = compositor.CreateColorBrush();
 			halo.letters = compositor.CreateMaskBrush();
@@ -516,6 +576,7 @@ namespace
 				letters.Offset({ shift[0], shift[1], 0 });
 				halo.root.Children().InsertAtTop(letters);
 				halo.sprites.push_back(letters);
+				if (m_halo.textStyle) break; // A single, unshifted face keeps the native stroke width.
 			}
 			PaintHalo(halo, text, true);
 			FitHalo(halo, text);
@@ -525,7 +586,7 @@ namespace
 			{
 				if (const auto found = m_halos.find(key); found != m_halos.end())
 				{
-					DescribeText(L"text", node.as<wux::Controls::TextBlock>());
+					if (!found->second.style.textStyle) DescribeText(L"text", node.as<wux::Controls::TextBlock>());
 					PaintHalo(found->second, node.as<wux::Controls::TextBlock>(), true);
 				}
 			});
@@ -549,7 +610,8 @@ namespace
 		{
 			const auto text = halo.text.get();
 			if (!text) return;
-			wux::Hosting::ElementCompositionPreview::SetElementChildVisual(text, nullptr);
+			if (wux::Hosting::ElementCompositionPreview::GetElementChildVisual(text) == halo.root)
+				wux::Hosting::ElementCompositionPreview::SetElementChildVisual(text, nullptr);
 			if (halo.textToken >= 0) text.UnregisterPropertyChangedCallback(wux::Controls::TextBlock::TextProperty(), halo.textToken);
 			if (halo.foregroundToken >= 0) text.UnregisterPropertyChangedCallback(wux::Controls::TextBlock::ForegroundProperty(), halo.foregroundToken);
 			text.SizeChanged(halo.sizeToken);
@@ -577,7 +639,13 @@ namespace
 		{
 			try
 			{
-				if (!enabled || m_halo.mode == 0 || m_halo.strength == 0)
+				if (enabled)
+				{
+					const auto next = ReadHalo();
+					if ((next.textStyle != 0) != (m_halo.textStyle != 0)) ClearHalos();
+					m_halo = next;
+				}
+				if (!enabled || (!m_halo.textStyle && (m_halo.mode == 0 || m_halo.strength == 0)))
 				{
 					if (!m_halos.empty()) { ClearHalos(); m_haloCount = 0; Log(L"tray halo off"); }
 					return;
@@ -592,15 +660,14 @@ namespace
 					if (found != m_halos.end() && found->second.text.get() != text) { m_halos.erase(found); found = m_halos.end(); }
 					if (found == m_halos.end())
 					{
-						winrt::Windows::UI::Color ink{};
-						if (DarkInk(text, ink)) AddHalo(key, text);
+						if (VisibleInk(TextInk(text), m_halo) && !text.Text().empty()) AddHalo(key, text);
 					}
 					else
 					{
 						// Without the colour check the halo kept drawing black letters over text that had turned white.
-						winrt::Windows::UI::Color ink{};
-						const bool dark = DarkInk(text, ink);
-						if (found->second.style != m_halo || dark != found->second.dark || (dark && ink != found->second.inkSeen))
+						const auto ink = TextInk(text);
+						const bool retryMask = !found->second.masked && VisibleInk(ink, m_halo) && !text.Text().empty();
+						if (found->second.style != m_halo || ink != found->second.inkSeen || retryMask)
 						{
 							found->second.style = m_halo;
 							PaintHalo(found->second, text, false);

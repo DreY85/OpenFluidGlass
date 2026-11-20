@@ -10,6 +10,7 @@ namespace OpenGlass
 		D2D1_COLOR_F afterglow;
 		D2D1_COLOR_F fallback;
 		float blurBalance;
+		D2D1_VECTOR_4F explorerClearPane{};
 		bool pill{ false };	// Fluid Glass: cut to a fully rounded outline (Direct3D only)
 		bool light{ false };	// Fluid Glass: the window draws dark text, so readability lightens instead (Direct3D only)
 	};
