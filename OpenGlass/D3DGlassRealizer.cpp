@@ -834,8 +834,12 @@ HRESULT CD3DGlassRealizer::Render(
 		// With a back buffer view, pass 1 keeps reading the back buffer as before.
 		pass1InputSRV = backBufferSRV ? backBufferSRV : m_intermediateBuffer.m_srv.get();
 	}
-	else
+	else if (!fg.enabled)
 	{
+		// The realizer is shared by every glass on the device. With Fluid Glass on, some glass (a sharp
+		// taskbar next to Clarity 0 windows, or a clear pane) can need this texture while the next one
+		// does not, and releasing it here re-created a screen-sized texture almost every frame.
+		// Ensure() still re-creates it when the size, format or protection changes.
 		m_intermediateBuffer.Reset();
 	}
 
