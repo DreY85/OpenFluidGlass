@@ -561,6 +561,104 @@ HRESULT CaptionTextHandler::MyCChannel_MatrixTransformUpdate(dwmcore::CChannel* 
 	return g_CChannel_MatrixTransformUpdate_Org(This, handleId, matrix);
 }
 
+namespace
+{
+	static_assert(sizeof(DWRITE_MATRIX) == sizeof(D2D1_MATRIX_3X2_F));
+
+	// Collects the outlines of a text layout as D2D geometry, placed and snapped the way DrawTextLayout places the
+	// glyphs. It lives on the stack for one IDWriteTextLayout::Draw call, so it does not count references.
+	class TextOutlineCollector final : public IDWriteTextRenderer
+	{
+	public:
+		TextOutlineCollector(ID2D1Factory* factory, ID2D1DeviceContext* context, D2D1_DRAW_TEXT_OPTIONS options) :
+			m_factory{ factory }, m_context{ context }, m_options{ options }
+		{
+		}
+
+		std::vector<winrt::com_ptr<ID2D1TransformedGeometry>> runs{};
+
+		IFACEMETHODIMP QueryInterface(REFIID riid, void** object) override
+		{
+			if (riid == __uuidof(IUnknown) || riid == __uuidof(IDWritePixelSnapping) || riid == __uuidof(IDWriteTextRenderer))
+			{
+				*object = static_cast<IDWriteTextRenderer*>(this);
+				return S_OK;
+			}
+			*object = nullptr;
+			return E_NOINTERFACE;
+		}
+		IFACEMETHODIMP_(ULONG) AddRef() override { return 1; }
+		IFACEMETHODIMP_(ULONG) Release() override { return 1; }
+
+		IFACEMETHODIMP IsPixelSnappingDisabled(void*, BOOL* isDisabled) override
+		{
+			*isDisabled = (m_options & D2D1_DRAW_TEXT_OPTIONS_NO_SNAP) != 0;
+			return S_OK;
+		}
+		IFACEMETHODIMP GetCurrentTransform(void*, DWRITE_MATRIX* transform) override
+		{
+			m_context->GetTransform(reinterpret_cast<D2D1_MATRIX_3X2_F*>(transform));
+			return S_OK;
+		}
+		IFACEMETHODIMP GetPixelsPerDip(void*, FLOAT* pixelsPerDip) override
+		{
+			float dpiX{ 96.f }, dpiY{ 96.f };
+			m_context->GetDpi(&dpiX, &dpiY);
+			*pixelsPerDip = dpiX > 0.f ? dpiX / 96.f : 1.f;
+			return S_OK;
+		}
+
+		IFACEMETHODIMP DrawGlyphRun(void*, FLOAT baselineOriginX, FLOAT baselineOriginY, DWRITE_MEASURING_MODE, const DWRITE_GLYPH_RUN* glyphRun, const DWRITE_GLYPH_RUN_DESCRIPTION*, IUnknown*) override
+		{
+			if (!glyphRun->glyphCount)
+			{
+				return S_OK;
+			}
+			// Colour glyphs such as emoji keep their own pictures, without a wall inside them.
+			winrt::com_ptr<IDWriteFontFace2> colorFace{};
+			if (SUCCEEDED(glyphRun->fontFace->QueryInterface(colorFace.put())) && colorFace->IsColorFont())
+			{
+				return S_OK;
+			}
+			winrt::com_ptr<ID2D1PathGeometry> outline{};
+			winrt::com_ptr<ID2D1GeometrySink> sink{};
+			HRESULT hr = m_factory->CreatePathGeometry(outline.put());
+			if (SUCCEEDED(hr)) hr = outline->Open(sink.put());
+			if (FAILED(hr)) return hr;
+			sink->SetFillMode(D2D1_FILL_MODE_WINDING);
+			hr = glyphRun->fontFace->GetGlyphRunOutline(
+				glyphRun->fontEmSize,
+				glyphRun->glyphIndices,
+				glyphRun->glyphAdvances,
+				glyphRun->glyphOffsets,
+				glyphRun->glyphCount,
+				glyphRun->isSideways,
+				glyphRun->bidiLevel % 2,
+				sink.get()
+			);
+			if (SUCCEEDED(hr)) hr = sink->Close();
+			if (FAILED(hr)) return hr;
+			winrt::com_ptr<ID2D1TransformedGeometry> placed{};
+			hr = m_factory->CreateTransformedGeometry(outline.get(), D2D1::Matrix3x2F::Translation(baselineOriginX, baselineOriginY), placed.put());
+			if (FAILED(hr)) return hr;
+			runs.emplace_back(std::move(placed));
+			return S_OK;
+		}
+		IFACEMETHODIMP DrawUnderline(void*, FLOAT, FLOAT, const DWRITE_UNDERLINE*, IUnknown*) override { return S_OK; }
+		IFACEMETHODIMP DrawStrikethrough(void*, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH*, IUnknown*) override { return S_OK; }
+		// The ellipsis of a trimmed title is an inline object that draws its glyphs through this renderer.
+		IFACEMETHODIMP DrawInlineObject(void* context, FLOAT originX, FLOAT originY, IDWriteInlineObject* inlineObject, BOOL isSideways, BOOL isRightToLeft, IUnknown* effect) override
+		{
+			return inlineObject ? inlineObject->Draw(context, this, originX, originY, isSideways, isRightToLeft, effect) : S_OK;
+		}
+
+	private:
+		ID2D1Factory* m_factory;
+		ID2D1DeviceContext* m_context;
+		D2D1_DRAW_TEXT_OPTIONS m_options;
+	};
+}
+
 void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 	ID2D1DeviceContext* This,
 	D2D1_POINT_2F origin,
@@ -617,28 +715,32 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 	// Fluid Glass text style, drawn behind the letters one physical pixel away, like the File Explorer labels.
 	// Engraved: one edge, under the letters in light mode and above them in dark mode, light under dark ink.
 	// Etched: a dark edge above and a light edge under the letters.
+	const bool textStyle = fluidGlass && g_titleTextStyle;
+	float dpiX{ 96.f }, dpiY{ 96.f };
+	This->GetDpi(&dpiX, &dpiY);
+	const float pixel = dpiY > 0.f ? 96.f / dpiY : 1.f;
+	// The dimmed grey of an inactive title says little about its mode, so the window's mode decides there.
+	const bool darkInk = windowState.active ?
+		Engraving::LightEdge(static_cast<int>(drawnColor.r * 255.f), static_cast<int>(drawnColor.g * 255.f), static_cast<int>(drawnColor.b * 255.f)) :
+		windowState.light;
+	// A recessed face catches light on the wall opposite the frame light.
+	D2D1_POINT_2F step{ 0.f, pixel };
+	if (g_titleTextStyle == 3)
+	{
+		const float radians = Shared::g_fluidGlass.lightDegrees * 0.01745329252f;
+		step = { -std::cos(radians) * (dpiX > 0.f ? 96.f / dpiX : 1.f), -std::sin(radians) * pixel };
+	}
+	// Directional incision with light ink, as in dark mode: white letters leave no room for a brighter wall beside
+	// them, and a dark edge outside them vanishes on dark glass. The shadow wall goes inside the letters instead.
+	const bool innerShadow = textStyle && g_titleTextStyle == 3 && !darkInk;
 	const auto drawTextStyle = [&](D2D1_POINT_2F at)
 	{
-		if (!fluidGlass || !g_titleTextStyle)
+		if (!textStyle || innerShadow)
 		{
 			return;
 		}
-		float dpiX{ 96.f }, dpiY{ 96.f };
-		This->GetDpi(&dpiX, &dpiY);
-		const float pixel = dpiY > 0.f ? 96.f / dpiY : 1.f;
-		// The dimmed grey of an inactive title says little about its mode, so the window's mode decides there.
-		const bool darkInk = windowState.active ?
-			Engraving::LightEdge(static_cast<int>(drawnColor.r * 255.f), static_cast<int>(drawnColor.g * 255.f), static_cast<int>(drawnColor.b * 255.f)) :
-			windowState.light;
 		// Colour fonts would draw their pictures again at the edge, so the edges use the plain glyph shapes.
 		const auto edgeOptions = options & ~D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
-		// A recessed face catches light on the wall opposite the frame light.
-		D2D1_POINT_2F step{ 0.f, pixel };
-		if (g_titleTextStyle == 3)
-		{
-			const float radians = Shared::g_fluidGlass.lightDegrees * 0.01745329252f;
-			step = { -std::cos(radians) * (dpiX > 0.f ? 96.f / dpiX : 1.f), -std::sin(radians) * pixel };
-		}
 		const auto edge = [&](float rows, bool white, int percent)
 		{
 			const float value = white ? 1.f : 0.f;
@@ -655,6 +757,67 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		{
 			edge(windowState.light ? 1.f : -1.f, darkInk, Engraving::Strength);
 		}
+	};
+	// Drawn over the letters: the part of them that the same letters, moved one pixel away from the light, leave
+	// uncovered. That is a thin band inside each stroke along the side that faces the light.
+	const auto drawInnerShadow = [&](D2D1_POINT_2F at)
+	{
+		if (!innerShadow)
+		{
+			return;
+		}
+		winrt::com_ptr<ID2D1Factory> factory{};
+		This->GetFactory(factory.put());
+		if (!factory)
+		{
+			return;
+		}
+		TextOutlineCollector collector{ factory.get(), This, options };
+		if (FAILED(textLayout->Draw(nullptr, &collector, at.x, at.y)) || collector.runs.empty())
+		{
+			return;
+		}
+		std::vector<ID2D1Geometry*> runs{};
+		for (const auto& run : collector.runs)
+		{
+			runs.push_back(run.get());
+		}
+		winrt::com_ptr<ID2D1GeometryGroup> letters{};
+		winrt::com_ptr<ID2D1PathGeometry> wall{};
+		winrt::com_ptr<ID2D1GeometrySink> sink{};
+		if (
+			FAILED(factory->CreateGeometryGroup(D2D1_FILL_MODE_WINDING, runs.data(), static_cast<UINT32>(runs.size()), letters.put())) ||
+			FAILED(factory->CreatePathGeometry(wall.put())) ||
+			FAILED(wall->Open(sink.put()))
+		)
+		{
+			return;
+		}
+		D2D1_MATRIX_3X2_F transform{};
+		This->GetTransform(&transform);
+		const float tolerance = D2D1::ComputeFlatteningTolerance(transform, dpiX, dpiY);
+		const auto shift = D2D1::Matrix3x2F::Translation(step.x, step.y);
+		if (
+			FAILED(letters->CombineWithGeometry(letters.get(), D2D1_COMBINE_MODE_EXCLUDE, &shift, tolerance, sink.get())) ||
+			FAILED(sink->Close())
+		)
+		{
+			return;
+		}
+		// Never FillGeometry here: GlassRenderer hooks it on every D2D context in this process and treats each call as
+		// glass, with whatever glass state an earlier draw left behind. A geometry realization takes another entry.
+		winrt::com_ptr<ID2D1DeviceContext1> context1{};
+		winrt::com_ptr<ID2D1GeometryRealization> realization{};
+		if (
+			FAILED(This->QueryInterface(context1.put())) ||
+			FAILED(context1->CreateFilledGeometryRealization(wall.get(), tolerance, realization.put()))
+		)
+		{
+			return;
+		}
+		solidColorBrush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, drawnColor.a * static_cast<float>(Engraving::UpperStrength(false)) / 100.f));
+		context1->DrawGeometryRealization(realization.get(), solidColorBrush.get());
+		solidColorBrush->SetColor(drawnColor);
 	};
 
 	// uDWM may draw the same layout again; only widen it the first time it turns bold.
@@ -679,13 +842,15 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 	if (!g_textGlowSize)
 	{
 		drawTextStyle(origin);
-		return g_ID2D1DeviceContext_DrawTextLayout_Org(
+		g_ID2D1DeviceContext_DrawTextLayout_Org(
 			This,
 			origin,
 			textLayout,
 			defaultFillBrush,
 			options
 		);
+		drawInnerShadow(origin);
+		return;
 	}
 
 	origin.x += g_textGlowSize;
@@ -811,6 +976,7 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 			nullptr,
 			D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR
 		);
+		drawInnerShadow(origin);
 		return;
 	}
 	// The theme's light glow would wash out light text, so it only goes behind dark text.
@@ -913,13 +1079,14 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 	}
 
 	drawTextStyle(origin);
-	return g_ID2D1DeviceContext_DrawTextLayout_Org(
+	g_ID2D1DeviceContext_DrawTextLayout_Org(
 		This,
 		origin,
 		textLayout,
 		defaultFillBrush,
 		options
 	);
+	drawInnerShadow(origin);
 }
 
 HRESULT CaptionTextHandler::MyICompositionGraphicsDevice_CreateDrawingSurface(

@@ -24,7 +24,7 @@
 
 - File Explorer text style has two new looks. Engraved adds a single edge, under dark text in light mode and above light text in dark mode. Etched adds a fine upper shadow and a lower reflection and keeps your text color. Standard uses the halo, glow and outline settings as before.
 - Title bars that Windows draws for other apps, such as classic Notepad, Regedit and Control Panel, take the File Explorer text color of their mode while the window is active. Inactive titles stay dimmed. Title bar text style picks Standard, Engraved or Etched. Apps that draw their own title bars are not affected. The color card is now called Text colors and title bars.
-- Title bar text style has a fourth look, Directional incision. The letters look cut into the glass, with the lit wall facing the glass light angle. The Engraved and Etched edges now follow the transparency of the title text.
+- Title bar text style has a fourth look, Directional incision. The letters look cut into the glass, with the lit wall facing the glass light angle. With light text, as in dark mode, the shadow wall is drawn inside the letters, on the side that faces the light. The Engraved and Etched edges now follow the transparency of the title text.
 - In light mode, the column headers in File Explorer (Name, Date modified and the rest) get the text color, halo and outline too.
 - The outline and glow of a row scrolled under the column headers no longer show through them as a dark ghost.
 
