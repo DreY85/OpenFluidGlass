@@ -57,6 +57,7 @@
     <ClInclude Include="Elevation.hpp" />
     <ClInclude Include="Diagnostics.hpp" />
     <ClInclude Include="OpenGlassGUI.hpp" />
+    <ClInclude Include="UpdateCheck.hpp" />
     <ClInclude Include="MainFrame.hpp" />
     <ClInclude Include="PresetPackage.hpp" />
     <ClInclude Include="ManagedFiles.hpp" />
@@ -86,6 +87,7 @@
     <ClCompile Include="Elevation.cpp" />
     <ClCompile Include="Diagnostics.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="OpenGlassGUI.cpp" />
+    <ClCompile Include="UpdateCheck.cpp" />
 	<ClCompile Include="MainFrame.ColorPresets.cpp" />
     <ClCompile Include="MainFrame.Presets.cpp" />
     <ClCompile Include="MainFrame.Core.cpp" />
@@ -94,6 +96,7 @@
     <ClCompile Include="MainFrame.FluidGlass.cpp" />
     <ClCompile Include="MainFrame.Explorer.cpp" />
     <ClCompile Include="MainFrame.Taskbar.cpp" />
+    <ClCompile Include="MainFrame.Updates.cpp" />
     <ClCompile Include="ModernTheme.cpp" />
     <ClCompile Include="ModernControls.cpp" />
     <ClCompile Include="ConfigurationResources.cpp" />

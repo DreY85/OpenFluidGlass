@@ -100,6 +100,8 @@ UninstallRestartExplorer=Restart Windows Explorer to remove the glass effects no
 StartTaskbar=Start the Fluid Glass taskbar now
 InstallingTaskbar=Registering the Fluid Glass taskbar...
 RemovingTaskbar=Removing the Fluid Glass taskbar...
+InstallingUpdateCheck=Registering the daily update check...
+RemovingUpdateCheck=Removing the daily update check...
 UpstreamInstalled=OpenGlass, or an early Open Fluid Glass build, is already installed on this PC. The two cannot run together. Uninstall it from Settings > Apps, restart, then run this setup again. To keep your settings, leave the uninstaller's delete options unticked.
 TaskbarTaskFailed=The Fluid Glass taskbar could not be set to start at sign-in. Everything else is installed. You can still start the taskbar from the Taskbar tab in Fluid Glass. The setup log has the details.
 
@@ -119,6 +121,7 @@ Source: "{#TaskbarPath}\starttap.dll"; DestDir: "{app}\taskbar"; Flags: ignoreve
 ; MoveAsideInUse renames the loaded copy first, so an update needs an Explorer restart, not a Windows restart.
 Source: "{#TaskbarPath}\itemglass.dll"; DestDir: "{app}\taskbar"; Flags: ignoreversion restartreplace uninsrestartdelete; BeforeInstall: MoveAsideInUse; Check: IsWindows11
 Source: "{#MyProjPath}\Scripts\Register-TaskbarTask.ps1"; DestDir: "{app}\taskbar"; Flags: ignoreversion
+Source: "{#MyProjPath}\Scripts\Register-UpdateTask.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyProjPath}\Scripts\Restart-Explorer.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyProjPath}\Scripts\Restart-ExplorerAsUser.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -216,7 +219,8 @@ Type: files; Name: "{group}\Uninstall Open Liquid Glass.lnk"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkablealone
 
 [Icons]
-Name: "{group}\Open Fluid Glass"; Filename: "{app}\OpenGlassGUI.exe"
+; Windows shows the update notice only for an app ID that a Start menu shortcut carries. The GUI uses the same ID.
+Name: "{group}\Open Fluid Glass"; Filename: "{app}\OpenGlassGUI.exe"; AppUserModelID: "DreY85.OpenFluidGlass"
 Name: "{commondesktop}\Open Fluid Glass"; Filename: "{app}\OpenGlassGUI.exe"; Tasks: desktopicon
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
@@ -256,6 +260,8 @@ Filename: "{sys}\sc.exe"; Parameters: "description OpenGlassHost ""{cm:ServiceDe
 Filename: "{sys}\sc.exe"; Parameters: "start OpenGlassHost"; Flags: runhidden nowait
 ; Logon task for the taskbar host (Users group, normal priority). The script runs from the hardened install folder.
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -HostPath ""{app}\taskbar\pillhost.exe"""; StatusMsg: "{cm:InstallingTaskbar}"; Flags: runhidden waituntilterminated; AfterInstall: CheckTaskbarTask; Check: IsWindows11
+; Daily and at sign-in, as each signed-in user: ask GitHub for the latest release and notify. Nothing is downloaded.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\Register-UpdateTask.ps1"" -GuiPath ""{app}\{#MyAppExeName}"""; StatusMsg: "{cm:InstallingUpdateCheck}"; Flags: runhidden waituntilterminated
 ; Both of these start as the signed-in user, never elevated: explorer could not post to an elevated host.
 Filename: "{app}\Restart-Explorer.cmd"; Description: "{cm:RestartExplorer}"; Flags: postinstall nowait runasoriginaluser runhidden skipifsilent
 Filename: "{app}\taskbar\pillhost.exe"; Description: "{cm:StartTaskbar}"; Flags: postinstall nowait runasoriginaluser skipifsilent; Check: IsWindows11
@@ -266,6 +272,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchOpenGlassGUI}"; Flags
 Filename: "{sys}\sc.exe"; Parameters: "stop OpenGlassHost"; Flags: runhidden waituntilterminated; RunOnceId: "StopService"
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM ""{#MyAppExeName}"" /F"; Flags: runhidden; RunOnceId: "KillGUI"
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\taskbar\Register-TaskbarTask.ps1"" -Remove"; StatusMsg: "{cm:RemovingTaskbar}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveTaskbarTask"
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\Register-UpdateTask.ps1"" -Remove"; StatusMsg: "{cm:RemovingUpdateCheck}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveUpdateTask"
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM pillhost.exe /F"; Flags: runhidden; RunOnceId: "KillTaskbarHost"
 Filename: "{sys}\sc.exe"; Parameters: "delete OpenGlassHost"; Flags: runhidden; RunOnceId: "DeleteService"
 
@@ -605,6 +612,8 @@ begin
 
   DeleteConfigValues(HKEY_CURRENT_USER, 'SOFTWARE\Microsoft\Windows\DWM', OpenGlassKeys);
   DeleteConfigValues(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\Windows\DWM', OpenGlassKeys);
+  // The update check's per-user state: the daily switch, the last release seen and a skipped version.
+  RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, 'Software\OpenGlass\Update');
 
   DeleteConfigurationResources(ExpandConstant('{commonappdata}\OpenGlass\Configuration\Machine'));
   Sid := CurrentUninstallSid;

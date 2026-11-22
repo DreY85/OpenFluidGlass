@@ -158,6 +158,7 @@ namespace OpenGlass
 			m_clDisabledHooks->Enable(false);
 			AddWarningNotice(panel, sizer, L"Requires administrator privileges to edit HKLM settings.");
 		}
+		CreateUpdatesCard(panel, sizer);
 
 		panel->SetSizer(sizer);
 		panel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW)); 

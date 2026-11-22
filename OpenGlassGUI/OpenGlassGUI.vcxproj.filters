@@ -54,6 +54,9 @@
 		<ClInclude Include="MainFrame.hpp">
 			<Filter>Header Files</Filter>
 		</ClInclude>
+		<ClInclude Include="UpdateCheck.hpp">
+			<Filter>Header Files</Filter>
+		</ClInclude>
 		<ClInclude Include="RegistryConfig.hpp">
 			<Filter>Header Files</Filter>
 		</ClInclude>
@@ -102,6 +105,12 @@
 			<Filter>Source Files</Filter>
 		</ClCompile>
 		<ClCompile Include="MainFrame.Tabs.cpp">
+			<Filter>Source Files</Filter>
+		</ClCompile>
+		<ClCompile Include="MainFrame.Updates.cpp">
+			<Filter>Source Files</Filter>
+		</ClCompile>
+		<ClCompile Include="UpdateCheck.cpp">
 			<Filter>Source Files</Filter>
 		</ClCompile>
 		<ClCompile Include="RegistryConfig.cpp">

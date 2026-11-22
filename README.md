@@ -50,17 +50,21 @@ Some antivirus products may flag the taskbar module. To draw glass behind the ta
 
 Open Fluid Glass has no telemetry, no analytics and no accounts. It does not write log files. It never records what you type. The only keys it checks are the emergency exit combination above, plus <kbd>Shift</kbd> when you open the **More** menu of the settings app. It looks at window positions and sizes only to place the glass.
 
-It connects to the internet for one thing only. It downloads public debug symbols for the Windows DWM files (such as `uDWM.dll`) from Microsoft's symbol server (`msdl.microsoft.com`). These tell OpenGlass where to hook into DWM on your Windows build. Nothing about you or your PC is sent, apart from what any download from Microsoft involves.
+It connects to the internet for two things only:
+
+- It downloads public debug symbols for the Windows DWM files (such as `uDWM.dll`) from Microsoft's symbol server (`msdl.microsoft.com`). These tell OpenGlass where to hook into DWM on your Windows build. Nothing about you or your PC is sent, apart from what any download from Microsoft involves.
+- Once a day and at sign-in, it asks GitHub (`api.github.com`) for the latest Open Fluid Glass release. When that release is newer than yours, Windows shows a notice with a link to the release page. Nothing is downloaded or installed. GitHub sees your IP address, as with any visit to a website, and nothing else about you. You can turn this off in the settings app, on the **System** tab, under **Updates**.
 
 What it changes on your PC:
 
 - A Windows service that loads the glass into DWM, as OpenGlass does.
 - Settings in `Software\Microsoft\Windows\DWM` and `Software\OpenGlass`, for the machine (`HKLM`) and for each user (`HKCU`).
 - A scheduled task, `FluidGlassTaskbar`, that starts the taskbar at sign-in.
+- A scheduled task, `FluidGlassUpdateCheck`, that runs the daily update check.
 - A shell extension for ExplorerBlurMica and one for the File Explorer glass highlights.
 - Copies of the taskbar modules in `%LOCALAPPDATA%\OpenGlass\tap`, because Program Files is read-only for normal users.
 
-Uninstalling removes the service, the task and the shell extensions. It asks whether to delete your settings too.
+Uninstalling removes the service, the tasks and the shell extensions. It asks whether to delete your settings too.
 
 ## Support
 

@@ -4,6 +4,7 @@
 #include "MainFrame.hpp"
 #include "Elevation.hpp"
 #include "EditorScope.hpp"
+#include "UpdateCheck.hpp"
 #include <wx/cmdline.h>
 
 // IMPLEMENT_APP must be in global scope
@@ -11,6 +12,13 @@ IMPLEMENT_APP(OpenGlass::OpenGlassApp)
 
 namespace OpenGlass
 {
+	// wxWidgets gives every window this app ID. It matches the Start menu shortcut, which lets Windows show
+	// the update notice and keeps the taskbar button grouped with that shortcut.
+	OpenGlassApp::OpenGlassApp()
+	{
+		SetClassName(UpdateCheck::c_appUserModelId);
+	}
+
 	void OpenGlassApp::OnInitCmdLine(wxCmdLineParser& parser)
 	{
 		wxApp::OnInitCmdLine(parser);
@@ -24,10 +32,28 @@ namespace OpenGlass
 			wxCMD_LINE_VAL_STRING,
 			wxCMD_LINE_HIDDEN
 		);
+		parser.AddLongSwitch(L"check-updates", L"check GitHub for a newer release and notify, then exit", wxCMD_LINE_HIDDEN);
+		parser.AddLongOption(L"assume-version", L"installed version to compare with, for testing the update check", wxCMD_LINE_VAL_STRING, wxCMD_LINE_HIDDEN);
 	}
 
 	bool OpenGlassApp::OnInit()
 	{
+		// The scheduled update check runs headless and exits: no window, no elevation and no session lock.
+		bool checkUpdates = false;
+		std::wstring assumedVersion;
+		for (int index = 1; index < argc; ++index)
+		{
+			const wxString argument = argv[index];
+			if (argument == L"--check-updates") checkUpdates = true;
+			else if (argument.StartsWith(L"--assume-version=")) assumedVersion = argument.Mid(17).ToStdWstring();
+		}
+		if (checkUpdates)
+		{
+			// wx returns this code when OnInit stops the app, so Task Scheduler shows 0 for a good run.
+			SetErrorExitCode(UpdateCheck::RunScheduledCheck(assumedVersion));
+			return false;
+		}
+
 		// Dark is forced, so the system text colors can't follow a Windows switch on their own and end up
 		// dark on the dark palette. The main window rebuilds itself in the new colors instead.
 		if (wxSystemSettings::GetAppearance().AreAppsDark())

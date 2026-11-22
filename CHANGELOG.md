@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.0.5
+
+### Update check
+
+- Once a day and at sign-in, Open Fluid Glass asks GitHub for the latest release. When it is newer than yours, Windows shows a notice with a link to the release page. Nothing is downloaded or installed, and GitHub sees only your IP address.
+- The settings app has an Updates card on the System tab: Check for updates daily (on by default) and Check now. When a newer release is known, an Update button appears next to More, with Open release page and Skip this version.
+
+### Smoother dragging
+
+- Moving the mouse and dragging windows no longer stutters when the taskbar has its own glass settings and windows use Clarity 0. A screen-sized texture was created and freed almost every frame. It is now kept while Fluid Glass is on. In a 20 second window drag, frames longer than 33 ms went from 7 to 0.
+
+### Glass
+
+- Grain adds a fine static noise over the glass, like frosted or sandblasted glass. Grain in light mode has its own value. Both start at 0, which is off.
+- Shadow lift for light mode readability: Readability in light mode brightens only the dark parts of the backdrop, tinted toward the wallpaper around them, and fades out across the curved edge. Bright areas stay clear instead of milky. Off keeps the classic lift.
+- Glass tint in light mode sets how far the glass is lifted toward white in light mode. 0 keeps the dark mode color. The default keeps the old look.
+- Clear glass for File Explorer in light mode gives File Explorer windows the same glass color as in dark mode, without the milky white layer. The text halo, outline and colors keep the names readable. Other apps and Start follow Glass tint in light mode. It is off by default.
+- Clear empty space below Explorer items shows clear glass in the empty part of the file view in light mode. With Shadow lift on, the last visible row fades into it. The navigation pane and the status bar keep their material.
+
+### Text
+
+- File Explorer text style has two new looks. Engraved adds a single edge, under dark text in light mode and above light text in dark mode. Etched adds a fine upper shadow and a lower reflection and keeps your text color. Standard uses the halo, glow and outline settings as before.
+- Title bars that Windows draws for other apps, such as classic Notepad, Regedit and Control Panel, take the File Explorer text color of their mode while the window is active. Inactive titles stay dimmed. Title bar text style picks Standard, Engraved or Etched. Apps that draw their own title bars are not affected. The color card is now called Text colors and title bars.
+- In light mode, the column headers in File Explorer (Name, Date modified and the rest) get the text color, halo and outline too.
+- The outline and glow of a row scrolled under the column headers no longer show through them as a dark ghost.
+
+### Taskbar
+
+- Use separate blur and readability gives the floating taskbar its own blur and readability for light and dark mode.
+- Tray text style styles the clock, the date and the system icon glyphs on the floating taskbar.
+- The taskbar text effects reuse cached glyph masks.
+
 ## 1.0.4
 
 ### File Explorer colors

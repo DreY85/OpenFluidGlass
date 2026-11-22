@@ -201,16 +201,42 @@ namespace OpenGlass
 		ModernTheme::StyleButton(m_btnRevert);
 		ModernTheme::StyleButton(more);
 
+		// A newer release found by the daily check or by Check now. Hidden until there is one.
+		m_btnUpdate = new MoreButton(this, wxID_ANY, L"Update available ▴");
+		m_btnUpdate->Bind(wxEVT_BUTTON, [this](wxCommandEvent&)
+		{
+			if (!m_pendingUpdate) return;
+			const auto release = *m_pendingUpdate;
+			wxMenu menu;
+			auto* open = menu.Append(wxID_ANY, L"Open release page...",
+				L"Open the release on github.com in your browser. Fluid Glass downloads nothing by itself.");
+			auto* skip = menu.Append(wxID_ANY, std::format(L"Skip version {}", release.version),
+				L"Stop showing this release here and in the daily notice. A newer release shows again.");
+			const auto selected = m_btnUpdate->GetPopupMenuSelectionFromUser(menu, wxPoint(0, 0));
+			if (selected == open->GetId()) wxLaunchDefaultBrowser(release.url);
+			else if (selected == skip->GetId())
+			{
+				UpdateCheck::SaveSkipped(m_targetUserSid.ToStdWstring(), release.version);
+				RefreshUpdateNotice();
+				SetStatusText(std::format(L"Version {} skipped.", release.version));
+			}
+		});
+		m_btnUpdate->SetMinSize(wxSize(-1, buttonSize.y));
+		ModernTheme::StyleButton(m_btnUpdate);
+
 		// Status messages live next to the buttons; the native status bar drew a black strip in dark mode.
 		m_statusText = new wxStaticText(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
 		m_statusText->SetForegroundColour(ModernTheme::Get().subtext);
 
 		btnSizer->Add(more, 0);
+		btnSizer->Add(m_btnUpdate, 0, wxLEFT, FromDIP(8));
 		btnSizer->Add(m_statusText, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(12));
 		btnSizer->Add(m_btnRevert, 0, wxRIGHT, FromDIP(8));
 		btnSizer->Add(m_btnSave, 0);
 
 		parentSizer->Add(btnSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(12));
+		m_btnUpdate->Hide();
+		RefreshUpdateNotice();
 	}
 
 	void MainFrame::SetStatusText(const wxString& text, int)

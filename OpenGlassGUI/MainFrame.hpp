@@ -9,6 +9,7 @@
 #include "PresetPackage.hpp"
 #include "ConfigurationResources.hpp"
 #include "WrappingLayout.hpp"
+#include "UpdateCheck.hpp"
 
 namespace OpenGlass
 {
@@ -21,10 +22,15 @@ namespace OpenGlass
 	public:
 		MainFrame(std::wstring userSid, Settings::Scope scope, bool systemTransparency);
 		void SetStatusText(const wxString& text, int number = 0) override;
+		// Called on the UI thread when a "Check now" request returns.
+		void ApplyUpdateCheckResult(const UpdateCheck::FetchResult& result);
 
 	private:
 		void CreateControls();
 		void CreateSystemTab();
+		void CreateUpdatesCard(wxWindow* panel, wxSizer* sizer);
+		void RefreshUpdateNotice();
+		void CheckForUpdatesNow();
 		void CreatePresetsTab();
 		void CreateDiagnosticsTab();
 		void CreateThemeTab();
@@ -147,6 +153,13 @@ namespace OpenGlass
 		// Buttons
 		wxButton* m_btnSave{ nullptr };
 		wxButton* m_btnRevert{ nullptr };
+		wxButton* m_btnUpdate{ nullptr }; // shown only while a newer release is known
+
+		// Update check (per user, never touches the DWM settings)
+		wxCheckBox* m_chkCheckUpdates{ nullptr };
+		wxButton* m_btnCheckUpdates{ nullptr };
+		wxStaticText* m_updateStatus{ nullptr };
+		std::optional<UpdateCheck::Release> m_pendingUpdate;
 
 		// System Tab
 		wxCheckBox* m_chkDisableGlassOnBattery{ nullptr };

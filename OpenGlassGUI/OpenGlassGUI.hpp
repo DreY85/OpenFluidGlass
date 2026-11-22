@@ -6,6 +6,7 @@ namespace OpenGlass
 	class OpenGlassApp : public wxApp
 	{
 	public:
+		OpenGlassApp();
 		bool OnInit() override;
 		void OnInitCmdLine(wxCmdLineParser& parser) override;
 	private:
