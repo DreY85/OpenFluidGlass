@@ -18,11 +18,13 @@
 - Glass tint in light mode sets how far the glass is lifted toward white in light mode. 0 keeps the dark mode color. The default keeps the old look.
 - Clear glass for File Explorer in light mode gives File Explorer windows the same glass color as in dark mode, without the milky white layer. The text halo, outline and colors keep the names readable. Other apps and Start follow Glass tint in light mode. It is off by default.
 - Clear empty space below Explorer items shows clear glass in the empty part of the file view in light mode. With Shadow lift on, the last visible row fades into it. The navigation pane and the status bar keep their material.
+- Local edge glint in Explorer lets the rim of File Explorer windows catch the color of the backdrop where a colorful area crosses it. It works in light and dark mode and is off by default.
 
 ### Text
 
 - File Explorer text style has two new looks. Engraved adds a single edge, under dark text in light mode and above light text in dark mode. Etched adds a fine upper shadow and a lower reflection and keeps your text color. Standard uses the halo, glow and outline settings as before.
 - Title bars that Windows draws for other apps, such as classic Notepad, Regedit and Control Panel, take the File Explorer text color of their mode while the window is active. Inactive titles stay dimmed. Title bar text style picks Standard, Engraved or Etched. Apps that draw their own title bars are not affected. The color card is now called Text colors and title bars.
+- Title bar text style has a fourth look, Directional incision. The letters look cut into the glass, with the lit wall facing the glass light angle. The Engraved and Etched edges now follow the transparency of the title text.
 - In light mode, the column headers in File Explorer (Name, Date modified and the rest) get the text color, halo and outline too.
 - The outline and glow of a row scrolled under the column headers no longer show through them as a dark ghost.
 

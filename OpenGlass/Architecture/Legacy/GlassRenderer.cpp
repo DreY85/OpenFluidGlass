@@ -446,6 +446,7 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 				g_type = Shared::g_type;
 				g_params.blurAmount = Shared::g_blurAmount;
 				g_params.optimization = Shared::g_blurOptimization;
+				g_params.explorer = reinterpreter.PaneSlot() != 0;
 				g_params.pill = reinterpreter.GetIsPill();
 				g_params.light = reinterpreter.GetIsLight();
 				g_params.explorerClearPane = GlassKernel::ReadExplorerPane(reinterpreter.PaneSlot());

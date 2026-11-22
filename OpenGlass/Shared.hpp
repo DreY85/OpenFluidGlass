@@ -50,6 +50,7 @@ namespace OpenGlass::Shared
 		bool explorerClearPane{ false };
 		bool shadowLift{ false };	// light mode readability lifts only dark backdrops, tinted toward the wallpaper
 	} g_fluidGlass{};
+	inline bool g_explorerGlint{};
 	inline TaskbarGlass::Settings g_taskbarGlass{};
 
 	inline D2D1_COLOR_F g_color{};

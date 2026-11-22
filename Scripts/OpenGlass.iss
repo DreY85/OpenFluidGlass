@@ -607,6 +607,7 @@ begin
     'FluidGlassSoftness', 'FluidGlassItems', 'FluidGlassDialogs', 'FluidGlassClearLight', 'FluidGlassLightTint', 'FluidGlassGrain', 'FluidGlassGrainLight', 'FluidGlassShadowLift', 'FluidGlassExplorerClearPane', 'FluidGlassEngravedText', 'FluidGlassTitleTextStyle',
     'FluidGlassTextColorLight', 'FluidGlassTextColorDark', 'FluidGlassIconColorLight', 'FluidGlassIconColorDark',
     'FluidGlassSecondaryTextColorLight', 'FluidGlassSecondaryTextColorDark',
+    'FluidGlassExplorerGlint',
     'FluidGlassTaskbarCustom', 'FluidGlassTaskbarBlur', 'FluidGlassTaskbarReadabilityDark', 'FluidGlassTaskbarReadabilityLight'
   ];
 

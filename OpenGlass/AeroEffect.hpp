@@ -13,6 +13,7 @@ namespace OpenGlass
 		D2D1_VECTOR_4F explorerClearPane{};
 		bool pill{ false };	// Fluid Glass: cut to a fully rounded outline (Direct3D only)
 		bool light{ false };	// Fluid Glass: the window draws dark text, so readability lightens instead (Direct3D only)
+		bool explorer{ false };
 	};
 
 	class CAeroEffect : public winrt::implements<CAeroEffect, IRenderingEffect, winrt::non_agile, winrt::no_weak_ref>

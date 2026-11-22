@@ -360,6 +360,15 @@ void LgCompose(PS_INPUT input, out float4 background, out float3 rimLight, out L
 	float farFace = 0.4f * pow(clamp(max(-toLight, turn), 0.0f, sideFacing), fgRim.y);
 	float facing = lerp(farFace, litFace, smoothstep(-turn, turn, toLight));
 	rimLight = ((1.0f - N.y) * facing * fgRim.x).xxx;
+	[branch] if (conv[0].w > 0.5f)
+	{
+		// The existing refracted sample carries the local backdrop colour.
+		float peak = max(neighborhood.r, max(neighborhood.g, neighborhood.b));
+		float low = min(neighborhood.r, min(neighborhood.g, neighborhood.b));
+		float intensity = smoothstep(0.035f, 0.38f, peak - low);
+		float lip = 1.0f - smoothstep(0.25f, min(3.5f, bezel), -d);
+		rimLight += (neighborhood / max(peak, 0.1f)) * (0.38f * intensity * lip * saturate(background.a));
+	}
 	pane.backdrop.rgb += rimLight * saturate(pane.backdrop.a);
 }
 

@@ -400,14 +400,17 @@ namespace
 }
 unsigned GlassKernel::ExplorerPaneSlot(const uDWM::CWindowData* data)
 {
-	if (!Shared::g_fluidGlass.explorerClearPane || !Shared::g_fluidGlass.shadowLift || !data) return 0;
+	const bool trackPane = Shared::g_fluidGlass.explorerClearPane && Shared::g_fluidGlass.shadowLift;
+	if (!data || (!trackPane && !Shared::g_explorerGlint)) return 0;
 	const HWND window = data->GetHwnd();
 	wchar_t name[32]{};
 	if (!window || !GetClassNameW(window, name, ARRAYSIZE(name)) || wcscmp(name, L"CabinetWClass")) return 0;
+	// A glint only needs the window class. Reserve the final token for this case.
+	if (!trackPane || !IsLightWindow(data)) return ARRAYSIZE(s_paneWindows) - 1;
 	AcquireSRWLockExclusive(&s_paneLock);
 	auto unlock = wil::scope_exit([] { ReleaseSRWLockExclusive(&s_paneLock); });
 	unsigned freeSlot = 0;
-	for (unsigned i = 1; i < ARRAYSIZE(s_paneWindows); ++i)
+	for (unsigned i = 1; i < ARRAYSIZE(s_paneWindows) - 1; ++i)
 	{
 		const HWND old = s_paneWindows[i].load(std::memory_order_relaxed);
 		if (old == window) return i;
@@ -419,7 +422,7 @@ unsigned GlassKernel::ExplorerPaneSlot(const uDWM::CWindowData* data)
 }
 D2D1_VECTOR_4F GlassKernel::ReadExplorerPane(unsigned slot)
 {
-	if (!slot || slot >= ARRAYSIZE(s_paneWindows) || !Shared::g_fluidGlass.explorerClearPane || !Shared::g_fluidGlass.shadowLift) return {};
+	if (!slot || slot >= ARRAYSIZE(s_paneWindows) - 1 || !Shared::g_fluidGlass.explorerClearPane || !Shared::g_fluidGlass.shadowLift) return {};
 	const auto window = s_paneWindows[slot].load();
 	if (!window) return {};
 	const auto packed = static_cast<std::uint32_t>(reinterpret_cast<ULONG_PTR>(GetPropW(window, ExplorerPane::Property)));
@@ -704,6 +707,7 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		fg.lightTint = std::clamp(fgValue(L"FluidGlassLightTint", 0.9f), 0.f, 0.9f);
 		fg.grain = std::clamp(fgValue(L"FluidGlassGrain", 0.f), 0.f, 1.f);
 		fg.grainLight = std::clamp(fgValue(L"FluidGlassGrainLight", 0.f), 0.f, 1.f);
+		Shared::g_explorerGlint = GlassEngine::GetDwordFromRegistry(L"FluidGlassExplorerGlint", 0) != 0;
 		fg.explorerClearPane = GlassEngine::GetDwordFromRegistry(L"FluidGlassExplorerClearPane", 0) != 0;
 		fg.shadowLift = GlassEngine::GetDwordFromRegistry(L"FluidGlassShadowLift", 0) != 0;
 		Shared::g_taskbarGlass = TaskbarGlass::Load([](PCWSTR name, DWORD fallback) {

@@ -237,7 +237,7 @@ HRESULT AccentOverrider::MyCAccent__UpdateSolidFill(
 			marker.SetIsPill((data->GetAccentPolicy()->AccentFlags & AccentFlagPill) != 0);
 			marker.SetIsLight(light);
 			marker.SetIsClear(clear);
-			if (light && !marker.GetIsPill()) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(data));
+			if ((light || Shared::g_explorerGlint) && !marker.GetIsPill()) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(data));
 			glassColor.a = marker.ToFloat();
 			RETURN_IF_FAILED(effectBrush->Update(1.0, glassColor));
 

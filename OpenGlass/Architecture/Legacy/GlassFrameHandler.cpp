@@ -300,7 +300,7 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateNCAreaBackground(uDWM::CTopLe
 		GlassKernel::AlphaChannelReinterpreter marker{ active, maximized };
 		marker.SetIsLight(GlassKernel::IsLightWindow(This->GetData()));
 		marker.SetIsClear(marker.GetIsLight() && GlassKernel::IsClearLightWindow(This->GetData()));
-		if (marker.GetIsLight()) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(This->GetData()));
+		if (marker.GetIsLight() || Shared::g_explorerGlint) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(This->GetData()));
 		color.a = marker.ToFloat();
 		RETURN_IF_FAILED(effectBrush->Update(1.0, color));
 	}
@@ -422,7 +422,7 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateClientBlur(uDWM::CTopLevelWin
 		GlassKernel::AlphaChannelReinterpreter marker{ active, maximized };
 		marker.SetIsLight(GlassKernel::IsLightWindow(This->GetData()));
 		marker.SetIsClear(marker.GetIsLight() && GlassKernel::IsClearLightWindow(This->GetData()));
-		if (marker.GetIsLight()) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(This->GetData()));
+		if (marker.GetIsLight() || Shared::g_explorerGlint) marker.SetPaneSlot(GlassKernel::ExplorerPaneSlot(This->GetData()));
 		color.a = marker.ToFloat();
 		RETURN_IF_FAILED(effectBrush->Update(1.0, color));
 	}

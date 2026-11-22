@@ -659,6 +659,8 @@ HRESULT CD3DGlassRealizer::Render(
 	const auto material = TaskbarGlass::Resolve(Shared::g_taskbarGlass, params.pill && fg.enabled, params.light,
 		{ fg.clarity, fg.softness, params.light ? -fg.readabilityLight : fg.readability, fg.shadowLift });
 	{
+		// The convolution uses xyz; its spare w lanes keep the shader buffer layout stable.
+		cbPS.conv[0].w = params.explorer && Shared::g_explorerGlint ? 1.f : 0.f;
 		cbPS.fgRect = { geometryBounds.left, geometryBounds.top, geometryBounds.right, geometryBounds.bottom };
 		// Pass 2 samples the quarter-width buffer: u advances by 0.25 / quarterWidth per back-buffer pixel.
 		// A pill takes its own corner radius; by default more than any glass can hold, which the shader clamps to half the height.

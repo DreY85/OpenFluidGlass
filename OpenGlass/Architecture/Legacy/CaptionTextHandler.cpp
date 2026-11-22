@@ -632,17 +632,21 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 			windowState.light;
 		// Colour fonts would draw their pictures again at the edge, so the edges use the plain glyph shapes.
 		const auto edgeOptions = options & ~D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT;
+		// A recessed face catches light on the wall opposite the frame light.
+		D2D1_POINT_2F step{ 0.f, pixel };
+		if (g_titleTextStyle == 3)
+		{
+			const float radians = Shared::g_fluidGlass.lightDegrees * 0.01745329252f;
+			step = { -std::cos(radians) * (dpiX > 0.f ? 96.f / dpiX : 1.f), -std::sin(radians) * pixel };
+		}
 		const auto edge = [&](float rows, bool white, int percent)
 		{
 			const float value = white ? 1.f : 0.f;
-			winrt::com_ptr<ID2D1SolidColorBrush> brush{};
-			if (FAILED(This->CreateSolidColorBrush(D2D1::ColorF(value, value, value, static_cast<float>(percent) / 100.f), brush.put())))
-			{
-				return;
-			}
-			g_ID2D1DeviceContext_DrawTextLayout_Org(This, D2D1::Point2F(at.x, at.y + rows * pixel), textLayout, brush.get(), edgeOptions);
+			solidColorBrush->SetColor(D2D1::ColorF(value, value, value, drawnColor.a * static_cast<float>(percent) / 100.f));
+			g_ID2D1DeviceContext_DrawTextLayout_Org(This, D2D1::Point2F(at.x + rows * step.x, at.y + rows * step.y), textLayout, solidColorBrush.get(), edgeOptions);
+			solidColorBrush->SetColor(drawnColor);
 		};
-		if (g_titleTextStyle == 2)
+		if (g_titleTextStyle >= 2)
 		{
 			edge(-1.f, false, Engraving::UpperStrength(darkInk));
 			edge(1.f, true, Engraving::LowerStrength(darkInk, windowState.light));
@@ -1201,7 +1205,7 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 	{
 		g_centerCaption = std::clamp(static_cast<int>(GlassEngine::GetDwordFromRegistry(L"CenterCaption", FALSE)), 0, 2);
 		g_boldCaption = GlassEngine::GetDwordFromRegistry(L"CaptionTextBold", 0) != 0;
-		g_titleTextStyle = std::clamp(static_cast<int>(GlassEngine::GetDwordFromRegistry(L"FluidGlassTitleTextStyle", 0)), 0, 2);
+		g_titleTextStyle = std::clamp(static_cast<int>(GlassEngine::GetDwordFromRegistry(L"FluidGlassTitleTextStyle", 0)), 0, 3);
 		// The GUI marks a colour the user picked with 0x01 in the top byte. 0 keeps the system colour.
 		const auto fluidGlassColor = [](PCWSTR name)
 		{
